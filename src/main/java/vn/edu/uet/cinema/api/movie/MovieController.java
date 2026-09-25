@@ -5,6 +5,7 @@ import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Positive;
+import jakarta.validation.constraints.Size;
 import java.time.LocalDate;
 import java.util.List;
 import java.util.UUID;
@@ -63,8 +64,9 @@ class MovieController {
 		movies.delete(id);
 	}
 
-	record MovieRequest(@NotBlank String title, @NotBlank String description, @NotNull @Positive Integer durationMinutes,
-		@NotBlank String genre, @NotNull AgeRating ageRating, @NotNull LocalDate releaseDate, @NotBlank String posterUrl) {
+	record MovieRequest(@NotBlank @Size(max = 255) String title, @NotBlank String description,
+		@NotNull @Positive Integer durationMinutes, @NotBlank @Size(max = 255) String genre,
+		@NotNull AgeRating ageRating, @NotNull LocalDate releaseDate, @NotBlank String posterUrl) {
 	}
 
 	record MovieResponse(UUID id, String title, String description, int durationMinutes, String genre,

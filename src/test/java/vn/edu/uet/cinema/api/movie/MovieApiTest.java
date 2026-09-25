@@ -4,6 +4,7 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -56,11 +57,50 @@ class MovieApiTest {
 		mvc.perform(get("/api/movies/" + id)).andExpect(status().isNotFound());
 	}
 
+	@Test
+	void invalidMovieRequestsAreProblemDetails() throws Exception {
+		String admin = token();
+		mvc.perform(post("/api/movies").header("Authorization", "Bearer " + admin)
+				.contentType(MediaType.APPLICATION_JSON).content(movieJson("Invalid age rating", "INVALID")))
+			.andExpect(status().isBadRequest())
+			.andExpect(content().contentType(MediaType.APPLICATION_PROBLEM_JSON));
+		mvc.perform(post("/api/movies").header("Authorization", "Bearer " + admin)
+				.contentType(MediaType.APPLICATION_JSON)
+				.content(movieJson("Negative duration", "P").replace("\"durationMinutes\":120", "\"durationMinutes\":-1")))
+			.andExpect(status().isBadRequest())
+			.andExpect(content().contentType(MediaType.APPLICATION_PROBLEM_JSON));
+	}
+
+	@Test
+	void movieWritesRequireAuthenticationAndAdminRole() throws Exception {
+		mvc.perform(post("/api/movies").contentType(MediaType.APPLICATION_JSON)
+				.content(movieJson("Unauthenticated movie", "P")))
+			.andExpect(status().isUnauthorized())
+			.andExpect(content().contentType(MediaType.APPLICATION_PROBLEM_JSON));
+
+		register("movie-customer@example.com");
+		String customer = token("movie-customer@example.com", "password123");
+		mvc.perform(post("/api/movies").header("Authorization", "Bearer " + customer)
+				.contentType(MediaType.APPLICATION_JSON).content(movieJson("Customer movie", "P")))
+			.andExpect(status().isForbidden())
+			.andExpect(content().contentType(MediaType.APPLICATION_PROBLEM_JSON));
+	}
+
 	private String token() throws Exception {
+		return token("admin@cinema.local", "admin12345");
+	}
+
+	private String token(String email, String password) throws Exception {
 		String body = mvc.perform(post("/api/auth/login").contentType(MediaType.APPLICATION_JSON)
-				.content("{\"email\":\"admin@cinema.local\",\"password\":\"admin12345\"}"))
+				.content("{\"email\":\"%s\",\"password\":\"%s\"}".formatted(email, password)))
 			.andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
 		return JsonPath.read(body, "$.accessToken");
+	}
+
+	private void register(String email) throws Exception {
+		mvc.perform(post("/api/auth/register").contentType(MediaType.APPLICATION_JSON)
+			.content("{\"email\":\"%s\",\"password\":\"password123\",\"fullName\":\"Movie Customer\"}".formatted(email)))
+			.andExpect(status().isCreated());
 	}
 
 	private static String movieJson(String title, String ageRating) {
