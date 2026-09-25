@@ -76,6 +76,7 @@ All under `/api`. Errors are RFC 9457 `application/problem+json`.
 |---|---|---|
 | Auth | `POST /auth/register` `{email, password, fullName}` | public |
 | | `POST /auth/login` `{email, password}` | public |
+| | `GET /me` (own Account) | authenticated |
 | Cinema | `POST /cinemas`, `PUT /cinemas/{id}`, `DELETE /cinemas/{id}` | ADMIN |
 | | `GET /cinemas`, `GET /cinemas/{id}` | public |
 | Auditorium | `POST /cinemas/{id}/auditoriums`, `DELETE /auditoriums/{id}` | ADMIN |
