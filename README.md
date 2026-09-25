@@ -56,7 +56,8 @@ Alternatively, run `TestCinemaApplication` (in `src/test`) from your IDE: it sta
 | Variable | Default | Meaning |
 |---|---|---|
 | `DB_URL` | `jdbc:postgresql://localhost:5432/cinema` | JDBC URL |
-| `DB_USERNAME` / `DB_PASSWORD` | `cinema` / `cinema` | Database credentials (compose requires `DB_PASSWORD` in `.env`) |
+| `DB_USERNAME` | `cinema` | Database user |
+| `DB_PASSWORD` | none (required) | Database password |
 | `JWT_SECRET` | none (required) | HS256 signing key, ≥ 32 bytes |
 | `ADMIN_EMAIL` | `admin@cinema.local` | The Admin account, created or updated at startup |
 | `ADMIN_PASSWORD` | none (required) | Its password; change it and restart to rotate |

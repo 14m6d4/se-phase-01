@@ -4,7 +4,7 @@ spring:
   datasource:
     url: ${DB_URL:jdbc:postgresql://localhost:5432/cinema}
     username: ${DB_USERNAME:cinema}
-    password: ${DB_PASSWORD:cinema}
+    password: ${DB_PASSWORD}
   jpa:
     open-in-view: false
     hibernate:
@@ -15,9 +15,9 @@ spring:
     problemdetails:
       enabled: true
 
+# Only non-secret values have defaults: the app refuses to start without DB_PASSWORD, ADMIN_PASSWORD
+# and JWT_SECRET. docker-compose.yml (via .env) and the tests supply them.
 app:
-  # No defaults on purpose: the app refuses to start without real secrets.
-  # docker-compose.yml and the tests supply development values.
   admin:
     email: ${ADMIN_EMAIL:admin@cinema.local}
     password: ${ADMIN_PASSWORD}
