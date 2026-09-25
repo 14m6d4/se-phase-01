@@ -12,7 +12,10 @@ import org.springframework.stereotype.Component;
 import vn.edu.uet.cinema.business.account.Account;
 
 @Component
-class TokenIssuer {
+public class TokenIssuer {
+
+	/** Token claim holding the Account's roles; SecurityConfig maps it to authorities. */
+	public static final String ROLES_CLAIM = "roles";
 
 	static final Duration TTL = Duration.ofHours(1);
 
@@ -28,7 +31,7 @@ class TokenIssuer {
 			.subject(account.id().toString())
 			.issuedAt(now)
 			.expiresAt(now.plus(TTL))
-			.claim("roles", List.of(account.role().name()))
+			.claim(ROLES_CLAIM, List.of(account.role().name()))
 			.build();
 		JwsHeader header = JwsHeader.with(MacAlgorithm.HS256).build();
 		return encoder.encode(JwtEncoderParameters.from(header, claims)).getTokenValue();

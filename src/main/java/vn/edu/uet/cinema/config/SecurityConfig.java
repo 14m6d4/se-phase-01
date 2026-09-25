@@ -28,6 +28,7 @@ import org.springframework.security.oauth2.server.resource.web.access.BearerToke
 import org.springframework.security.web.AuthenticationEntryPoint;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.access.AccessDeniedHandler;
+import vn.edu.uet.cinema.api.account.TokenIssuer;
 import vn.edu.uet.cinema.business.account.PasswordHasher;
 
 /**
@@ -120,10 +121,10 @@ class SecurityConfig {
 			.formatted(status.getReasonPhrase(), status.value()));
 	}
 
-	/** Maps the token's {@code roles} claim to {@code ROLE_*} authorities used by {@code hasRole}. */
+	/** Maps the token's roles claim to {@code ROLE_*} authorities used by {@code hasRole}. */
 	private static JwtAuthenticationConverter rolesClaimConverter() {
 		JwtGrantedAuthoritiesConverter authorities = new JwtGrantedAuthoritiesConverter();
-		authorities.setAuthoritiesClaimName("roles");
+		authorities.setAuthoritiesClaimName(TokenIssuer.ROLES_CLAIM);
 		authorities.setAuthorityPrefix("ROLE_");
 		JwtAuthenticationConverter converter = new JwtAuthenticationConverter();
 		converter.setJwtGrantedAuthoritiesConverter(authorities);
