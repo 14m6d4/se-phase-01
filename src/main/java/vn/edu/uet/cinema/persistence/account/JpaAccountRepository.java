@@ -4,9 +4,9 @@ import java.util.Optional;
 import java.util.UUID;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Repository;
-import vn.edu.uet.cinema.business.ConflictException;
 import vn.edu.uet.cinema.business.account.Account;
 import vn.edu.uet.cinema.business.account.AccountRepository;
+import vn.edu.uet.cinema.business.account.EmailTakenException;
 
 @Repository
 class JpaAccountRepository implements AccountRepository {
@@ -38,7 +38,7 @@ class JpaAccountRepository implements AccountRepository {
 			return jpa.saveAndFlush(AccountEntity.from(account)).toAccount();
 		} catch (DataIntegrityViolationException e) {
 			// Two registrations with the same email raced past existsByEmail; the unique constraint decides.
-			throw new ConflictException(AccountRepository.EMAIL_TAKEN);
+			throw new EmailTakenException();
 		}
 	}
 }
