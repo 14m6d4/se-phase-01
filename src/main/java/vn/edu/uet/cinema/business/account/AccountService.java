@@ -1,6 +1,7 @@
 package vn.edu.uet.cinema.business.account;
 
 import java.util.Locale;
+import java.util.Optional;
 import java.util.UUID;
 import vn.edu.uet.cinema.business.ConflictException;
 import vn.edu.uet.cinema.business.NotFoundException;
@@ -9,10 +10,13 @@ public class AccountService {
 
 	private final AccountRepository accounts;
 	private final PasswordHasher passwordHasher;
+	/** Checked against when the email is unknown, so both failure paths cost one hash comparison. */
+	private final String dummyHash;
 
 	public AccountService(AccountRepository accounts, PasswordHasher passwordHasher) {
 		this.accounts = accounts;
 		this.passwordHasher = passwordHasher;
+		this.dummyHash = passwordHasher.hash("not-a-real-password");
 	}
 
 	/** Self-registration always creates a Customer; Admins are seeded, never registered. */
@@ -25,12 +29,15 @@ public class AccountService {
 			fullName.strip(), Role.CUSTOMER));
 	}
 
-	// ponytail: an unknown email returns faster than a wrong password (no hash check), which leaks
-	// which emails exist; hash a dummy password here if account enumeration matters.
 	public Account authenticate(String email, String password) {
-		return accounts.findByEmail(normalize(email))
-			.filter(account -> passwordHasher.matches(password, account.passwordHash()))
-			.orElseThrow(InvalidCredentialsException::new);
+		Optional<Account> account = accounts.findByEmail(normalize(email));
+		// Always hash-compare so an unknown email takes as long as a wrong password (no account enumeration by timing).
+		boolean passwordMatches = passwordHasher.matches(password,
+			account.map(Account::passwordHash).orElse(dummyHash));
+		if (account.isEmpty() || !passwordMatches) {
+			throw new InvalidCredentialsException();
+		}
+		return account.get();
 	}
 
 	public Account get(UUID id) {

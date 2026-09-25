@@ -44,6 +44,16 @@ class AccountServiceTest {
 			.isInstanceOf(InvalidCredentialsException.class);
 	}
 
+	@Test
+	void unknownEmailStillCostsAHashComparison() {
+		CountingHasher hasher = new CountingHasher();
+		AccountService counted = new AccountService(new InMemoryAccounts(), hasher);
+
+		assertThatThrownBy(() -> counted.authenticate("nobody@example.com", "secret123"))
+			.isInstanceOf(InvalidCredentialsException.class);
+		assertThat(hasher.matchCalls).isEqualTo(1);
+	}
+
 	private class InMemoryAccounts implements AccountRepository {
 
 		public Optional<Account> findById(UUID id) {
@@ -72,6 +82,17 @@ class AccountServiceTest {
 
 		public boolean matches(String rawPassword, String hash) {
 			return hash.equals(hash(rawPassword));
+		}
+	}
+
+	private static class CountingHasher extends PrefixHasher {
+
+		int matchCalls;
+
+		@Override
+		public boolean matches(String rawPassword, String hash) {
+			matchCalls++;
+			return super.matches(rawPassword, hash);
 		}
 	}
 }
