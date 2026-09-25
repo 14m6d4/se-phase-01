@@ -55,6 +55,10 @@ A paid Booking. Final: it can never be cancelled or refunded; a Customer who can
 
 ### People
 
+**Account**:
+The login identity (email + password) of a Customer or an Admin; its role says which.
+_Avoid_: User, login, profile
+
 **Customer**:
 A registered person who books seats for Showtimes.
 _Avoid_: User, client, member
