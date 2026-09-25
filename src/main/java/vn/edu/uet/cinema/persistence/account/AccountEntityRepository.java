@@ -4,7 +4,7 @@ import java.util.Optional;
 import java.util.UUID;
 import org.springframework.data.jpa.repository.JpaRepository;
 
-interface AccountJpaRepository extends JpaRepository<AccountEntity, UUID> {
+interface AccountEntityRepository extends JpaRepository<AccountEntity, UUID> {
 
 	Optional<AccountEntity> findByEmail(String email);
 
