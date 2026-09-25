@@ -64,6 +64,17 @@ class AuthenticationApiTest {
 	}
 
 	@Test
+	void metricsAreAdminOnly() throws Exception {
+		register("dave@example.com");
+		String customer = token("dave@example.com", "password123");
+		String admin = token("admin@cinema.local", "admin12345");
+
+		mvc.perform(get("/actuator/metrics").header("Authorization", "Bearer " + customer))
+			.andExpect(status().isForbidden());
+		mvc.perform(get("/actuator/metrics").header("Authorization", "Bearer " + admin)).andExpect(status().isOk());
+	}
+
+	@Test
 	void apiDocsArePublic() throws Exception {
 		mvc.perform(get("/v3/api-docs"))
 			.andExpect(status().isOk())

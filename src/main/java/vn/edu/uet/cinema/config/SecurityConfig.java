@@ -53,6 +53,7 @@ class SecurityConfig {
 				.requestMatchers(GET, CATALOGUE).permitAll()
 				.requestMatchers(CATALOGUE).hasRole("ADMIN")
 				.requestMatchers("/api/bookings/**").hasRole("CUSTOMER")
+				.requestMatchers("/actuator/metrics/**").hasRole("ADMIN")
 				.anyRequest().authenticated())
 			.exceptionHandling(ex -> ex.authenticationEntryPoint(unauthorized).accessDeniedHandler(forbidden))
 			.oauth2ResourceServer(oauth -> oauth
