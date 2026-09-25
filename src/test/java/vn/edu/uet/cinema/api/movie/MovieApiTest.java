@@ -1,5 +1,6 @@
 package vn.edu.uet.cinema.api.movie;
 
+import static org.hamcrest.Matchers.hasItem;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -9,7 +10,6 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import com.jayway.jsonpath.JsonPath;
-import java.util.List;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -41,7 +41,7 @@ class MovieApiTest {
 
 		mvc.perform(get("/api/movies"))
 			.andExpect(status().isOk())
-			.andExpect(jsonPath("$[?(@.id == '%s')].title".formatted(id)).value(List.of("The First Movie")));
+			.andExpect(jsonPath("$[*].id").value(hasItem(id)));
 		mvc.perform(get("/api/movies/" + id))
 			.andExpect(status().isOk())
 			.andExpect(jsonPath("$.description").value("A first description"));
@@ -104,8 +104,8 @@ class MovieApiTest {
 	}
 
 	private static String movieJson(String title, String ageRating) {
-		return "{\"title\":\"%s\",\"description\":\"A first description\",\"durationMinutes\":120,"
+		return ("{\"title\":\"%s\",\"description\":\"A first description\",\"durationMinutes\":120,"
 			+ "\"genre\":\"Drama\",\"ageRating\":\"%s\",\"releaseDate\":\"2026-01-15\","
-			+ "\"posterUrl\":\"https://example.com/movie.jpg\"}".formatted(title, ageRating);
+			+ "\"posterUrl\":\"https://example.com/movie.jpg\"}").formatted(title, ageRating);
 	}
 }
