@@ -1,0 +1,26 @@
+package vn.edu.uet.cinema.api;
+
+import org.springframework.http.HttpStatus;
+import org.springframework.http.ProblemDetail;
+import org.springframework.web.bind.annotation.ExceptionHandler;
+import org.springframework.web.bind.annotation.RestControllerAdvice;
+import vn.edu.uet.cinema.business.ConflictException;
+import vn.edu.uet.cinema.business.NotFoundException;
+
+/**
+ * Maps business exceptions to RFC 9457 problem details. Framework exceptions (validation,
+ * malformed JSON, ...) are handled by Spring Boot via {@code spring.mvc.problemdetails.enabled}.
+ */
+@RestControllerAdvice
+class ApiExceptionHandler {
+
+	@ExceptionHandler
+	ProblemDetail notFound(NotFoundException e) {
+		return ProblemDetail.forStatusAndDetail(HttpStatus.NOT_FOUND, e.getMessage());
+	}
+
+	@ExceptionHandler
+	ProblemDetail conflict(ConflictException e) {
+		return ProblemDetail.forStatusAndDetail(HttpStatus.CONFLICT, e.getMessage());
+	}
+}
