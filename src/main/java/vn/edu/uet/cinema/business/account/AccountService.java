@@ -29,10 +29,22 @@ public class AccountService {
 			fullName.strip(), Role.CUSTOMER));
 	}
 
-	/** Creates the Admin on first start if missing; an existing Admin is left untouched. */
+	/**
+	 * Makes the configured Admin exist with exactly the configured password, so changing ADMIN_PASSWORD and
+	 * restarting rotates it; the old password stops working.
+	 */
 	public void ensureAdmin(String email, String password) {
 		String normalizedEmail = normalize(email);
-		if (accounts.existsByEmail(normalizedEmail)) {
+		Optional<Account> existing = accounts.findByEmail(normalizedEmail);
+		if (existing.isPresent()) {
+			Account admin = existing.get();
+			if (admin.role() != Role.ADMIN) {
+				throw new IllegalStateException("Configured admin email belongs to a " + admin.role() + " account");
+			}
+			if (!passwordHasher.matches(password, admin.passwordHash())) {
+				accounts.save(new Account(admin.id(), admin.email(), passwordHasher.hash(password), admin.fullName(),
+					Role.ADMIN));
+			}
 			return;
 		}
 		try {
