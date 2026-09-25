@@ -66,7 +66,7 @@ The whole chain runs on `Asia/Ho_Chi_Minh`. Timestamps are stored as `timestampt
 - Roles: `CUSTOMER` (self-registered) and `ADMIN` (created at startup from `ADMIN_EMAIL`/`ADMIN_PASSWORD`, never registered through the API).
 - `POST /api/auth/login` returns `{accessToken, expiresIn}`; HS256 JWT, 1 hour, no refresh token. Secret from env `JWT_SECRET`.
 - Passwords hashed with BCrypt.
-- Public: auth endpoints, all catalogue `GET`s, Swagger, `/actuator/health`. Catalogue writes: `ADMIN`. `/api/bookings/**`: `CUSTOMER`.
+- Public: auth endpoints, all catalogue `GET`s, Swagger, `/actuator/health`. Catalogue writes: `ADMIN`. `/api/bookings/**`: `CUSTOMER`. `/actuator/metrics`: `ADMIN`.
 
 ## Endpoints
 
