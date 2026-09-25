@@ -15,8 +15,9 @@ spring:
     problemdetails:
       enabled: true
 
-# Only non-secret values have defaults: the app refuses to start without DB_PASSWORD, ADMIN_PASSWORD
-# and JWT_SECRET. docker-compose.yml (via .env) and the tests supply them.
+# Only non-secret values have defaults. DB_PASSWORD, ADMIN_PASSWORD and JWT_SECRET must be set:
+# without the last two the app refuses to start, without DB_PASSWORD it fails to connect to the database.
+# docker-compose.yml (via .env) and the tests supply them.
 app:
   admin:
     email: ${ADMIN_EMAIL:admin@cinema.local}
