@@ -15,6 +15,7 @@ import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.context.annotation.Import;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.test.web.servlet.ResultActions;
 import vn.edu.uet.cinema.TestcontainersConfiguration;
 
 @SpringBootTest
@@ -99,12 +100,12 @@ class AuthenticationApiTest {
 			.andExpect(content().contentType(MediaType.APPLICATION_PROBLEM_JSON));
 	}
 
-	private org.springframework.test.web.servlet.ResultActions register(String email) throws Exception {
+	private ResultActions register(String email) throws Exception {
 		return mvc.perform(post("/api/auth/register").contentType(MediaType.APPLICATION_JSON)
 			.content("{\"email\":\"%s\",\"password\":\"password123\",\"fullName\":\"Test\"}".formatted(email)));
 	}
 
-	private org.springframework.test.web.servlet.ResultActions login(String email, String password) throws Exception {
+	private ResultActions login(String email, String password) throws Exception {
 		return mvc.perform(post("/api/auth/login").contentType(MediaType.APPLICATION_JSON)
 			.content("{\"email\":\"%s\",\"password\":\"%s\"}".formatted(email, password)));
 	}
