@@ -55,6 +55,14 @@ class AuthenticationApiTest {
 	}
 
 	@Test
+	void apiDocsArePublic() throws Exception {
+		mvc.perform(get("/v3/api-docs"))
+			.andExpect(status().isOk())
+			.andExpect(jsonPath("$.paths['/api/auth/login']").exists())
+			.andExpect(jsonPath("$.components.securitySchemes.bearerAuth.scheme").value("bearer"));
+	}
+
+	@Test
 	void invalidRegistrationIsAProblemDetail() throws Exception {
 		mvc.perform(post("/api/auth/register").contentType(MediaType.APPLICATION_JSON)
 				.content("{\"email\":\"not-an-email\",\"password\":\"short\",\"fullName\":\"\"}"))
