@@ -30,6 +30,7 @@ Layered architecture, one package per layer under `vn.edu.uet.cinema`:
 ## Run with Docker
 
 ```bash
+cp .env.example .env    # then edit the secrets in .env
 docker compose up --build
 ```
 
@@ -37,26 +38,25 @@ docker compose up --build
 - Swagger UI: http://localhost:8080/swagger-ui.html
 - Health: http://localhost:8080/actuator/health
 
-The compose file uses development secrets. Override them with `JWT_SECRET`, `ADMIN_EMAIL` and `ADMIN_PASSWORD` in your shell or a `.env` file. Every push to `main` also publishes the image as `ghcr.io/14m6d4/se-phase-01:latest`.
+Secrets are never stored in the repo: compose reads them from `.env` (git-ignored) or your shell, and refuses to start if one is missing. Log in as Admin with the `ADMIN_EMAIL` / `ADMIN_PASSWORD` from your `.env`. Every push to `main` also publishes the image as `ghcr.io/14m6d4/se-phase-01:latest`.
 
 ## Run locally (without Docker for the app)
 
 Requires JDK 21 and a PostgreSQL database (`docker compose up db` is the easiest).
 
 ```bash
-export JWT_SECRET=local-dev-secret-change-me-0123456789abcdef   # at least 32 bytes
-export ADMIN_PASSWORD=admin12345
+set -a; source .env; set +a   # export the variables from .env
 ./mvnw spring-boot:run
 ```
 
-Alternatively, run `TestCinemaApplication` (in `src/test`) from your IDE: it starts PostgreSQL in a container automatically. You still need the two variables above.
+Alternatively, run `TestCinemaApplication` (in `src/test`) from your IDE: it starts PostgreSQL in a container automatically. You still need `JWT_SECRET` and `ADMIN_PASSWORD` in the run configuration's environment.
 
 ### Configuration
 
 | Variable | Default | Meaning |
 |---|---|---|
 | `DB_URL` | `jdbc:postgresql://localhost:5432/cinema` | JDBC URL |
-| `DB_USERNAME` / `DB_PASSWORD` | `cinema` / `cinema` | Database credentials |
+| `DB_USERNAME` / `DB_PASSWORD` | `cinema` / `cinema` | Database credentials (compose requires `DB_PASSWORD` in `.env`) |
 | `JWT_SECRET` | none (required) | HS256 signing key, ≥ 32 bytes |
 | `ADMIN_EMAIL` | `admin@cinema.local` | The Admin account, created or updated at startup |
 | `ADMIN_PASSWORD` | none (required) | Its password; change it and restart to rotate |
