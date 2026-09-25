@@ -45,6 +45,15 @@ class AccountServiceTest {
 	}
 
 	@Test
+	void ensureAdminCreatesTheAdminOnce() {
+		service.ensureAdmin("Admin@Cinema.local", "admin-pass");
+		service.ensureAdmin("admin@cinema.local", "changed-pass");
+
+		assertThat(store).hasSize(1);
+		assertThat(service.authenticate("admin@cinema.local", "admin-pass").role()).isEqualTo(Role.ADMIN);
+	}
+
+	@Test
 	void unknownEmailStillCostsAHashComparison() {
 		CountingHasher hasher = new CountingHasher();
 		AccountService counted = new AccountService(new InMemoryAccounts(), hasher);

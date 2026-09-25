@@ -16,6 +16,10 @@ spring:
       enabled: true
 
 app:
+  # Defaults are for local development only; set ADMIN_PASSWORD and JWT_SECRET everywhere else.
+  admin:
+    email: ${ADMIN_EMAIL:admin@cinema.local}
+    password: ${ADMIN_PASSWORD:admin12345}
   jwt:
     # HS256 needs >= 32 bytes. Always set JWT_SECRET outside local development.
     secret: ${JWT_SECRET:local-dev-secret-change-me-0123456789abcdef}
