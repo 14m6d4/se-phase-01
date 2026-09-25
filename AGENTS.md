@@ -1,3 +1,10 @@
+## Conventions
+
+- Tests need Docker running (Testcontainers starts PostgreSQL).
+- Access rules live in `config/SecurityConfig` alone. A protected operation also carries `@SecurityRequirement(name = OpenApiConfig.BEARER_AUTH)` so Swagger shows its lock.
+- Persistence naming: Spring Data interface `<X>EntityRepository`, adapter `Jpa<X>Repository` implementing the business `<X>Repository`.
+- Business errors are exceptions extending `ConflictException` / `NotFoundException`; `ApiExceptionHandler` turns them into problem+json.
+
 ## Agent skills
 
 ### Issue tracker
