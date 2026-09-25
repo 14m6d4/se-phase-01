@@ -3,6 +3,7 @@ package vn.edu.uet.cinema.api.account;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -39,8 +40,14 @@ class AuthenticationApiTest {
 
 	@Test
 	void protectedEndpointsRequireAValidToken() throws Exception {
-		mvc.perform(get("/api/me")).andExpect(status().isUnauthorized());
-		mvc.perform(get("/api/me").header("Authorization", "Bearer not-a-jwt")).andExpect(status().isUnauthorized());
+		mvc.perform(get("/api/me"))
+			.andExpect(status().isUnauthorized())
+			.andExpect(header().exists("WWW-Authenticate"))
+			.andExpect(content().contentType(MediaType.APPLICATION_PROBLEM_JSON));
+		mvc.perform(get("/api/me").header("Authorization", "Bearer not-a-jwt"))
+			.andExpect(status().isUnauthorized())
+			.andExpect(header().exists("WWW-Authenticate"))
+			.andExpect(content().contentType(MediaType.APPLICATION_PROBLEM_JSON));
 	}
 
 	@Test
@@ -49,7 +56,9 @@ class AuthenticationApiTest {
 		String customer = token("carol@example.com", "password123");
 		String admin = token("admin@cinema.local", "admin12345");
 
-		mvc.perform(post("/api/cinemas").header("Authorization", "Bearer " + customer)).andExpect(status().isForbidden());
+		mvc.perform(post("/api/cinemas").header("Authorization", "Bearer " + customer))
+			.andExpect(status().isForbidden())
+			.andExpect(content().contentType(MediaType.APPLICATION_PROBLEM_JSON));
 		// No controller yet (issue #2), so an admin gets past security and hits 404.
 		mvc.perform(post("/api/cinemas").header("Authorization", "Bearer " + admin)).andExpect(status().isNotFound());
 	}

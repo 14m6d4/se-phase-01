@@ -3,12 +3,16 @@ package vn.edu.uet.cinema.config;
 import static org.springframework.http.HttpMethod.GET;
 
 import com.nimbusds.jose.jwk.source.ImmutableSecret;
+import jakarta.servlet.http.HttpServletResponse;
+import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import javax.crypto.SecretKey;
 import javax.crypto.spec.SecretKeySpec;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.http.SessionCreationPolicy;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
@@ -19,7 +23,11 @@ import org.springframework.security.oauth2.jwt.NimbusJwtDecoder;
 import org.springframework.security.oauth2.jwt.NimbusJwtEncoder;
 import org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationConverter;
 import org.springframework.security.oauth2.server.resource.authentication.JwtGrantedAuthoritiesConverter;
+import org.springframework.security.oauth2.server.resource.web.BearerTokenAuthenticationEntryPoint;
+import org.springframework.security.oauth2.server.resource.web.access.BearerTokenAccessDeniedHandler;
+import org.springframework.security.web.AuthenticationEntryPoint;
 import org.springframework.security.web.SecurityFilterChain;
+import org.springframework.security.web.access.AccessDeniedHandler;
 import vn.edu.uet.cinema.business.account.PasswordHasher;
 
 /**
@@ -34,6 +42,8 @@ class SecurityConfig {
 
 	@Bean
 	SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
+		AuthenticationEntryPoint unauthorized = problemJson(new BearerTokenAuthenticationEntryPoint());
+		AccessDeniedHandler forbidden = problemJson(new BearerTokenAccessDeniedHandler());
 		return http
 			.csrf(csrf -> csrf.disable())
 			.sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
@@ -44,7 +54,11 @@ class SecurityConfig {
 				.requestMatchers(CATALOGUE).hasRole("ADMIN")
 				.requestMatchers("/api/bookings/**").hasRole("CUSTOMER")
 				.anyRequest().authenticated())
-			.oauth2ResourceServer(oauth -> oauth.jwt(jwt -> jwt.jwtAuthenticationConverter(rolesClaimConverter())))
+			.exceptionHandling(ex -> ex.authenticationEntryPoint(unauthorized).accessDeniedHandler(forbidden))
+			.oauth2ResourceServer(oauth -> oauth
+				.jwt(jwt -> jwt.jwtAuthenticationConverter(rolesClaimConverter()))
+				.authenticationEntryPoint(unauthorized)
+				.accessDeniedHandler(forbidden))
 			.build();
 	}
 
@@ -81,6 +95,28 @@ class SecurityConfig {
 				return bcrypt.matches(rawPassword, hash);
 			}
 		};
+	}
+
+	/** Lets the bearer defaults set the status and WWW-Authenticate header, then adds an RFC 9457 body. */
+	private static AuthenticationEntryPoint problemJson(AuthenticationEntryPoint delegate) {
+		return (request, response, e) -> {
+			delegate.commence(request, response, e);
+			writeProblem(response);
+		};
+	}
+
+	private static AccessDeniedHandler problemJson(AccessDeniedHandler delegate) {
+		return (request, response, e) -> {
+			delegate.handle(request, response, e);
+			writeProblem(response);
+		};
+	}
+
+	private static void writeProblem(HttpServletResponse response) throws IOException {
+		HttpStatus status = HttpStatus.valueOf(response.getStatus());
+		response.setContentType(MediaType.APPLICATION_PROBLEM_JSON_VALUE);
+		response.getWriter().write("{\"type\":\"about:blank\",\"title\":\"%s\",\"status\":%d}"
+			.formatted(status.getReasonPhrase(), status.value()));
 	}
 
 	/** Maps the token's {@code roles} claim to {@code ROLE_*} authorities used by {@code hasRole}. */
