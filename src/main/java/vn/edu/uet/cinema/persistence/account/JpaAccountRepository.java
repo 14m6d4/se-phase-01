@@ -38,7 +38,7 @@ class JpaAccountRepository implements AccountRepository {
 			return jpa.saveAndFlush(AccountEntity.from(account)).toAccount();
 		} catch (DataIntegrityViolationException e) {
 			// Two registrations with the same email raced past existsByEmail; the unique constraint decides.
-			throw new ConflictException("Email already registered");
+			throw new ConflictException(AccountRepository.EMAIL_TAKEN);
 		}
 	}
 }
