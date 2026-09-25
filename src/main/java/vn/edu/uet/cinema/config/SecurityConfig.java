@@ -28,7 +28,6 @@ import org.springframework.security.oauth2.server.resource.web.access.BearerToke
 import org.springframework.security.web.AuthenticationEntryPoint;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.access.AccessDeniedHandler;
-import vn.edu.uet.cinema.api.account.TokenIssuer;
 import vn.edu.uet.cinema.business.account.PasswordHasher;
 
 /**
@@ -36,7 +35,10 @@ import vn.edu.uet.cinema.business.account.PasswordHasher;
  * Spring Security's filter chain validates the bearer JWT and applies these rules before any controller runs.
  */
 @Configuration
-class SecurityConfig {
+public class SecurityConfig {
+
+	/** Token claim holding the Account's roles, mapped to {@code ROLE_*} authorities. */
+	public static final String ROLES_CLAIM = "roles";
 
 	private static final String[] CATALOGUE = {"/api/cinemas/**", "/api/auditoriums/**", "/api/movies/**",
 		"/api/showtimes/**"};
@@ -124,7 +126,7 @@ class SecurityConfig {
 	/** Maps the token's roles claim to {@code ROLE_*} authorities used by {@code hasRole}. */
 	private static JwtAuthenticationConverter rolesClaimConverter() {
 		JwtGrantedAuthoritiesConverter authorities = new JwtGrantedAuthoritiesConverter();
-		authorities.setAuthoritiesClaimName(TokenIssuer.ROLES_CLAIM);
+		authorities.setAuthoritiesClaimName(ROLES_CLAIM);
 		authorities.setAuthorityPrefix("ROLE_");
 		JwtAuthenticationConverter converter = new JwtAuthenticationConverter();
 		converter.setJwtGrantedAuthoritiesConverter(authorities);
