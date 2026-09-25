@@ -7,6 +7,8 @@ import org.springframework.context.annotation.Configuration;
 import vn.edu.uet.cinema.business.account.AccountRepository;
 import vn.edu.uet.cinema.business.account.AccountService;
 import vn.edu.uet.cinema.business.account.PasswordHasher;
+import vn.edu.uet.cinema.business.movie.MovieRepository;
+import vn.edu.uet.cinema.business.movie.MovieService;
 
 /** Business services carry no Spring annotations (ADR 0001), so they are wired here. */
 @Configuration
@@ -15,6 +17,11 @@ class BusinessConfig {
 	@Bean
 	AccountService accountService(AccountRepository accounts, PasswordHasher passwordHasher) {
 		return new AccountService(accounts, passwordHasher);
+	}
+
+	@Bean
+	MovieService movieService(MovieRepository movies) {
+		return new MovieService(movies);
 	}
 
 	/** Admins are never self-registered: the one Admin comes from ADMIN_EMAIL / ADMIN_PASSWORD. */
