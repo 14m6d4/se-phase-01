@@ -23,7 +23,7 @@ public class AccountService {
 	public Account registerCustomer(String email, String password, String fullName) {
 		String normalizedEmail = normalize(email);
 		if (accounts.existsByEmail(normalizedEmail)) {
-			throw new ConflictException("Email already registered");
+			throw new ConflictException(AccountRepository.EMAIL_TAKEN);
 		}
 		return accounts.save(new Account(UUID.randomUUID(), normalizedEmail, passwordHasher.hash(password),
 			fullName.strip(), Role.CUSTOMER));

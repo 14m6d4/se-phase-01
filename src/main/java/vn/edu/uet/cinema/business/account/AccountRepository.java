@@ -5,6 +5,8 @@ import java.util.UUID;
 
 public interface AccountRepository {
 
+	String EMAIL_TAKEN = "Email already registered";
+
 	Optional<Account> findById(UUID id);
 
 	Optional<Account> findByEmail(String email);
