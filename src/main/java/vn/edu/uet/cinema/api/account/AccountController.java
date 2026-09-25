@@ -16,6 +16,7 @@ import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
 import vn.edu.uet.cinema.business.account.Account;
 import vn.edu.uet.cinema.business.account.AccountService;
+import vn.edu.uet.cinema.config.OpenApiConfig;
 
 @RestController
 class AccountController {
@@ -41,7 +42,7 @@ class AccountController {
 	}
 
 	@GetMapping("/api/me")
-	@SecurityRequirement(name = "bearerAuth")
+	@SecurityRequirement(name = OpenApiConfig.BEARER_AUTH)
 	AccountResponse me(@AuthenticationPrincipal Jwt jwt) {
 		return AccountResponse.from(accounts.get(UUID.fromString(jwt.getSubject())));
 	}
