@@ -6,6 +6,7 @@ import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import vn.edu.uet.cinema.business.ConflictException;
 import vn.edu.uet.cinema.business.NotFoundException;
+import vn.edu.uet.cinema.business.account.InvalidCredentialsException;
 
 /**
  * Maps business exceptions to RFC 9457 problem details. Framework exceptions (validation,
@@ -22,5 +23,10 @@ class ApiExceptionHandler {
 	@ExceptionHandler
 	ProblemDetail conflict(ConflictException e) {
 		return ProblemDetail.forStatusAndDetail(HttpStatus.CONFLICT, e.getMessage());
+	}
+
+	@ExceptionHandler
+	ProblemDetail invalidCredentials(InvalidCredentialsException e) {
+		return ProblemDetail.forStatusAndDetail(HttpStatus.UNAUTHORIZED, e.getMessage());
 	}
 }

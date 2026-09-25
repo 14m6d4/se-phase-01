@@ -15,6 +15,11 @@ spring:
     problemdetails:
       enabled: true
 
+app:
+  jwt:
+    # HS256 needs >= 32 bytes. Always set JWT_SECRET outside local development.
+    secret: ${JWT_SECRET:local-dev-secret-change-me-0123456789abcdef}
+
 management:
   endpoints:
     web:
