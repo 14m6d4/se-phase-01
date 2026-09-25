@@ -16,13 +16,13 @@ spring:
       enabled: true
 
 app:
-  # Defaults are for local development only; set ADMIN_PASSWORD and JWT_SECRET everywhere else.
+  # No defaults on purpose: the app refuses to start without real secrets.
+  # docker-compose.yml and the tests supply development values.
   admin:
     email: ${ADMIN_EMAIL:admin@cinema.local}
-    password: ${ADMIN_PASSWORD:admin12345}
+    password: ${ADMIN_PASSWORD}
   jwt:
-    # HS256 needs >= 32 bytes. Always set JWT_SECRET outside local development.
-    secret: ${JWT_SECRET:local-dev-secret-change-me-0123456789abcdef}
+    secret: ${JWT_SECRET}
 
 management:
   endpoints:

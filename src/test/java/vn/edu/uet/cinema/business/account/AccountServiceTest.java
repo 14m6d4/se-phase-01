@@ -45,12 +45,22 @@ class AccountServiceTest {
 	}
 
 	@Test
-	void ensureAdminCreatesTheAdminOnce() {
+	void ensureAdminCreatesTheAdminOnceAndRotatesItsPassword() {
 		service.ensureAdmin("Admin@Cinema.local", "admin-pass");
-		service.ensureAdmin("admin@cinema.local", "changed-pass");
+		service.ensureAdmin("admin@cinema.local", "rotated-pass");
 
 		assertThat(store).hasSize(1);
-		assertThat(service.authenticate("admin@cinema.local", "admin-pass").role()).isEqualTo(Role.ADMIN);
+		assertThat(service.authenticate("admin@cinema.local", "rotated-pass").role()).isEqualTo(Role.ADMIN);
+		assertThatThrownBy(() -> service.authenticate("admin@cinema.local", "admin-pass"))
+			.isInstanceOf(InvalidCredentialsException.class);
+	}
+
+	@Test
+	void ensureAdminRefusesToPromoteACustomer() {
+		service.registerCustomer("boss@example.com", "secret123", "Boss");
+
+		assertThatThrownBy(() -> service.ensureAdmin("boss@example.com", "admin-pass"))
+			.isInstanceOf(IllegalStateException.class);
 	}
 
 	@Test
