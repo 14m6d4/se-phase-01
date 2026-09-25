@@ -11,9 +11,9 @@ import vn.edu.uet.cinema.business.account.AccountRepository;
 @Repository
 class JpaAccountRepository implements AccountRepository {
 
-	private final AccountJpaRepository jpa;
+	private final AccountEntityRepository jpa;
 
-	JpaAccountRepository(AccountJpaRepository jpa) {
+	JpaAccountRepository(AccountEntityRepository jpa) {
 		this.jpa = jpa;
 	}
 
