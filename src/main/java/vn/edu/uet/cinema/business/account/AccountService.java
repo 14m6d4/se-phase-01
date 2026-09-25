@@ -3,7 +3,6 @@ package vn.edu.uet.cinema.business.account;
 import java.util.Locale;
 import java.util.Optional;
 import java.util.UUID;
-import vn.edu.uet.cinema.business.ConflictException;
 import vn.edu.uet.cinema.business.NotFoundException;
 
 public class AccountService {
@@ -23,7 +22,7 @@ public class AccountService {
 	public Account registerCustomer(String email, String password, String fullName) {
 		String normalizedEmail = normalize(email);
 		if (accounts.existsByEmail(normalizedEmail)) {
-			throw new ConflictException(AccountRepository.EMAIL_TAKEN);
+			throw new EmailTakenException();
 		}
 		return accounts.save(new Account(UUID.randomUUID(), normalizedEmail, passwordHasher.hash(password),
 			fullName.strip(), Role.CUSTOMER));
@@ -50,7 +49,7 @@ public class AccountService {
 		try {
 			accounts.save(new Account(UUID.randomUUID(), normalizedEmail, passwordHasher.hash(password),
 				"Administrator", Role.ADMIN));
-		} catch (ConflictException alreadyCreatedByAnotherInstance) {
+		} catch (EmailTakenException alreadyCreatedByAnotherInstance) {
 			// Several instances starting together: whoever inserts first wins, that's fine.
 		}
 	}
