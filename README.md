@@ -23,6 +23,8 @@ Layered architecture, one package per layer under `vn.edu.uet.cinema`:
           config ───────────────┘  security rules, bean wiring, OpenAPI
 ```
 
+`api` may also read names owned by `config` (the JWT roles claim, the OpenAPI security scheme).
+
 - `business` depends on nothing but the JDK: no Spring, no JPA, no web ([ADR 0001](docs/adr/0001-framework-free-business-layer.md)). It declares the repository interfaces it needs; `persistence` implements them.
 - Authentication is done once, in Spring Security's filter chain (`config/SecurityConfig.java`), never inside controllers.
 - `ArchitectureTest` fails the build if a layer rule is broken.
