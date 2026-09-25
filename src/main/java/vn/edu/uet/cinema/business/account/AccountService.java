@@ -29,6 +29,20 @@ public class AccountService {
 			fullName.strip(), Role.CUSTOMER));
 	}
 
+	/** Creates the Admin on first start if missing; an existing Admin is left untouched. */
+	public void ensureAdmin(String email, String password) {
+		String normalizedEmail = normalize(email);
+		if (accounts.existsByEmail(normalizedEmail)) {
+			return;
+		}
+		try {
+			accounts.save(new Account(UUID.randomUUID(), normalizedEmail, passwordHasher.hash(password),
+				"Administrator", Role.ADMIN));
+		} catch (ConflictException alreadyCreatedByAnotherInstance) {
+			// Several instances starting together: whoever inserts first wins, that's fine.
+		}
+	}
+
 	public Account authenticate(String email, String password) {
 		Optional<Account> account = accounts.findByEmail(normalize(email));
 		// Always hash-compare so an unknown email takes as long as a wrong password (no account enumeration by timing).
