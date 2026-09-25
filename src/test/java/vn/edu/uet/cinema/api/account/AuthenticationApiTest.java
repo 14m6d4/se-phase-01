@@ -83,6 +83,15 @@ class AuthenticationApiTest {
 	}
 
 	@Test
+	void apiDocsLockOnlyProtectedOperations() throws Exception {
+		mvc.perform(get("/v3/api-docs"))
+			.andExpect(jsonPath("$.security").doesNotExist())
+			.andExpect(jsonPath("$.paths['/api/auth/register'].post.security").doesNotExist())
+			.andExpect(jsonPath("$.paths['/api/auth/login'].post.security").doesNotExist())
+			.andExpect(jsonPath("$.paths['/api/me'].get.security[0].bearerAuth").exists());
+	}
+
+	@Test
 	void invalidRegistrationIsAProblemDetail() throws Exception {
 		mvc.perform(post("/api/auth/register").contentType(MediaType.APPLICATION_JSON)
 				.content("{\"email\":\"not-an-email\",\"password\":\"short\",\"fullName\":\"\"}"))

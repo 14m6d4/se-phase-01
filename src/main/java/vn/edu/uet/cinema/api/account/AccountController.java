@@ -1,5 +1,6 @@
 package vn.edu.uet.cinema.api.account;
 
+import io.swagger.v3.oas.annotations.security.SecurityRequirement;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.Email;
 import jakarta.validation.constraints.NotBlank;
@@ -40,6 +41,7 @@ class AccountController {
 	}
 
 	@GetMapping("/api/me")
+	@SecurityRequirement(name = "bearerAuth")
 	AccountResponse me(@AuthenticationPrincipal Jwt jwt) {
 		return AccountResponse.from(accounts.get(UUID.fromString(jwt.getSubject())));
 	}
