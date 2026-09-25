@@ -1,5 +1,4 @@
-target
-.git
-.idea
-.vscode
-*.iml
+# Allowlist: the build copies only pom.xml and src, so nothing else (.env, .git, target) enters the context.
+*
+!pom.xml
+!src
