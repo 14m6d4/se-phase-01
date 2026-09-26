@@ -8,6 +8,8 @@ import java.util.UUID;
 
 public final class SeatLayout {
 
+	private static final int MAX_SEATS = 10_000;
+
 	private SeatLayout() {
 	}
 
@@ -18,6 +20,9 @@ public final class SeatLayout {
 		}
 		if (seatsPerRow < 1) {
 			throw new InvalidSeatLayoutException("Seats per row must be positive");
+		}
+		if ((long) rows * seatsPerRow > MAX_SEATS) {
+			throw new InvalidSeatLayoutException("Seat layout cannot exceed " + MAX_SEATS + " seats");
 		}
 		validateRows(vipRows, rows, "VIP");
 		validateRows(coupleRows, rows, "Couple");

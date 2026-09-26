@@ -100,6 +100,18 @@ class AuditoriumApiTest {
 	}
 
 	@Test
+	void rejectsAuditoriumsExceedingSeatLimit() throws Exception {
+		String admin = token("admin@cinema.local", "admin12345");
+		String cinema = cinemaId(admin, "Seat limit cinema " + UUID.randomUUID());
+
+		mvc.perform(post("/api/cinemas/" + cinema + "/auditoriums")
+				.header("Authorization", "Bearer " + admin).contentType(MediaType.APPLICATION_JSON)
+				.content(auditoriumJson("Too many seats", 2, Integer.MAX_VALUE, "[]", "[]")))
+			.andExpect(status().isBadRequest())
+			.andExpect(content().contentType(MediaType.APPLICATION_PROBLEM_JSON));
+	}
+
+	@Test
 	void catalogueOpenApiMarksOnlyWritesAsProtected() throws Exception {
 		mvc.perform(get("/v3/api-docs")).andExpect(status().isOk())
 			.andExpect(jsonPath("$.paths['/api/cinemas/{id}/auditoriums'].get.security").doesNotExist())

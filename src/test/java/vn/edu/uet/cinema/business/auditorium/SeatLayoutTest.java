@@ -39,6 +39,12 @@ class SeatLayoutTest {
 	}
 
 	@Test
+	void rejectsLayoutsExceedingGeneratedSeatLimit() {
+		assertInvalid(() -> SeatLayout.generate(2, Integer.MAX_VALUE, List.of(), List.of()));
+		assertInvalid(() -> SeatLayout.generate(26, 385, List.of(), List.of()));
+	}
+
+	@Test
 	void rejectsInvalidDimensionsAndRowLists() {
 		assertInvalid(() -> SeatLayout.generate(0, 1, List.of(), List.of()));
 		assertInvalid(() -> SeatLayout.generate(27, 1, List.of(), List.of()));
