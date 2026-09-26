@@ -7,6 +7,7 @@ import org.springframework.web.bind.annotation.RestControllerAdvice;
 import vn.edu.uet.cinema.business.ConflictException;
 import vn.edu.uet.cinema.business.NotFoundException;
 import vn.edu.uet.cinema.business.account.InvalidCredentialsException;
+import vn.edu.uet.cinema.business.auditorium.InvalidSeatLayoutException;
 
 /**
  * Maps business exceptions to RFC 9457 problem details. Framework exceptions (validation,
@@ -23,6 +24,11 @@ class ApiExceptionHandler {
 	@ExceptionHandler
 	ProblemDetail conflict(ConflictException e) {
 		return ProblemDetail.forStatusAndDetail(HttpStatus.CONFLICT, e.getMessage());
+	}
+
+	@ExceptionHandler
+	ProblemDetail invalidSeatLayout(InvalidSeatLayoutException e) {
+		return ProblemDetail.forStatusAndDetail(HttpStatus.BAD_REQUEST, e.getMessage());
 	}
 
 	@ExceptionHandler
