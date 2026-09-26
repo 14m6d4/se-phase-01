@@ -21,8 +21,8 @@ class AuditoriumEntity {
 	private String name;
 	private int rows;
 	private int seatsPerRow;
+	@jakarta.persistence.OrderBy("rowLetter ASC, seatNumber ASC")
 	@OneToMany(mappedBy = "auditorium", cascade = CascadeType.ALL, orphanRemoval = true)
-	private List<SeatEntity> seats = new ArrayList<>();
 
 	protected AuditoriumEntity() {
 	}
