@@ -4,6 +4,7 @@ import jakarta.persistence.CascadeType;
 import jakarta.persistence.Entity;
 import jakarta.persistence.Id;
 import jakarta.persistence.OneToMany;
+import jakarta.persistence.OrderBy;
 import jakarta.persistence.Table;
 import java.util.ArrayList;
 import java.util.List;
@@ -21,8 +22,9 @@ class AuditoriumEntity {
 	private String name;
 	private int rows;
 	private int seatsPerRow;
-	@jakarta.persistence.OrderBy("rowLetter ASC, seatNumber ASC")
 	@OneToMany(mappedBy = "auditorium", cascade = CascadeType.ALL, orphanRemoval = true)
+	@OrderBy("rowLetter ASC, seatNumber ASC")
+	private List<SeatEntity> seats = new ArrayList<>();
 
 	protected AuditoriumEntity() {
 	}
