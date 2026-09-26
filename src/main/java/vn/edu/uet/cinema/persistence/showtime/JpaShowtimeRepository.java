@@ -4,7 +4,11 @@ import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
+import java.sql.SQLException;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Repository;
+import org.springframework.transaction.annotation.Transactional;
+import vn.edu.uet.cinema.business.ConflictException;
 import vn.edu.uet.cinema.business.showtime.Showtime;
 import vn.edu.uet.cinema.business.showtime.ShowtimeRepository;
 
@@ -18,8 +22,18 @@ class JpaShowtimeRepository implements ShowtimeRepository {
 	}
 
 	@Override
+	@Transactional
 	public Showtime save(Showtime showtime) {
-		return jpa.save(ShowtimeEntity.from(showtime)).toShowtime();
+		try {
+			return jpa.saveAndFlush(ShowtimeEntity.from(showtime)).toShowtime();
+		} catch (DataIntegrityViolationException e) {
+			for (Throwable cause = e; cause != null; cause = cause.getCause()) {
+				if (cause instanceof SQLException sql && "23P01".equals(sql.getSQLState())) {
+					throw new ConflictException("Auditorium has an overlapping Showtime");
+				}
+			}
+			throw e;
+		}
 	}
 
 	@Override

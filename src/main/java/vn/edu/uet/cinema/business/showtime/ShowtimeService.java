@@ -3,6 +3,7 @@ package vn.edu.uet.cinema.business.showtime;
 import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
+import vn.edu.uet.cinema.business.ConflictException;
 import vn.edu.uet.cinema.business.NotFoundException;
 import vn.edu.uet.cinema.business.auditorium.AuditoriumService;
 import vn.edu.uet.cinema.business.movie.MovieService;
@@ -25,9 +26,11 @@ public class ShowtimeService {
 		}
 		int durationMinutes = movies.get(movieId).durationMinutes();
 		auditoriums.get(auditoriumId);
-		Showtime showtime = new Showtime(UUID.randomUUID(), movieId, auditoriumId, startsAt,
-			startsAt.plusSeconds(((long) durationMinutes + 15) * 60), basePrice);
-		return showtimes.save(showtime);
+		Instant endsAt = startsAt.plusSeconds(((long) durationMinutes + 15) * 60);
+		if (showtimes.existsOverlapping(auditoriumId, startsAt, endsAt)) {
+			throw new ConflictException("Auditorium has an overlapping Showtime");
+		}
+		return showtimes.save(new Showtime(UUID.randomUUID(), movieId, auditoriumId, startsAt, endsAt, basePrice));
 	}
 
 	public Showtime get(UUID id) {

@@ -10,6 +10,7 @@ import java.time.Instant;
 import java.time.LocalDate;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
+import vn.edu.uet.cinema.business.ConflictException;
 import vn.edu.uet.cinema.business.auditorium.Auditorium;
 import vn.edu.uet.cinema.business.auditorium.AuditoriumService;
 import vn.edu.uet.cinema.business.movie.AgeRating;
@@ -47,6 +48,22 @@ class ShowtimeServiceTest {
 		assertThat(showtime.basePrice()).isEqualTo(100_000L);
 		assertThat(showtime.movieId()).isEqualTo(movieId);
 		assertThat(showtime.auditoriumId()).isEqualTo(auditoriumId);
+	}
+
+	@Test
+	void overlappingShowtimeInSameAuditoriumIsRejected() {
+		UUID movieId = UUID.randomUUID();
+		UUID auditoriumId = UUID.randomUUID();
+		Instant startsAt = Instant.parse("2026-10-01T14:00:00Z");
+		when(movies.get(movieId)).thenReturn(new Movie(movieId, "Film", "Synopsis", 120, "Drama",
+			AgeRating.P, LocalDate.parse("2026-09-01"), "poster"));
+		when(auditoriums.get(auditoriumId)).thenReturn(new Auditorium(auditoriumId, UUID.randomUUID(), "Hall", 1, 1,
+			java.util.List.of()));
+		when(repository.existsOverlapping(auditoriumId, startsAt, startsAt.plusSeconds(135 * 60)))
+			.thenReturn(true);
+
+		assertThatThrownBy(() -> service.create(movieId, auditoriumId, startsAt, 100_000))
+			.isInstanceOf(ConflictException.class);
 	}
 
 	@Test
