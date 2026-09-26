@@ -1,0 +1,29 @@
+package vn.edu.uet.cinema.persistence.showtime;
+
+import java.time.Instant;
+import java.util.List;
+import java.util.UUID;
+import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
+
+interface ShowtimeEntityRepository extends JpaRepository<ShowtimeEntity, UUID> {
+
+	@Query("""
+		select s from ShowtimeEntity s where s.startsAt >= :from and s.startsAt < :to
+		and (:cinemaId is null or s.auditoriumId in (select a.id from AuditoriumEntity a where a.cinemaId = :cinemaId))
+		and (:movieId is null or s.movieId = :movieId) order by s.startsAt, s.id
+		""")
+	List<ShowtimeEntity> findStartingBetween(@Param("from") Instant fromInclusive, @Param("to") Instant toExclusive,
+		@Param("cinemaId") UUID cinemaId, @Param("movieId") UUID movieId);
+
+	@Query("""
+		select case when count(s) > 0 then true else false end from ShowtimeEntity s
+		where s.auditoriumId = :auditoriumId and s.startsAt < :endsAt and s.endsAt > :startsAt
+		""")
+	boolean existsOverlapping(UUID auditoriumId, Instant startsAt, Instant endsAt);
+
+	boolean existsByMovieId(UUID movieId);
+
+	boolean existsByAuditoriumId(UUID auditoriumId);
+}

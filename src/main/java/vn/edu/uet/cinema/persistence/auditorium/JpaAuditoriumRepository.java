@@ -7,6 +7,7 @@ import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Repository;
 import org.springframework.transaction.annotation.Transactional;
 import org.hibernate.exception.ConstraintViolationException;
+import vn.edu.uet.cinema.business.ConflictException;
 import vn.edu.uet.cinema.business.auditorium.Auditorium;
 import vn.edu.uet.cinema.business.auditorium.AuditoriumNameTakenException;
 import vn.edu.uet.cinema.business.auditorium.AuditoriumRepository;
@@ -58,8 +59,15 @@ class JpaAuditoriumRepository implements AuditoriumRepository {
 	@Override
 	@Transactional
 	public void deleteById(UUID id) {
-		jpa.deleteById(id);
-		jpa.flush();
+		try {
+			jpa.deleteById(id);
+			jpa.flush();
+		} catch (DataIntegrityViolationException e) {
+			if (hasConstraint(e, "fk_showtime_auditorium")) {
+				throw new ConflictException("Auditorium has Showtimes");
+			}
+			throw e;
+		}
 	}
 
 	private static boolean hasConstraint(Throwable error, String expected) {

@@ -3,14 +3,18 @@ package vn.edu.uet.cinema.business.movie;
 import java.time.LocalDate;
 import java.util.List;
 import java.util.UUID;
+import vn.edu.uet.cinema.business.ConflictException;
 import vn.edu.uet.cinema.business.NotFoundException;
+import vn.edu.uet.cinema.business.showtime.ShowtimeRepository;
 
 public class MovieService {
 
 	private final MovieRepository movies;
+	private final ShowtimeRepository showtimes;
 
-	public MovieService(MovieRepository movies) {
+	public MovieService(MovieRepository movies, ShowtimeRepository showtimes) {
 		this.movies = movies;
+		this.showtimes = showtimes;
 	}
 
 	public Movie create(String title, String description, int durationMinutes, String genre, AgeRating ageRating,
@@ -35,6 +39,9 @@ public class MovieService {
 
 	public void delete(UUID id) {
 		get(id);
+		if (showtimes.existsByMovieId(id)) {
+			throw new ConflictException("Movie has Showtimes");
+		}
 		movies.deleteById(id);
 	}
 }
