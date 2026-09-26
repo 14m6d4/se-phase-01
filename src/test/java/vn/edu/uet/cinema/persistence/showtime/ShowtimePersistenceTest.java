@@ -63,6 +63,22 @@ class ShowtimePersistenceTest {
 	}
 
 	@Test
+	void refusesToDeleteMovieOrAuditoriumWithShowtimesThenAllowsAfterShowtimeDelete() {
+		UUID movieId = movies.create("Film", "Synopsis", 90, "Drama", AgeRating.P,
+			LocalDate.parse("2026-09-01"), "poster").id();
+		UUID cinemaId = cinemas.create("Cinema " + UUID.randomUUID(), "Address").id();
+		UUID auditoriumId = auditoriums.create(cinemaId, "Hall", 1, 1, List.of(), List.of()).id();
+		Showtime showtime = showtimes.create(movieId, auditoriumId, Instant.parse("2026-10-01T12:00:00Z"), 100_000);
+
+		assertThatThrownBy(() -> movies.delete(movieId)).isInstanceOf(ConflictException.class);
+		assertThatThrownBy(() -> auditoriums.delete(auditoriumId)).isInstanceOf(ConflictException.class);
+		assertThat(showtimes.get(showtime.id())).isEqualTo(showtime);
+		showtimes.delete(showtime.id());
+		movies.delete(movieId);
+		auditoriums.delete(auditoriumId);
+	}
+
+	@Test
 	void savesAndFiltersByStartingTimeCinemaAndMovie() {
 		UUID movieId = movies.create("Film", "Synopsis", 90, "Drama", AgeRating.P, LocalDate.parse("2026-09-01"), "poster").id();
 		UUID otherMovieId = movies.create("Other", "Synopsis", 90, "Drama", AgeRating.P, LocalDate.parse("2026-09-01"), "poster").id();

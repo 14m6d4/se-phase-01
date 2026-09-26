@@ -26,8 +26,8 @@ class BusinessConfig {
 	}
 
 	@Bean
-	MovieService movieService(MovieRepository movies) {
-		return new MovieService(movies);
+	MovieService movieService(MovieRepository movies, ShowtimeRepository showtimes) {
+		return new MovieService(movies, showtimes);
 	}
 
 	@Bean
@@ -36,8 +36,9 @@ class BusinessConfig {
 	}
 
 	@Bean
-	AuditoriumService auditoriumService(CinemaService cinemas, AuditoriumRepository auditoriums) {
-		return new AuditoriumService(cinemas, auditoriums);
+	AuditoriumService auditoriumService(CinemaService cinemas, AuditoriumRepository auditoriums,
+		ShowtimeRepository showtimes) {
+		return new AuditoriumService(cinemas, auditoriums, showtimes);
 	}
 
 	@Bean

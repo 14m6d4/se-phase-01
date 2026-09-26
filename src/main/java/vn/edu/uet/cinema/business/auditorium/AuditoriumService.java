@@ -2,17 +2,21 @@ package vn.edu.uet.cinema.business.auditorium;
 
 import java.util.List;
 import java.util.UUID;
+import vn.edu.uet.cinema.business.ConflictException;
 import vn.edu.uet.cinema.business.NotFoundException;
 import vn.edu.uet.cinema.business.cinema.CinemaService;
+import vn.edu.uet.cinema.business.showtime.ShowtimeRepository;
 
 public class AuditoriumService {
 
 	private final CinemaService cinemas;
 	private final AuditoriumRepository auditoriums;
+	private final ShowtimeRepository showtimes;
 
-	public AuditoriumService(CinemaService cinemas, AuditoriumRepository auditoriums) {
+	public AuditoriumService(CinemaService cinemas, AuditoriumRepository auditoriums, ShowtimeRepository showtimes) {
 		this.cinemas = cinemas;
 		this.auditoriums = auditoriums;
+		this.showtimes = showtimes;
 	}
 
 	public Auditorium create(UUID cinemaId, String name, int rows, int seatsPerRow, List<String> vipRows,
@@ -36,6 +40,9 @@ public class AuditoriumService {
 
 	public void delete(UUID id) {
 		get(id);
+		if (showtimes.existsByAuditoriumId(id)) {
+			throw new ConflictException("Auditorium has Showtimes");
+		}
 		auditoriums.deleteById(id);
 	}
 }
