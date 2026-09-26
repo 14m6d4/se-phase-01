@@ -1,7 +1,7 @@
 CREATE TABLE showtime (
     id            uuid           PRIMARY KEY,
-    movie_id      uuid           NOT NULL REFERENCES movie (id) ON DELETE RESTRICT,
-    auditorium_id uuid           NOT NULL REFERENCES auditorium (id) ON DELETE RESTRICT,
+    movie_id      uuid           NOT NULL CONSTRAINT fk_showtime_movie REFERENCES movie (id) ON DELETE RESTRICT,
+    auditorium_id uuid           NOT NULL CONSTRAINT fk_showtime_auditorium REFERENCES auditorium (id) ON DELETE RESTRICT,
     starts_at     timestamptz    NOT NULL,
     ends_at       timestamptz    NOT NULL,
     base_price    bigint         NOT NULL CHECK (base_price > 0),

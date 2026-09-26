@@ -30,6 +30,8 @@ class ShowtimePersistenceTest {
 	@Autowired MovieService movies;
 	@Autowired CinemaService cinemas;
 	@Autowired AuditoriumService auditoriums;
+	@Autowired vn.edu.uet.cinema.business.movie.MovieRepository movieRepository;
+	@Autowired vn.edu.uet.cinema.business.auditorium.AuditoriumRepository auditoriumRepository;
 
 	@Test
 	void rejectsOverlapButAllowsBackToBackAndKeepsOriginalEndAfterMovieEdit() {
@@ -76,6 +78,22 @@ class ShowtimePersistenceTest {
 		showtimes.delete(showtime.id());
 		movies.delete(movieId);
 		auditoriums.delete(auditoriumId);
+	}
+
+	@Test
+	void adapterDeleteTranslatesForeignKeyViolationToConflictWhenServiceGuardWasBypassed() {
+		UUID movieId = movies.create("Film", "Synopsis", 90, "Drama", AgeRating.P,
+			LocalDate.parse("2026-09-01"), "poster").id();
+		UUID cinemaId = cinemas.create("Cinema " + UUID.randomUUID(), "Address").id();
+		UUID auditoriumId = auditoriums.create(cinemaId, "Hall", 1, 1, List.of(), List.of()).id();
+		Instant start = Instant.parse("2026-10-01T12:00:00Z");
+		repository.save(new Showtime(UUID.randomUUID(), movieId, auditoriumId, start, start.plusSeconds(3_600),
+			100_000));
+
+		assertThatThrownBy(() -> movieRepository.deleteById(movieId)).isInstanceOf(ConflictException.class);
+		assertThatThrownBy(() -> auditoriumRepository.deleteById(auditoriumId)).isInstanceOf(ConflictException.class);
+		assertThat(movies.get(movieId)).isNotNull();
+		assertThat(auditoriums.get(auditoriumId)).isNotNull();
 	}
 
 	@Test
