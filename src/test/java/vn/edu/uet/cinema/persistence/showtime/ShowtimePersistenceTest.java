@@ -65,6 +65,22 @@ class ShowtimePersistenceTest {
 	}
 
 	@Test
+	void persistenceRejectsSaveWhenMovieOrAuditoriumWasDeletedAfterLookup() {
+		UUID movieId = movies.create("Film", "Synopsis", 90, "Drama", AgeRating.P,
+			LocalDate.parse("2026-09-01"), "poster").id();
+		UUID cinemaId = cinemas.create("Cinema " + UUID.randomUUID(), "Address").id();
+		UUID hallId = auditoriums.create(cinemaId, "Hall", 1, 1, List.of(), List.of()).id();
+		Instant start = Instant.parse("2026-10-01T12:00:00Z");
+
+		assertThatThrownBy(() -> repository.save(new Showtime(UUID.randomUUID(), UUID.randomUUID(), hallId,
+			start, start.plusSeconds(3_600), 100_000)))
+			.isInstanceOf(ConflictException.class);
+		assertThatThrownBy(() -> repository.save(new Showtime(UUID.randomUUID(), movieId, UUID.randomUUID(),
+			start, start.plusSeconds(3_600), 100_000)))
+			.isInstanceOf(ConflictException.class);
+	}
+
+	@Test
 	void refusesToDeleteMovieOrAuditoriumWithShowtimesThenAllowsAfterShowtimeDelete() {
 		UUID movieId = movies.create("Film", "Synopsis", 90, "Drama", AgeRating.P,
 			LocalDate.parse("2026-09-01"), "poster").id();
