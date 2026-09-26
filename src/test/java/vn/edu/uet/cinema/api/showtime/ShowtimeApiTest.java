@@ -1,5 +1,7 @@
 package vn.edu.uet.cinema.api.showtime;
 
+import static org.hamcrest.Matchers.hasItem;
+import static org.hamcrest.Matchers.hasSize;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -8,6 +10,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import com.jayway.jsonpath.JsonPath;
+import java.time.Instant;
 import java.time.LocalDate;
 import java.util.List;
 import java.util.UUID;
@@ -23,6 +26,7 @@ import vn.edu.uet.cinema.business.auditorium.AuditoriumService;
 import vn.edu.uet.cinema.business.cinema.CinemaService;
 import vn.edu.uet.cinema.business.movie.AgeRating;
 import vn.edu.uet.cinema.business.movie.MovieService;
+import vn.edu.uet.cinema.business.showtime.ShowtimeService;
 
 @SpringBootTest
 @AutoConfigureMockMvc
@@ -33,6 +37,7 @@ class ShowtimeApiTest {
 	@Autowired MovieService movies;
 	@Autowired CinemaService cinemas;
 	@Autowired AuditoriumService auditoriums;
+	@Autowired ShowtimeService showtimes;
 
 	@Test
 	void adminSchedulesAndDeletesShowtimeWithOffsetConvertedToInstant() throws Exception {
@@ -89,14 +94,52 @@ class ShowtimeApiTest {
 			.andExpect(jsonPath("$.paths['/api/showtimes/{id}'].delete.security[0].bearerAuth").exists());
 	}
 
+	@Test
+	void showtimesByDateUseVietnameseMidnightBoundariesAndOptionalFilters() throws Exception {
+		UUID movie1 = movieId();
+		UUID movie2 = movieId();
+		UUID cinema1 = cinemas.create("Cinema " + UUID.randomUUID(), "Address").id();
+		UUID cinema2 = cinemas.create("Cinema " + UUID.randomUUID(), "Address").id();
+		schedule(movie1, auditoriumId(cinema1), Instant.parse("2026-10-01T16:59:59.999999Z"));
+		UUID midnight = schedule(movie1, auditoriumId(cinema1), Instant.parse("2026-10-01T17:00:00Z"));
+		UUID lastMoment = schedule(movie2, auditoriumId(cinema2), Instant.parse("2026-10-02T16:59:59.999999Z"));
+		schedule(movie1, auditoriumId(cinema2), Instant.parse("2026-10-02T17:00:00Z"));
+
+		mvc.perform(get("/api/showtimes").param("date", "2026-10-02"))
+			.andExpect(status().isOk()).andExpect(jsonPath("$", hasSize(2)))
+			.andExpect(jsonPath("$[*].id").value(hasItem(midnight.toString())))
+			.andExpect(jsonPath("$[*].id").value(hasItem(lastMoment.toString())));
+		mvc.perform(get("/api/showtimes").param("date", "2026-10-02").param("cinemaId", cinema1.toString()))
+			.andExpect(status().isOk()).andExpect(jsonPath("$", hasSize(1)))
+			.andExpect(jsonPath("$[0].id").value(midnight.toString()));
+		mvc.perform(get("/api/showtimes").param("date", "2026-10-02").param("movieId", movie2.toString()))
+			.andExpect(status().isOk()).andExpect(jsonPath("$", hasSize(1)))
+			.andExpect(jsonPath("$[0].id").value(lastMoment.toString()));
+		mvc.perform(get("/api/showtimes").param("date", "2026-10-02").param("cinemaId", cinema1.toString())
+				.param("movieId", movie1.toString()))
+			.andExpect(status().isOk()).andExpect(jsonPath("$", hasSize(1)))
+			.andExpect(jsonPath("$[0].id").value(midnight.toString()));
+		mvc.perform(get("/api/showtimes/" + midnight)).andExpect(status().isOk())
+			.andExpect(jsonPath("$.startsAt").value("2026-10-01T17:00:00Z"));
+		mvc.perform(get("/api/showtimes")).andExpect(status().isBadRequest())
+			.andExpect(content().contentType(MediaType.APPLICATION_PROBLEM_JSON));
+	}
+
 	private UUID movieId() {
 		return movies.create("Film " + UUID.randomUUID(), "Synopsis", 120, "Drama", AgeRating.P,
 			LocalDate.parse("2026-09-01"), "poster").id();
 	}
 
 	private UUID auditoriumId() {
-		UUID cinemaId = cinemas.create("Cinema " + UUID.randomUUID(), "Address").id();
-		return auditoriums.create(cinemaId, "Hall", 1, 1, List.of(), List.of()).id();
+		return auditoriumId(cinemas.create("Cinema " + UUID.randomUUID(), "Address").id());
+	}
+
+	private UUID auditoriumId(UUID cinemaId) {
+		return auditoriums.create(cinemaId, "Hall " + UUID.randomUUID(), 1, 1, List.of(), List.of()).id();
+	}
+
+	private UUID schedule(UUID movieId, UUID auditoriumId, Instant startsAt) {
+		return showtimes.create(movieId, auditoriumId, startsAt, 100_000).id();
 	}
 
 	private String token(String email, String password) throws Exception {

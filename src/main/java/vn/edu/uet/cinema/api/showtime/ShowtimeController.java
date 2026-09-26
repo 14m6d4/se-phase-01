@@ -5,12 +5,17 @@ import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Positive;
 import java.time.Instant;
+import java.time.LocalDate;
 import java.time.OffsetDateTime;
+import java.time.ZoneId;
+import java.util.List;
 import java.util.UUID;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.DeleteMapping;
+import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
@@ -20,6 +25,8 @@ import vn.edu.uet.cinema.config.OpenApiConfig;
 
 @RestController
 class ShowtimeController {
+
+	private static final ZoneId VIETNAM_ZONE = ZoneId.of("Asia/Ho_Chi_Minh");
 
 	private final ShowtimeService showtimes;
 
@@ -33,6 +40,19 @@ class ShowtimeController {
 	ShowtimeResponse create(@Valid @RequestBody ShowtimeRequest request) {
 		return ShowtimeResponse.from(showtimes.create(request.movieId(), request.auditoriumId(),
 			request.startsAt().toInstant(), request.basePrice()));
+	}
+
+	@GetMapping("/api/showtimes")
+	List<ShowtimeResponse> list(@RequestParam LocalDate date, @RequestParam(required = false) UUID cinemaId,
+		@RequestParam(required = false) UUID movieId) {
+		Instant from = date.atStartOfDay(VIETNAM_ZONE).toInstant();
+		Instant to = date.plusDays(1).atStartOfDay(VIETNAM_ZONE).toInstant();
+		return showtimes.list(from, to, cinemaId, movieId).stream().map(ShowtimeResponse::from).toList();
+	}
+
+	@GetMapping("/api/showtimes/{id}")
+	ShowtimeResponse get(@PathVariable UUID id) {
+		return ShowtimeResponse.from(showtimes.get(id));
 	}
 
 	@DeleteMapping("/api/showtimes/{id}")
