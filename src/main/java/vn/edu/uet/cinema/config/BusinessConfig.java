@@ -7,6 +7,8 @@ import org.springframework.context.annotation.Configuration;
 import vn.edu.uet.cinema.business.account.AccountRepository;
 import vn.edu.uet.cinema.business.account.AccountService;
 import vn.edu.uet.cinema.business.account.PasswordHasher;
+import vn.edu.uet.cinema.business.auditorium.AuditoriumRepository;
+import vn.edu.uet.cinema.business.auditorium.AuditoriumService;
 import vn.edu.uet.cinema.business.cinema.CinemaRepository;
 import vn.edu.uet.cinema.business.cinema.CinemaService;
 import vn.edu.uet.cinema.business.movie.MovieRepository;
@@ -27,8 +29,13 @@ class BusinessConfig {
 	}
 
 	@Bean
-	CinemaService cinemaService(CinemaRepository cinemas) {
-		return new CinemaService(cinemas);
+	CinemaService cinemaService(CinemaRepository cinemas, AuditoriumRepository auditoriums) {
+		return new CinemaService(cinemas, auditoriums);
+	}
+
+	@Bean
+	AuditoriumService auditoriumService(CinemaService cinemas, AuditoriumRepository auditoriums) {
+		return new AuditoriumService(cinemas, auditoriums);
 	}
 
 	/** Admins are never self-registered: the one Admin comes from ADMIN_EMAIL / ADMIN_PASSWORD. */

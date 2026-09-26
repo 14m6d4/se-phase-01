@@ -59,6 +59,22 @@ class CinemaApiTest {
 	}
 
 	@Test
+	void cinemaWithAuditoriumCannotBeDeleted() throws Exception {
+		String admin = token();
+		String cinemaBody = mvc.perform(post("/api/cinemas").header("Authorization", "Bearer " + admin)
+				.contentType(MediaType.APPLICATION_JSON).content(cinemaJson("Cinema with room " + UUID.randomUUID(), "Address")))
+			.andExpect(status().isCreated()).andReturn().getResponse().getContentAsString();
+		String cinemaId = JsonPath.read(cinemaBody, "$.id");
+		mvc.perform(post("/api/cinemas/" + cinemaId + "/auditoriums").header("Authorization", "Bearer " + admin)
+				.contentType(MediaType.APPLICATION_JSON)
+				.content("{\"name\":\"Main\",\"rows\":1,\"seatsPerRow\":1,\"vipRows\":[],\"coupleRows\":[]}"))
+			.andExpect(status().isCreated());
+
+		mvc.perform(delete("/api/cinemas/" + cinemaId).header("Authorization", "Bearer " + admin))
+			.andExpect(status().isConflict());
+	}
+
+	@Test
 	void unknownCinemaWritesAreNotFound() throws Exception {
 		String admin = token();
 		mvc.perform(put("/api/cinemas/" + UUID.randomUUID()).header("Authorization", "Bearer " + admin)
