@@ -1,5 +1,6 @@
 package vn.edu.uet.cinema.api.showtime;
 
+import static org.hamcrest.Matchers.contains;
 import static org.hamcrest.Matchers.hasItem;
 import static org.hamcrest.Matchers.hasSize;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
@@ -123,6 +124,28 @@ class ShowtimeApiTest {
 			.andExpect(jsonPath("$.startsAt").value("2026-10-01T17:00:00Z"));
 		mvc.perform(get("/api/showtimes")).andExpect(status().isBadRequest())
 			.andExpect(content().contentType(MediaType.APPLICATION_PROBLEM_JSON));
+	}
+
+	@Test
+	void seatMapUsesAuditoriumLayoutAndShowsCurrentPricesAndAvailability() throws Exception {
+		UUID cinemaId = cinemas.create("Cinema " + UUID.randomUUID(), "Address").id();
+		UUID auditoriumId = auditoriums.create(cinemaId, "Seat map hall", 3, 2, List.of("B"), List.of("C")).id();
+		UUID showtimeId = showtimes.create(movieId(), auditoriumId, Instant.parse("2026-11-05T17:00:00Z"),
+			100_000).id();
+
+		mvc.perform(get("/api/showtimes/" + showtimeId + "/seats"))
+			.andExpect(status().isOk()).andExpect(jsonPath("$", hasSize(6)))
+			.andExpect(jsonPath("$[*].status").value(contains("AVAILABLE", "AVAILABLE", "AVAILABLE", "AVAILABLE",
+				"AVAILABLE", "AVAILABLE")))
+			.andExpect(jsonPath("$[0].label").value("A1"))
+			.andExpect(jsonPath("$[0].type").value("STANDARD"))
+			.andExpect(jsonPath("$[0].price").value(100_000))
+			.andExpect(jsonPath("$[2].label").value("B1"))
+			.andExpect(jsonPath("$[2].type").value("VIP"))
+			.andExpect(jsonPath("$[2].price").value(120_000))
+			.andExpect(jsonPath("$[4].label").value("C1"))
+			.andExpect(jsonPath("$[4].type").value("COUPLE"))
+			.andExpect(jsonPath("$[4].price").value(210_000));
 	}
 
 	private UUID movieId() {
