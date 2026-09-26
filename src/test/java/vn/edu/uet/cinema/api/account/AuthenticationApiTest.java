@@ -60,8 +60,9 @@ class AuthenticationApiTest {
 		mvc.perform(post("/api/cinemas").header("Authorization", "Bearer " + customer))
 			.andExpect(status().isForbidden())
 			.andExpect(content().contentType(MediaType.APPLICATION_PROBLEM_JSON));
-		// No controller yet (issue #2), so an admin gets past security and hits 404.
-		mvc.perform(post("/api/cinemas").header("Authorization", "Bearer " + admin)).andExpect(status().isNotFound());
+		mvc.perform(post("/api/cinemas").header("Authorization", "Bearer " + admin)
+				.contentType(MediaType.APPLICATION_JSON).content("{\"name\":\"Cinema Alpha\",\"address\":\"1 Alpha Street\"}"))
+			.andExpect(status().isCreated());
 	}
 
 	@Test
