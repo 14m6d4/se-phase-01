@@ -8,6 +8,7 @@ import vn.edu.uet.cinema.business.ConflictException;
 import vn.edu.uet.cinema.business.NotFoundException;
 import vn.edu.uet.cinema.business.account.InvalidCredentialsException;
 import vn.edu.uet.cinema.business.auditorium.InvalidSeatLayoutException;
+import vn.edu.uet.cinema.business.showtime.InvalidShowtimeException;
 
 /**
  * Maps business exceptions to RFC 9457 problem details. Framework exceptions (validation,
@@ -28,6 +29,11 @@ class ApiExceptionHandler {
 
 	@ExceptionHandler
 	ProblemDetail invalidSeatLayout(InvalidSeatLayoutException e) {
+		return ProblemDetail.forStatusAndDetail(HttpStatus.BAD_REQUEST, e.getMessage());
+	}
+
+	@ExceptionHandler
+	ProblemDetail invalidShowtime(InvalidShowtimeException e) {
 		return ProblemDetail.forStatusAndDetail(HttpStatus.BAD_REQUEST, e.getMessage());
 	}
 
