@@ -40,7 +40,7 @@ Each use case saves exactly one aggregate; the persistence adapter owns the tran
 - A **Movie** has `title`, `description`, `durationMinutes`, `genre`, `ageRating` (`P`, `K`, `T13`, `T16`, `T18`; display only), `releaseDate`, `posterUrl`.
 - A **Showtime** has `movieId`, `auditoriumId`, `startsAt`, `basePrice`. `endsAt = startsAt + durationMinutes + 15 min` (cleaning) is fixed at creation; later Movie edits do not change it.
 - Showtimes in the same Auditorium may not overlap on `[startsAt, endsAt)`.
-- Deletes are hard deletes, refused with `409` while dependants exist: Cinema with Auditoriums, Auditorium with Showtimes, Movie with Showtimes, Showtime with any Booking.
+- Deletes are hard deletes, refused with `409` while dependants exist: Cinema with Auditoriums, Auditorium with Showtimes, Movie with Showtimes, Showtime with a Confirmed or live Pending Booking (lapsed Holds are deleted along with the Showtime).
 
 ### Pricing
 - Standard = **Base Price**; VIP = Base Price + 20,000; Couple = 2 × Base Price + 10,000. Surcharges are constants.
@@ -48,11 +48,11 @@ Each use case saves exactly one aggregate; the persistence adapter owns the tran
 - Seat prices are copied into the Booking when it is created; later changes don't affect it.
 
 ### Booking
-- One **Booking** = one Showtime, 1–8 Seats, all in that Showtime's Auditorium.
+- One **Booking** = one Showtime, 1–8 Seats (a Couple Seat counts as one), all in that Showtime's Auditorium. Duplicate `seatIds` → `400`.
 - Cannot book a Showtime that has already started.
 - A new Booking is **Pending** with a **Hold** of 10 minutes (`expiresAt`).
-- A Customer may have at most one live Pending Booking.
-- `POST /bookings/{id}/payment` (simulated, always succeeds) makes it **Confirmed** if the Hold is still live, else `409`.
+- A Customer may have at most one live Pending Booking; booking again while it is live → `409` naming that Booking's id.
+- `POST /bookings/{id}/payment` (simulated, always succeeds) makes it **Confirmed** if the Hold is still live, else `409`. The Hold alone decides: payment after the Showtime has started is allowed.
 - A Pending Booking can be abandoned (`DELETE`): it is removed and its Seats freed. A Confirmed Booking is final: no cancel, no refund (`409`).
 - A Pending Booking past `expiresAt` is **Expired**: shown as such, cannot be paid, and removed the next time anyone books one of its Seats ([ADR 0004](adr/0004-seat-contention-via-unique-constraint-and-lazy-holds.md)).
 - Double booking is prevented by `UNIQUE(showtime_id, seat_id)` on booked seats; the loser gets `409`.
