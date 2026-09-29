@@ -1,10 +1,16 @@
 package vn.edu.uet.cinema.business.booking;
 
 import java.time.Instant;
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
 public interface BookingRepository {
+
+	Optional<Booking> findById(UUID id);
+
+	/** Newest first. */
+	List<Booking> findByCustomer(UUID customerId);
 
 	/** The Customer's Pending Booking whose Hold is still running at {@code now}. */
 	Optional<Booking> findLivePending(UUID customerId, Instant now);
@@ -17,4 +23,10 @@ public interface BookingRepository {
 	 * Pending Booking
 	 */
 	Booking saveNew(Booking booking, Instant now);
+
+	/** Makes the Booking Confirmed if it is Pending with a Hold still running at {@code now}; false otherwise. */
+	boolean confirm(UUID id, Instant now);
+
+	/** Deletes the Booking if it is Pending; false otherwise. */
+	boolean deletePending(UUID id);
 }

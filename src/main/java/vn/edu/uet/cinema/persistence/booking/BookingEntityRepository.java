@@ -17,6 +17,20 @@ interface BookingEntityRepository extends JpaRepository<BookingEntity, UUID> {
 		""")
 	Optional<BookingEntity> findLivePending(UUID customerId, Instant now);
 
+	List<BookingEntity> findByCustomerIdOrderByCreatedAtDesc(UUID customerId);
+
+	/** The conditional update of ADR 0004: only a live Hold can be paid. */
+	@Modifying
+	@Query(nativeQuery = true, value = """
+		update booking set status = 'CONFIRMED' where id = :id and status = 'PENDING' and expires_at > :now
+		""")
+	int confirm(UUID id, Instant now);
+
+	/** booked_seat rows go by ON DELETE CASCADE. */
+	@Modifying
+	@Query(nativeQuery = true, value = "delete from booking where id = :id and status = 'PENDING'")
+	int deletePending(UUID id);
+
 	/** Lapsed Holds on these Seats, and the Customer's own lapsed one. booked_seat rows go by ON DELETE CASCADE. */
 	@Modifying
 	@Query(nativeQuery = true, value = """

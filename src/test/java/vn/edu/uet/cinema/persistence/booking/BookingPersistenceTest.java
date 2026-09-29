@@ -154,6 +154,54 @@ class BookingPersistenceTest {
 		assertThatThrownBy(() -> showtimes.get(lapsedOnlyId)).isInstanceOf(NotFoundException.class);
 	}
 
+	@Test
+	void paymentIsAConditionalUpdateThatOnlyALiveHoldPasses() {
+		Auditorium hall = auditorium();
+		UUID showtimeId = showtime(hall);
+		UUID seatId = hall.seats().get(0).id();
+		UUID customerId = customer();
+		Booking lapsed = bookings.book(customerId, showtimeId, List.of(hall.seats().get(1).id()),
+			now.minus(11, ChronoUnit.MINUTES));
+		assertThat(repository.confirm(lapsed.id(), now)).isFalse();
+
+		Booking live = bookings.book(customerId, showtimeId, List.of(seatId), now);
+
+		assertThat(repository.confirm(live.id(), now)).isTrue();
+		assertThat(repository.confirm(live.id(), now)).isFalse();
+		assertThat(repository.deletePending(live.id())).isFalse();
+		assertThat(repository.findById(live.id())).get().extracting(Booking::status).isEqualTo(BookingStatus.CONFIRMED);
+		assertThat(occupancy.statuses(showtimeId, now)).containsExactly(Map.entry(seatId, SeatStatus.SOLD));
+	}
+
+	@Test
+	void abandonedBookingIsGoneAndItsSeatsAreFree() {
+		Auditorium hall = auditorium();
+		UUID showtimeId = showtime(hall);
+		UUID seatId = hall.seats().get(0).id();
+		Booking abandoned = bookings.book(customer(), showtimeId, List.of(seatId), now);
+
+		assertThat(repository.deletePending(abandoned.id())).isTrue();
+
+		assertThat(repository.findById(abandoned.id())).isEmpty();
+		assertThat(occupancy.statuses(showtimeId, now)).isEmpty();
+		bookings.book(customer(), showtimeId, List.of(seatId), now);
+	}
+
+	@Test
+	void customersBookingsAreListedNewestFirst() {
+		Auditorium hall = auditorium();
+		UUID showtimeId = showtime(hall);
+		UUID customerId = customer();
+		Instant earlier = now.minus(20, ChronoUnit.MINUTES);
+		Booking paid = bookings.book(customerId, showtimeId, List.of(hall.seats().get(0).id()), earlier);
+		repository.confirm(paid.id(), earlier);
+		Booking pending = bookings.book(customerId, showtimeId, List.of(hall.seats().get(1).id()), now);
+		bookings.book(customer(), showtimeId, List.of(hall.seats().get(2).id()), now);
+
+		assertThat(repository.findByCustomer(customerId)).extracting(Booking::id)
+			.containsExactly(pending.id(), paid.id());
+	}
+
 	private UUID customer() {
 		return accounts.registerCustomer("booking-" + UUID.randomUUID() + "@example.com", "password123", "Customer")
 			.id();
