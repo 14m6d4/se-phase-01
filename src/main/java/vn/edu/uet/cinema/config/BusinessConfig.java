@@ -9,6 +9,8 @@ import vn.edu.uet.cinema.business.account.AccountService;
 import vn.edu.uet.cinema.business.account.PasswordHasher;
 import vn.edu.uet.cinema.business.auditorium.AuditoriumRepository;
 import vn.edu.uet.cinema.business.auditorium.AuditoriumService;
+import vn.edu.uet.cinema.business.booking.BookingRepository;
+import vn.edu.uet.cinema.business.booking.BookingService;
 import vn.edu.uet.cinema.business.cinema.CinemaRepository;
 import vn.edu.uet.cinema.business.cinema.CinemaService;
 import vn.edu.uet.cinema.business.movie.MovieRepository;
@@ -44,6 +46,11 @@ class BusinessConfig {
 	@Bean
 	ShowtimeService showtimeService(MovieService movies, AuditoriumService auditoriums, ShowtimeRepository showtimes) {
 		return new ShowtimeService(movies, auditoriums, showtimes);
+	}
+
+	@Bean
+	BookingService bookingService(ShowtimeService showtimes, AuditoriumService auditoriums, BookingRepository bookings) {
+		return new BookingService(showtimes, auditoriums, bookings);
 	}
 
 	/** Admins are never self-registered: the one Admin comes from ADMIN_EMAIL / ADMIN_PASSWORD. */
