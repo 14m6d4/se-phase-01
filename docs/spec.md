@@ -96,8 +96,8 @@ No pagination in phase 1: `GET /showtimes` is bounded by `date`, the other lists
 
 On a Kaggle CPU notebook ([ADR 0003](adr/0003-load-test-on-kaggle-without-docker.md)): install JDK 21 and PostgreSQL via `apt`, run the JAR, load `loadtest/seed.sql`, run k6.
 
-- Seed: 3 Cinemas × 4 Auditoriums (10 × 12 seats), 20 Movies, 7 days of Showtimes, 2,000 Customers sharing one pre-hashed password.
-- Each k6 VU logs in once in `setup` (BCrypt would otherwise dominate).
+- Seed: 3 Cinemas × 4 Auditoriums (10 × 12 seats), 20 Movies, 7 days of Showtimes starting the day after the seed is loaded, 2,000 Customers sharing one pre-hashed password.
+- Each scenario that needs a token logs in as many Customers as its `maxVUs`, once in `setup` (BCrypt would otherwise dominate).
 - Scenarios: **browse** (showtimes by date → seat map), **book** (hold → pay), **contention** (many VUs on the same seats; afterwards SQL verifies no seat sold twice).
 - `ramping-arrival-rate`; record RPS, p50/p95/p99 latency, error rate into `docs/loadtest-baseline.md`.
 
