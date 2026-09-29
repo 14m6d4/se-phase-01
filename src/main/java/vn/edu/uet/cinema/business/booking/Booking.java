@@ -11,6 +11,11 @@ public record Booking(UUID id, UUID customerId, UUID showtimeId, BookingStatus s
 		seats = List.copyOf(seats);
 	}
 
+	/** The stored status, except that a Pending Booking whose Hold has lapsed at {@code now} is Expired. */
+	public BookingStatus statusAt(Instant now) {
+		return status == BookingStatus.PENDING && !now.isBefore(expiresAt) ? BookingStatus.EXPIRED : status;
+	}
+
 	public long totalPrice() {
 		return seats.stream().mapToLong(BookedSeat::price).reduce(0L, Math::addExact);
 	}

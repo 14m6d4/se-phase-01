@@ -1,6 +1,7 @@
 package vn.edu.uet.cinema.persistence.booking;
 
 import java.time.Instant;
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 import org.hibernate.exception.ConstraintViolationException;
@@ -20,6 +21,18 @@ class JpaBookingRepository implements BookingRepository {
 
 	JpaBookingRepository(BookingEntityRepository jpa) {
 		this.jpa = jpa;
+	}
+
+	@Override
+	@Transactional(readOnly = true)
+	public Optional<Booking> findById(UUID id) {
+		return jpa.findById(id).map(BookingEntity::toBooking);
+	}
+
+	@Override
+	@Transactional(readOnly = true)
+	public List<Booking> findByCustomer(UUID customerId) {
+		return jpa.findByCustomerIdOrderByCreatedAtDesc(customerId).stream().map(BookingEntity::toBooking).toList();
 	}
 
 	@Override
@@ -51,6 +64,18 @@ class JpaBookingRepository implements BookingRepository {
 			// A deadlock between overlapping lapsed-Hold deletes: someone else is taking these Seats right now.
 			throw new ConflictException("Seat already taken");
 		}
+	}
+
+	@Override
+	@Transactional
+	public boolean confirm(UUID id, Instant now) {
+		return jpa.confirm(id, now) == 1;
+	}
+
+	@Override
+	@Transactional
+	public boolean deletePending(UUID id) {
+		return jpa.deletePending(id) == 1;
 	}
 
 	private static boolean hasConstraint(Throwable error, String expected) {

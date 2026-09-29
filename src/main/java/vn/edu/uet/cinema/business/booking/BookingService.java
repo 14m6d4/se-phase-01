@@ -9,6 +9,7 @@ import java.util.UUID;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 import vn.edu.uet.cinema.business.ConflictException;
+import vn.edu.uet.cinema.business.NotFoundException;
 import vn.edu.uet.cinema.business.auditorium.AuditoriumService;
 import vn.edu.uet.cinema.business.auditorium.Seat;
 import vn.edu.uet.cinema.business.showtime.SeatPricing;
@@ -55,5 +56,37 @@ public class BookingService {
 		});
 		return bookings.saveNew(new Booking(UUID.randomUUID(), customerId, showtimeId, BookingStatus.PENDING, now,
 			now.plus(HOLD), booked), now);
+	}
+
+	/** The Customer's own Bookings, newest first. */
+	public List<Booking> list(UUID customerId) {
+		return bookings.findByCustomer(customerId);
+	}
+
+	/** Someone else's Booking is reported as not found. */
+	public Booking get(UUID customerId, UUID id) {
+		return bookings.findById(id).filter(booking -> booking.customerId().equals(customerId))
+			.orElseThrow(() -> new NotFoundException("Booking not found"));
+	}
+
+	/** Simulated payment: always succeeds, so only the Hold decides. */
+	public Booking pay(UUID customerId, UUID id, Instant now) {
+		Booking booking = get(customerId, id);
+		BookingStatus status = booking.statusAt(now);
+		if (status != BookingStatus.PENDING) {
+			throw new ConflictException("Booking is " + status + ", only a Pending Booking can be paid");
+		}
+		if (!bookings.confirm(id, now)) {
+			throw new ConflictException("Booking is no longer Pending");
+		}
+		return new Booking(booking.id(), booking.customerId(), booking.showtimeId(), BookingStatus.CONFIRMED,
+			booking.createdAt(), booking.expiresAt(), booking.seats());
+	}
+
+	public void abandon(UUID customerId, UUID id) {
+		// Checked again by the delete itself, in case it is being paid right now.
+		if (get(customerId, id).status() == BookingStatus.CONFIRMED || !bookings.deletePending(id)) {
+			throw new ConflictException("A Confirmed Booking cannot be abandoned");
+		}
 	}
 }
