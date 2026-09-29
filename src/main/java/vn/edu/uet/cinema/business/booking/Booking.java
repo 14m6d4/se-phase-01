@@ -16,6 +16,10 @@ public record Booking(UUID id, UUID customerId, UUID showtimeId, BookingStatus s
 		return status == BookingStatus.PENDING && !now.isBefore(expiresAt) ? BookingStatus.EXPIRED : status;
 	}
 
+	public Booking confirmed() {
+		return new Booking(id, customerId, showtimeId, BookingStatus.CONFIRMED, createdAt, expiresAt, seats);
+	}
+
 	public long totalPrice() {
 		return seats.stream().mapToLong(BookedSeat::price).reduce(0L, Math::addExact);
 	}

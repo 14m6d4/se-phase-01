@@ -115,6 +115,15 @@ class BookingServiceTest {
 	}
 
 	@Test
+	void onlyTheHoldDecidesSoPaymentAfterTheShowtimeStartedIsAllowed() {
+		Instant afterStart = showtime.startsAt().plusSeconds(60);
+		Booking pending = stored(BookingStatus.PENDING, afterStart.plusSeconds(1));
+		when(repository.confirm(pending.id(), afterStart)).thenReturn(true);
+
+		assertThat(service.pay(customerId, pending.id(), afterStart).status()).isEqualTo(BookingStatus.CONFIRMED);
+	}
+
+	@Test
 	void paymentOfAnExpiredConfirmedOrJustLapsedBookingIsConflict() {
 		Booking expired = stored(BookingStatus.PENDING, NOW);
 		Booking confirmed = stored(BookingStatus.CONFIRMED, NOW.plusSeconds(60));
@@ -139,6 +148,14 @@ class BookingServiceTest {
 		verify(repository).deletePending(pending.id());
 		assertThatThrownBy(() -> service.abandon(customerId, confirmed.id())).isInstanceOf(ConflictException.class);
 		verify(repository, never()).deletePending(confirmed.id());
+	}
+
+	@Test
+	void abandoningABookingThatVanishedMeanwhileIsNotFound() {
+		Booking pending = stored(BookingStatus.PENDING, NOW.plusSeconds(60));
+		when(repository.findById(pending.id())).thenReturn(Optional.of(pending), Optional.empty());
+
+		assertThatThrownBy(() -> service.abandon(customerId, pending.id())).isInstanceOf(NotFoundException.class);
 	}
 
 	private Booking stored(BookingStatus status, Instant expiresAt) {

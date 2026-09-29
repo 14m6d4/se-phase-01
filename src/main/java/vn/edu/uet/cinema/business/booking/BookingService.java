@@ -79,14 +79,16 @@ public class BookingService {
 		if (!bookings.confirm(id, now)) {
 			throw new ConflictException("Booking is no longer Pending");
 		}
-		return new Booking(booking.id(), booking.customerId(), booking.showtimeId(), BookingStatus.CONFIRMED,
-			booking.createdAt(), booking.expiresAt(), booking.seats());
+		return booking.confirmed();
 	}
 
+	/** An Expired Booking can be abandoned too: it is removed like any lapsed Hold. */
 	public void abandon(UUID customerId, UUID id) {
-		// Checked again by the delete itself, in case it is being paid right now.
-		if (get(customerId, id).status() == BookingStatus.CONFIRMED || !bookings.deletePending(id)) {
-			throw new ConflictException("A Confirmed Booking cannot be abandoned");
+		if (get(customerId, id).status() == BookingStatus.PENDING && bookings.deletePending(id)) {
+			return;
 		}
+		// Nothing deleted: it is Confirmed, was paid just now, or is already gone (then this is 404).
+		get(customerId, id);
+		throw new ConflictException("A Confirmed Booking cannot be abandoned");
 	}
 }
