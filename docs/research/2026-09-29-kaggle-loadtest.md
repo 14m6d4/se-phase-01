@@ -5,14 +5,14 @@ Primary sources only; anything not confirmed by one is marked **UNVERIFIED**. Th
 
 ## First Kaggle run (2026-09-29)
 
-Smoke scenario at `feat/7-kaggle-loadtest-harness` (`69ba0fc`), `RATE` 50, `HOLD` 60s. The notebook ran top to bottom and produced `app.log`, `env.txt` and `summary.json`.
+Smoke scenario at `feat/7-kaggle-loadtest-harness` (`69ba0fc`), `RATE` 50, `HOLD` 60s, run with **Save & Run All**. The notebook ran top to bottom without manual steps and produced `app.log`, `env.txt` and `summary.json`.
 
 - **The session runs Ubuntu 22.04 (jammy), not 24.04.** The JDK build is `21.0.12.1+1-1-22.04.4-Ubuntu` and PostgreSQL is `14.24-0ubuntu0.22.04.1`. The registry image read in section 1 is not what Kaggle serves (or no longer is). apt gives **PostgreSQL 14**, not 16. `btree_gist` has been trusted since PostgreSQL 13, so migration V5 still succeeded as the `cinema` role, and the notebook needed no change.
 - **Hardware:** 4 vCPUs, Intel Xeon @ 2.20GHz (family 6, model 79, i.e. Broadwell) under KVM, 2 cores × 2 threads; 31 GiB RAM, no swap.
 - **JVM defaults:** G1, initial heap 480 MiB, max heap 7.5 GiB (a quarter of RAM). Hikari pool 10, PostgreSQL `max_connections` 100.
 - **JDK 21 was present** after the environment cell. Whether it came with the image or from the notebook's `apt` fallback was not recorded.
 - **Background processes survive across cells:** the service started in its cell kept serving k6 in later cells.
-- **Internet worked.** Whether phone verification is required stays **UNVERIFIED** (the account used was already able to enable it).
+- **Internet works in a Save & Run All run** (the clone, Maven and k6 downloads all succeeded). Whether phone verification is required stays **UNVERIFIED** (the account used was already able to enable it).
 - The service started in 15 s. Build time was not recorded.
 - **`dropped_iterations` is absent** from the summary when nothing was dropped, as guessed in section 3.
 - **Excluding setup matters:** over all requests p99 was 326 ms (setup's 100 BCrypt calls), over the `phase:load` requests 7.5 ms.
@@ -72,7 +72,7 @@ All from [Kaggle Notebooks docs, "Technical Specifications"](https://www.kaggle.
 - Internet:
   - The docs say to make sure "Internet" is enabled in the Settings pane before `!pip install`. Internet is one of the notebook's "Session options" (same page).
   - Phone verification before internet can be enabled is **UNVERIFIED** in the docs; only forum and support threads state it (e.g. [kaggle.com/general/331276](https://www.kaggle.com/general/331276)).
-  - That a "Save & Run All" run keeps the notebook's internet setting follows from internet being a notebook setting, but no explicit sentence says so (**UNVERIFIED**).
+  - That a "Save & Run All" run keeps the notebook's internet setting follows from internet being a notebook setting, but no explicit sentence says so; the first Kaggle run confirmed it.
 - Shell commands run with a `!` prefix in a cell (same page).
 - Background processes across cells: the Kaggle docs say nothing about them (**UNVERIFIED**). In practice, a child of the Jupyter kernel keeps running until the kernel or session ends. Use `start_new_session=True` and log to a file under `/kaggle/working` so the logs are saved with the version.
 
