@@ -37,3 +37,6 @@ build/
 
 ### Claude Code (personal settings) ###
 .claude/settings.local.json
+
+### Load test output ###
+loadtest/results/
