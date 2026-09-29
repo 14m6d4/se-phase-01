@@ -1,21 +1,37 @@
 # Research: running the k6 baseline on a Kaggle CPU notebook (issue #7)
 
 Date: 2026-09-29. Context: [ADR 0003](../adr/0003-load-test-on-kaggle-without-docker.md), `docs/spec.md` "Load test (baseline)".
-Primary sources only; anything not confirmed by one is marked **UNVERIFIED**.
+Primary sources only; anything not confirmed by one is marked **UNVERIFIED**. The section "First Kaggle run" records what a real session showed and overrides the rest where they disagree.
+
+## First Kaggle run (2026-09-29)
+
+Smoke scenario at `feat/7-kaggle-loadtest-harness` (`69ba0fc`), `RATE` 50, `HOLD` 60s. The notebook ran top to bottom and produced `app.log`, `env.txt` and `summary.json`.
+
+- **The session runs Ubuntu 22.04 (jammy), not 24.04.** The JDK build is `21.0.12.1+1-1-22.04.4-Ubuntu` and PostgreSQL is `14.24-0ubuntu0.22.04.1`. The registry image read in section 1 is not what Kaggle serves (or no longer is). apt gives **PostgreSQL 14**, not 16. `btree_gist` has been trusted since PostgreSQL 13, so migration V5 still succeeded as the `cinema` role, and the notebook needed no change.
+- **Hardware:** 4 vCPUs, Intel Xeon @ 2.20GHz (family 6, model 79, i.e. Broadwell) under KVM, 2 cores × 2 threads; 31 GiB RAM, no swap.
+- **JVM defaults:** G1, initial heap 480 MiB, max heap 7.5 GiB (a quarter of RAM). Hikari pool 10, PostgreSQL `max_connections` 100.
+- **JDK 21 was present** after the environment cell. Whether it came with the image or from the notebook's `apt` fallback was not recorded.
+- **Background processes survive across cells:** the service started in its cell kept serving k6 in later cells.
+- **Internet worked.** Whether phone verification is required stays **UNVERIFIED** (the account used was already able to enable it).
+- The service started in 15 s. Build time was not recorded.
+- **`dropped_iterations` is absent** from the summary when nothing was dropped, as guessed in section 3.
+- **Excluding setup matters:** over all requests p99 was 326 ms (setup's 100 BCrypt calls), over the `phase:load` requests 7.5 ms.
+- **`handleSummary` receives `setup_data`**, so the first `summary.json` contained the 50 Customers' JWTs. The summary module now drops it.
+- **Numbers** (load requests only): 3,999 requests, 0 % errors, p50 2.92 ms, p95 5.67 ms, p99 7.48 ms. RPS 38.0 averaged over the 105 s run (ramps and setup included; 50/s during the hold).
 
 ## Conclusions for the notebook
 
-- The image is **Ubuntu 24.04 (noble)** and runs as **root**, so no `sudo` is needed (`sudo` is installed anyway).
+- The image is **Ubuntu 24.04 (noble)** according to its registry config, but a real session runs **22.04** (see "First Kaggle run"). It runs as **root**, so no `sudo` is needed (`sudo` is installed anyway).
 - **JDK 21 is already installed** (`openjdk-21-jdk-headless`, put there by the Colab base image). Run `java -version` first and only `apt-get install -y openjdk-21-jdk-headless` if it is missing.
-- `apt-get install -y postgresql` gives **PostgreSQL 16**. `btree_gist` ships inside `postgresql-16` and is a **trusted** extension. The app user can therefore run `CREATE EXTENSION btree_gist` in V5 as long as it has `CREATE` on the database. Simplest setup: make the `cinema` role the database owner.
-- There is no systemd, and the base image has `/usr/sbin/policy-rc.d`, so apt will not start Postgres. Start it yourself with `service postgresql start` or `pg_ctlcluster 16 main start`. The package creates the `main` cluster on port 5432 when it installs.
+- `apt-get install -y postgresql` gives **PostgreSQL 16** on noble; a real session got **14** (see "First Kaggle run"). `btree_gist` ships inside the server package and is a **trusted** extension. The app user can therefore run `CREATE EXTENSION btree_gist` in V5 as long as it has `CREATE` on the database. Simplest setup: make the `cinema` role the database owner.
+- There is no systemd, and the base image has `/usr/sbin/policy-rc.d`, so apt will not start Postgres. Start it yourself with `service postgresql start` (or `pg_ctlcluster <version> main start`). The package creates the `main` cluster on port 5432 when it installs.
 - Create the role and database with `su postgres -c "psql ..."`: `CREATE ROLE cinema LOGIN PASSWORD '...'; CREATE DATABASE cinema OWNER cinema;`. The app connects over TCP to `localhost:5432/cinema` as user `cinema` (defaults in `application.yml`).
 - **Internet must be ON** in the notebook settings, because `mvnw`, Maven Central and the k6 tarball all need the network. Enabling internet requires phone verification. That rule comes from Kaggle forum/support pages, not from the docs, so it is UNVERIFIED.
 - Build with `./mvnw -B -Dmaven.test.skip=true package`, not `-DskipTests`. `-DskipTests` still compiles the test sources, which means downloading Testcontainers and the other test dependencies. The wrapper type is `only-script`, which needs `curl`/`wget` and `unzip`.
 - k6 has **v2.3.0 (2026-09-21)** as its latest release. Install it with `curl -sL https://github.com/grafana/k6/releases/download/v2.3.0/k6-v2.3.0-linux-amd64.tar.gz | tar xz` and pin the version, because k6 v2 removed some flags.
 - Use `handleSummary(data)` to write the JSON, and set `summaryTrendStats: ['avg','min','med','max','p(90)','p(95)','p(99)']`. Without that setting there is no p(99). k6 discourages `--summary-export`, and its format differs from `handleSummary` data (details in section 3).
 - Hardware: 4 CPU cores and 30 GB RAM. A session can run for 12 h, but the interactive editor stops after 20 min idle. `/kaggle/working` holds 20 GB and is saved. For an unattended run, use "Save & Run All". Record `nproc` and `free -h` anyway, because Kaggle says the CPU platform varies.
-- Start the JAR with `subprocess.Popen(..., start_new_session=True)`, send its output to a log file, and poll `/actuator/health` from the same or a later cell. The docs do not say whether a process started this way survives across cells (UNVERIFIED, but it lives as long as the kernel container does).
+- Start the JAR with `subprocess.Popen(..., start_new_session=True)`, send its output to a log file, and poll `/actuator/health` from the same or a later cell. The docs do not say whether a process started this way survives across cells; the first Kaggle run showed that it does.
 
 ## 1. Notebook image, OS, Java, PostgreSQL
 
@@ -27,7 +43,7 @@ Primary sources only; anything not confirmed by one is marked **UNVERIFIED**.
   - Its build history runs `apt-get install --no-install-recommends openjdk-21-jdk-headless` and also installs `sudo`.
   - It adds these apt repos: graphics-drivers PPA, deadsnakes PPA, CRAN, and r2u. It does **not** add the PostgreSQL PGDG repo, so `postgresql` comes from Ubuntu.
   - The Kaggle Dockerfile adds nothing Java-related and removes nothing Java-related.
-  - The raw config and os-release were read directly, so they are a primary artifact. Whether the JDK is still present inside a running Kaggle session is **UNVERIFIED**; check with `java -version`.
+  - The raw config and os-release were read directly, so they are a primary artifact. A real session nevertheless runs Ubuntu 22.04 (see "First Kaggle run"), so treat this section as describing the published image, not the session.
 - On Ubuntu noble:
   - [openjdk-21-jdk-headless](https://packages.ubuntu.com/noble-updates/openjdk-21-jdk-headless) is available at version 21.0.12.1+1-1~24.04.4.
   - [postgresql](https://packages.ubuntu.com/noble-updates/postgresql) 16+257build1.1 depends on [postgresql-16](https://packages.ubuntu.com/noble-updates/postgresql-16), version 16.15-0ubuntu0.24.04.1.
