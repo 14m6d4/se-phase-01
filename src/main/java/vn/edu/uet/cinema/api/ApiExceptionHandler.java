@@ -8,6 +8,7 @@ import vn.edu.uet.cinema.business.ConflictException;
 import vn.edu.uet.cinema.business.NotFoundException;
 import vn.edu.uet.cinema.business.account.InvalidCredentialsException;
 import vn.edu.uet.cinema.business.auditorium.InvalidSeatLayoutException;
+import vn.edu.uet.cinema.business.booking.InvalidBookingException;
 import vn.edu.uet.cinema.business.showtime.InvalidShowtimeException;
 
 /**
@@ -34,6 +35,11 @@ class ApiExceptionHandler {
 
 	@ExceptionHandler
 	ProblemDetail invalidShowtime(InvalidShowtimeException e) {
+		return ProblemDetail.forStatusAndDetail(HttpStatus.BAD_REQUEST, e.getMessage());
+	}
+
+	@ExceptionHandler
+	ProblemDetail invalidBooking(InvalidBookingException e) {
 		return ProblemDetail.forStatusAndDetail(HttpStatus.BAD_REQUEST, e.getMessage());
 	}
 

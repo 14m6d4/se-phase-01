@@ -58,8 +58,18 @@ class JpaShowtimeRepository implements ShowtimeRepository {
 	}
 
 	@Override
+	@Transactional
 	public void deleteById(UUID id) {
-		jpa.deleteById(id);
+		try {
+			jpa.deleteLapsedHolds(id, Instant.now());
+			jpa.deleteById(id);
+			jpa.flush();
+		} catch (DataIntegrityViolationException e) {
+			if (hasConstraint(e, "fk_booking_showtime")) {
+				throw new ConflictException("Showtime has Bookings");
+			}
+			throw e;
+		}
 	}
 
 	@Override
