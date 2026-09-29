@@ -63,6 +63,45 @@ class BookingApiTest {
 			.andExpect(jsonPath("$[*].status").value(contains("HELD", "AVAILABLE", "HELD", "AVAILABLE")));
 	}
 
+	@Test
+	void takenSeatIsConflictAndInvalidSeatSetIsBadRequest() throws Exception {
+		Auditorium hall = auditorium();
+		UUID showtimeId = showtime(hall);
+		UUID seatId = hall.seats().get(0).id();
+		mvc.perform(post("/api/bookings").header("Authorization", "Bearer " + customer())
+				.contentType(MediaType.APPLICATION_JSON).content(bookingJson(showtimeId, seatId)))
+			.andExpect(status().isCreated());
+
+		String other = customer();
+		mvc.perform(post("/api/bookings").header("Authorization", "Bearer " + other)
+				.contentType(MediaType.APPLICATION_JSON).content(bookingJson(showtimeId, seatId)))
+			.andExpect(status().isConflict())
+			.andExpect(content().contentType(MediaType.APPLICATION_PROBLEM_JSON))
+			.andExpect(jsonPath("$.detail").value(containsString("Seat")));
+		for (String body : List.of(bookingJson(showtimeId), bookingJson(showtimeId, seatId, seatId),
+			bookingJson(showtimeId, UUID.randomUUID()), "{\"showtimeId\":\"%s\"}".formatted(showtimeId))) {
+			mvc.perform(post("/api/bookings").header("Authorization", "Bearer " + other)
+					.contentType(MediaType.APPLICATION_JSON).content(body))
+				.andExpect(status().isBadRequest())
+				.andExpect(content().contentType(MediaType.APPLICATION_PROBLEM_JSON));
+		}
+	}
+
+	@Test
+	void bookingIsForCustomersOnlyAndMarkedProtectedInOpenApi() throws Exception {
+		String admin = JsonPath.read(mvc.perform(post("/api/auth/login").contentType(MediaType.APPLICATION_JSON)
+				.content("{\"email\":\"admin@cinema.local\",\"password\":\"admin12345\"}"))
+			.andReturn().getResponse().getContentAsString(), "$.accessToken");
+		String body = bookingJson(UUID.randomUUID(), UUID.randomUUID());
+		mvc.perform(post("/api/bookings").contentType(MediaType.APPLICATION_JSON).content(body))
+			.andExpect(status().isUnauthorized());
+		mvc.perform(post("/api/bookings").header("Authorization", "Bearer " + admin)
+				.contentType(MediaType.APPLICATION_JSON).content(body))
+			.andExpect(status().isForbidden());
+		mvc.perform(get("/v3/api-docs")).andExpect(status().isOk())
+			.andExpect(jsonPath("$.paths['/api/bookings'].post.security[0].bearerAuth").exists());
+	}
+
 	private Auditorium auditorium() {
 		UUID cinemaId = cinemas.create("Cinema " + UUID.randomUUID(), "Address").id();
 		return auditoriums.create(cinemaId, "Hall", 2, 2, List.of("B"), List.of());
