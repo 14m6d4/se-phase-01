@@ -4,6 +4,7 @@ import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
@@ -22,6 +23,13 @@ interface ShowtimeEntityRepository extends JpaRepository<ShowtimeEntity, UUID> {
 		where s.auditoriumId = :auditoriumId and s.startsAt < :endsAt and s.endsAt > :startsAt
 		""")
 	boolean existsOverlapping(UUID auditoriumId, Instant startsAt, Instant endsAt);
+
+	/** ADR 0004: lapsed Holds never block deleting their Showtime. booked_seat rows go by ON DELETE CASCADE. */
+	@Modifying
+	@Query(nativeQuery = true, value = """
+		delete from booking where showtime_id = :showtimeId and status = 'PENDING' and expires_at <= now()
+		""")
+	void deleteLapsedHolds(UUID showtimeId);
 
 	boolean existsByMovieId(UUID movieId);
 

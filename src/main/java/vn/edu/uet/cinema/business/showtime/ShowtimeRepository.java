@@ -11,6 +11,11 @@ public interface ShowtimeRepository {
 
 	Optional<Showtime> findById(UUID id);
 
+	/**
+	 * Lapsed Holds are deleted along with the Showtime.
+	 *
+	 * @throws vn.edu.uet.cinema.business.ConflictException if it has a Confirmed or live Pending Booking
+	 */
 	void deleteById(UUID id);
 
 	List<Showtime> findByStartsAtBetween(Instant fromInclusive, Instant toExclusive, UUID cinemaId, UUID movieId);

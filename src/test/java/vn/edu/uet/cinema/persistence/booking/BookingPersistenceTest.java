@@ -21,6 +21,7 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.context.annotation.Import;
 import vn.edu.uet.cinema.TestcontainersConfiguration;
 import vn.edu.uet.cinema.business.ConflictException;
+import vn.edu.uet.cinema.business.NotFoundException;
 import vn.edu.uet.cinema.business.account.AccountService;
 import vn.edu.uet.cinema.business.auditorium.Auditorium;
 import vn.edu.uet.cinema.business.auditorium.AuditoriumService;
@@ -129,6 +130,22 @@ class BookingPersistenceTest {
 
 		assertThat(occupancy.statuses(showtimeId, now))
 			.containsOnly(Map.entry(held, SeatStatus.HELD), Map.entry(sold, SeatStatus.SOLD));
+	}
+
+	@Test
+	void showtimeWithLiveHoldCannotBeDeletedButLapsedHoldsGoWithIt() {
+		Auditorium hall = auditorium();
+		UUID showtimeId = showtime(hall);
+		bookings.book(customer(), showtimeId, List.of(hall.seats().get(0).id()), now.minus(11, ChronoUnit.MINUTES));
+		bookings.book(customer(), showtimeId, List.of(hall.seats().get(1).id()), now);
+
+		assertThatThrownBy(() -> showtimes.delete(showtimeId)).isInstanceOf(ConflictException.class);
+
+		Auditorium otherHall = auditorium();
+		UUID lapsedOnlyId = showtime(otherHall);
+		bookings.book(customer(), lapsedOnlyId, List.of(otherHall.seats().get(0).id()), now.minus(11, ChronoUnit.MINUTES));
+		showtimes.delete(lapsedOnlyId);
+		assertThatThrownBy(() -> showtimes.get(lapsedOnlyId)).isInstanceOf(NotFoundException.class);
 	}
 
 	private UUID customer() {
