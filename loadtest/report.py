@@ -10,7 +10,7 @@ MAX_ERROR_RATE = 0.01
 MAX_P95_MS = 500
 
 
-def LOAD(name):
+def load_metric(name):
     """The sub-metric of requests tagged phase:load (see k6/lib/summary.js); setup's logins are excluded."""
     return f"{name}{{phase:load}}"
 
@@ -19,36 +19,32 @@ def metric(data, name, stat):
     return data["metrics"].get(name, {}).get("values", {}).get(stat)
 
 
-def fmt(value, unit=""):
-    return "n/a" if value is None else f"{value:,.2f}{unit}"
-
-
-def fmt_count(value):
-    return "n/a" if value is None else f"{value:,.0f}"
+def fmt(value, spec=",.2f", unit=""):
+    return "n/a" if value is None else f"{value:{spec}}{unit}"
 
 
 def main(path):
     with open(path) as f:
         data = json.load(f)
 
-    rps = metric(data, LOAD("http_reqs"), "rate")
-    p50 = metric(data, LOAD("http_req_duration"), "med")
-    p95 = metric(data, LOAD("http_req_duration"), "p(95)")
-    p99 = metric(data, LOAD("http_req_duration"), "p(99)")
-    error_rate = metric(data, LOAD("http_req_failed"), "rate")
-    requests = metric(data, LOAD("http_reqs"), "count")
+    rps = metric(data, load_metric("http_reqs"), "rate")
+    p50 = metric(data, load_metric("http_req_duration"), "med")
+    p95 = metric(data, load_metric("http_req_duration"), "p(95)")
+    p99 = metric(data, load_metric("http_req_duration"), "p(99)")
+    error_rate = metric(data, load_metric("http_req_failed"), "rate")
+    requests = metric(data, load_metric("http_reqs"), "count")
     # Only present when k6 ran out of VUs for the target rate.
     dropped = metric(data, "dropped_iterations", "count") or 0
 
     rows = [
-        ("Requests", fmt_count(requests)),
+        ("Requests", fmt(requests, ",.0f")),
         # Averaged over the whole run, ramps and setup included, so below the target rate.
         ("RPS (run average)", fmt(rps)),
-        ("p50", fmt(p50, " ms")),
-        ("p95", fmt(p95, " ms")),
-        ("p99", fmt(p99, " ms")),
-        ("Error rate", "n/a" if error_rate is None else f"{error_rate:.2%}"),
-        ("Dropped iterations", fmt_count(dropped)),
+        ("p50", fmt(p50, unit=" ms")),
+        ("p95", fmt(p95, unit=" ms")),
+        ("p99", fmt(p99, unit=" ms")),
+        ("Error rate", fmt(error_rate, ".2%")),
+        ("Dropped iterations", fmt(dropped, ",.0f")),
     ]
     width = max(len(label) for label, _ in rows)
     for label, value in rows:
