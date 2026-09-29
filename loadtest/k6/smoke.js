@@ -9,11 +9,29 @@ const BASE_URL = __ENV.BASE_URL || 'http://localhost:8080';
 const CUSTOMERS = 50;
 const PASSWORD = 'smoke-password';
 const JSON_HEADERS = { headers: { 'Content-Type': 'application/json' } };
+// Target requests per second and how long to hold it; the notebook passes them with -e.
+const RATE = Number(__ENV.RATE || 50);
+const HOLD = __ENV.HOLD || '60s';
 
 export const options = {
 	...summaryOptions,
 	// Registering and logging in pays BCrypt once per Customer.
 	setupTimeout: '120s',
+	scenarios: {
+		me: {
+			// Arrival rate: throughput is set by the target, not by how fast responses come back.
+			executor: 'ramping-arrival-rate',
+			startRate: 0,
+			timeUnit: '1s',
+			preAllocatedVUs: 50,
+			maxVUs: 200,
+			stages: [
+				{ duration: '30s', target: RATE },
+				{ duration: HOLD, target: RATE },
+				{ duration: '10s', target: 0 },
+			],
+		},
+	},
 };
 
 // Registers the smoke Customers (existing ones are kept, so re-runs work) and logs each in once,
