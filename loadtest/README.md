@@ -45,7 +45,7 @@ The first cell stops with an explanation if internet is off or the secret is mis
 ### Reading the numbers
 
 - Only requests tagged `phase:load` are reported. Setup's registrations and logins (BCrypt, and `409` on re-runs) are excluded.
-- **RPS** is averaged over the whole run, ramps included, so it is below `RATE`.
+- **RPS** is averaged over the whole run, ramps and setup included, so it is below `RATE`.
 - **Dropped iterations > 0** means k6 ran out of VUs (`maxVUs`) and did not reach the target rate.
 - The service and k6 share the same ~4 vCPUs, so compare runs only with the same hardware in `env.txt`.
 - The smoke thresholds (error rate < 1 %, p95 < 500 ms) are printed as PASS/FAIL and never stop the notebook.
