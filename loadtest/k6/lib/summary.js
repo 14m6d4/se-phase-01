@@ -21,6 +21,8 @@ export const summaryOptions = {
 };
 
 export function handleSummary(data) {
+	// setup's return value (the Customers' tokens) has no place in a shared results file.
+	delete data.setup_data;
 	return {
 		stdout: textSummary(data, { indent: ' ', enableColors: false }),
 		[`${RESULTS_DIR}/summary.json`]: JSON.stringify(data, null, 2),
