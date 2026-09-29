@@ -12,6 +12,7 @@ import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.stream.Stream;
 import org.junit.jupiter.api.Test;
 import vn.edu.uet.cinema.business.ConflictException;
 import vn.edu.uet.cinema.business.auditorium.Auditorium;
@@ -53,7 +54,7 @@ class BookingServiceTest {
 
 	@Test
 	void seatsMustBeOneToEightDistinctSeatsOfTheShowtimesAuditorium() {
-		List<UUID> nine = java.util.stream.Stream.generate(UUID::randomUUID).limit(9).toList();
+		List<UUID> nine = Stream.generate(UUID::randomUUID).limit(9).toList();
 		for (List<UUID> seatIds : List.of(List.<UUID>of(), nine, List.of(standard.id(), standard.id()),
 			List.of(standard.id(), UUID.randomUUID()))) {
 			assertThatThrownBy(() -> service.book(customerId, showtime.id(), seatIds, NOW))

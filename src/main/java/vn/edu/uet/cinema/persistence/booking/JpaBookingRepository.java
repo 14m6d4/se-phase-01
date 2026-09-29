@@ -5,6 +5,7 @@ import java.util.Optional;
 import java.util.UUID;
 import org.hibernate.exception.ConstraintViolationException;
 import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.dao.PessimisticLockingFailureException;
 import org.springframework.stereotype.Repository;
 import org.springframework.transaction.annotation.Transactional;
 import vn.edu.uet.cinema.business.ConflictException;
@@ -46,6 +47,9 @@ class JpaBookingRepository implements BookingRepository {
 				throw new ConflictException("Showtime no longer exists");
 			}
 			throw e;
+		} catch (PessimisticLockingFailureException e) {
+			// A deadlock between overlapping lapsed-Hold deletes: someone else is taking these Seats right now.
+			throw new ConflictException("Seat already taken");
 		}
 	}
 

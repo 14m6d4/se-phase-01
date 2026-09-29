@@ -61,7 +61,7 @@ class JpaShowtimeRepository implements ShowtimeRepository {
 	@Transactional
 	public void deleteById(UUID id) {
 		try {
-			jpa.deleteLapsedHolds(id);
+			jpa.deleteLapsedHolds(id, Instant.now());
 			jpa.deleteById(id);
 			jpa.flush();
 		} catch (DataIntegrityViolationException e) {

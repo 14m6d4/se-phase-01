@@ -27,9 +27,9 @@ interface ShowtimeEntityRepository extends JpaRepository<ShowtimeEntity, UUID> {
 	/** ADR 0004: lapsed Holds never block deleting their Showtime. booked_seat rows go by ON DELETE CASCADE. */
 	@Modifying
 	@Query(nativeQuery = true, value = """
-		delete from booking where showtime_id = :showtimeId and status = 'PENDING' and expires_at <= now()
+		delete from booking where showtime_id = :showtimeId and status = 'PENDING' and expires_at <= :now
 		""")
-	void deleteLapsedHolds(UUID showtimeId);
+	void deleteLapsedHolds(UUID showtimeId, Instant now);
 
 	boolean existsByMovieId(UUID movieId);
 

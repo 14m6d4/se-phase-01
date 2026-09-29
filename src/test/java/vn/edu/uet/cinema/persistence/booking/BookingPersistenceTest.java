@@ -53,21 +53,26 @@ class BookingPersistenceTest {
 	private final Instant now = Instant.now();
 
 	@Test
-	void concurrentBookingsOfTheSameSeatHaveExactlyOneWinner() throws Exception {
+	void concurrentBookingsOfTheSameSeatsInAnyOrderHaveExactlyOneWinnerAndNoOtherError() throws Exception {
 		int threads = 10;
 		Auditorium hall = auditorium();
 		UUID showtimeId = showtime(hall);
-		UUID seatId = hall.seats().get(0).id();
-		List<UUID> customers = IntStream.range(0, threads).mapToObj(i -> customer()).toList();
+		UUID a = hall.seats().get(0).id();
+		UUID b = hall.seats().get(1).id();
 		CountDownLatch start = new CountDownLatch(1);
-		List<Callable<Boolean>> attempts = customers.stream().<Callable<Boolean>>map(customerId -> () -> {
-			start.await();
-			try {
-				bookings.book(customerId, showtimeId, List.of(seatId), Instant.now());
-				return true;
-			} catch (ConflictException seatTaken) {
-				return false;
-			}
+		// Half ask for [a, b], half for [b, a]: opposite lock orders must not surface as a deadlock error.
+		List<Callable<Boolean>> attempts = IntStream.range(0, threads).<Callable<Boolean>>mapToObj(i -> {
+			UUID customerId = customer();
+			List<UUID> seatIds = i % 2 == 0 ? List.of(a, b) : List.of(b, a);
+			return () -> {
+				start.await();
+				try {
+					bookings.book(customerId, showtimeId, seatIds, Instant.now());
+					return true;
+				} catch (ConflictException seatTaken) {
+					return false;
+				}
+			};
 		}).toList();
 
 		ExecutorService pool = Executors.newFixedThreadPool(threads);
@@ -82,7 +87,8 @@ class BookingPersistenceTest {
 		} finally {
 			pool.shutdownNow();
 		}
-		assertThat(occupancy.statuses(showtimeId, Instant.now())).containsExactly(Map.entry(seatId, SeatStatus.HELD));
+		assertThat(occupancy.statuses(showtimeId, Instant.now()))
+			.containsOnly(Map.entry(a, SeatStatus.HELD), Map.entry(b, SeatStatus.HELD));
 	}
 
 	@Test

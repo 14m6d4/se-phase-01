@@ -13,6 +13,7 @@ import jakarta.persistence.Table;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
 import java.util.UUID;
 import vn.edu.uet.cinema.business.booking.BookedSeat;
@@ -51,7 +52,8 @@ class BookingEntity {
 		// timestamptz keeps microseconds; truncate so the saved Booking equals the one read back later.
 		entity.createdAt = booking.createdAt().truncatedTo(ChronoUnit.MICROS);
 		entity.expiresAt = booking.expiresAt().truncatedTo(ChronoUnit.MICROS);
-		entity.seats = booking.seats().stream()
+		// Inserted in seatId order, so overlapping Bookings take seat locks in the same order and don't deadlock.
+		entity.seats = booking.seats().stream().sorted(Comparator.comparing(BookedSeat::seatId))
 			.map(seat -> new BookedSeatEmbeddable(booking.showtimeId(), seat.seatId(), seat.price()))
 			.collect(ArrayList::new, List::add, List::addAll);
 		return entity;

@@ -12,6 +12,7 @@ import com.jayway.jsonpath.JsonPath;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.temporal.ChronoUnit;
+import java.util.Arrays;
 import java.util.List;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
@@ -54,8 +55,8 @@ class BookingApiTest {
 			.andExpect(jsonPath("$.showtimeId").value(showtimeId.toString()))
 			.andExpect(jsonPath("$.status").value("PENDING"))
 			.andExpect(jsonPath("$.expiresAt").exists())
-			.andExpect(jsonPath("$.seats[*].seatId").value(contains(a1.id().toString(), b1.id().toString())))
-			.andExpect(jsonPath("$.seats[*].price").value(contains(100_000, 120_000)))
+			.andExpect(jsonPath("$.seats[?(@.seatId == '%s')].price", a1.id()).value(contains(100_000)))
+			.andExpect(jsonPath("$.seats[?(@.seatId == '%s')].price", b1.id()).value(contains(120_000)))
 			.andExpect(jsonPath("$.totalPrice").value(220_000));
 
 		mvc.perform(get("/api/showtimes/" + showtimeId + "/seats"))
@@ -125,7 +126,7 @@ class BookingApiTest {
 	}
 
 	private static String bookingJson(UUID showtimeId, UUID... seatIds) {
-		String seats = String.join(",", java.util.Arrays.stream(seatIds).map(id -> "\"" + id + "\"").toList());
+		String seats = String.join(",", Arrays.stream(seatIds).map(id -> "\"" + id + "\"").toList());
 		return "{\"showtimeId\":\"%s\",\"seatIds\":[%s]}".formatted(showtimeId, seats);
 	}
 }
