@@ -2,6 +2,7 @@ package vn.edu.uet.cinema.api.booking;
 
 import static org.hamcrest.Matchers.contains;
 import static org.hamcrest.Matchers.containsString;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
@@ -26,6 +27,7 @@ import vn.edu.uet.cinema.TestcontainersConfiguration;
 import vn.edu.uet.cinema.business.auditorium.Auditorium;
 import vn.edu.uet.cinema.business.auditorium.AuditoriumService;
 import vn.edu.uet.cinema.business.auditorium.Seat;
+import vn.edu.uet.cinema.business.booking.BookingService;
 import vn.edu.uet.cinema.business.cinema.CinemaService;
 import vn.edu.uet.cinema.business.movie.AgeRating;
 import vn.edu.uet.cinema.business.movie.MovieService;
@@ -41,6 +43,7 @@ class BookingApiTest {
 	@Autowired CinemaService cinemas;
 	@Autowired AuditoriumService auditoriums;
 	@Autowired ShowtimeService showtimes;
+	@Autowired BookingService bookings;
 
 	@Test
 	void customerHoldsSeatsAndSeatMapShowsThemHeld() throws Exception {
@@ -89,6 +92,88 @@ class BookingApiTest {
 	}
 
 	@Test
+	void customerPaysForAHoldAndThenItIsFinal() throws Exception {
+		Auditorium hall = auditorium();
+		UUID showtimeId = showtime(hall);
+		UUID seatId = hall.seats().get(0).id();
+		String token = customer();
+		String id = hold(token, showtimeId, seatId);
+
+		mvc.perform(get("/api/bookings/" + id).header("Authorization", "Bearer " + token))
+			.andExpect(status().isOk())
+			.andExpect(jsonPath("$.status").value("PENDING"))
+			.andExpect(jsonPath("$.totalPrice").value(100_000));
+		mvc.perform(post("/api/bookings/" + id + "/payment").header("Authorization", "Bearer " + token))
+			.andExpect(status().isOk())
+			.andExpect(jsonPath("$.id").value(id))
+			.andExpect(jsonPath("$.status").value("CONFIRMED"));
+
+		mvc.perform(post("/api/bookings/" + id + "/payment").header("Authorization", "Bearer " + token))
+			.andExpect(status().isConflict())
+			.andExpect(content().contentType(MediaType.APPLICATION_PROBLEM_JSON));
+		mvc.perform(delete("/api/bookings/" + id).header("Authorization", "Bearer " + token))
+			.andExpect(status().isConflict())
+			.andExpect(content().contentType(MediaType.APPLICATION_PROBLEM_JSON));
+		mvc.perform(get("/api/showtimes/" + showtimeId + "/seats"))
+			.andExpect(jsonPath("$[0].status").value("SOLD"));
+		mvc.perform(get("/api/bookings").header("Authorization", "Bearer " + token))
+			.andExpect(status().isOk())
+			.andExpect(jsonPath("$[*].id").value(contains(id)))
+			.andExpect(jsonPath("$[0].status").value("CONFIRMED"));
+	}
+
+	@Test
+	void abandonedHoldIsGoneAndItsSeatsAreFree() throws Exception {
+		Auditorium hall = auditorium();
+		UUID showtimeId = showtime(hall);
+		String token = customer();
+		String id = hold(token, showtimeId, hall.seats().get(0).id());
+
+		mvc.perform(delete("/api/bookings/" + id).header("Authorization", "Bearer " + token))
+			.andExpect(status().isNoContent());
+
+		mvc.perform(get("/api/bookings/" + id).header("Authorization", "Bearer " + token))
+			.andExpect(status().isNotFound());
+		mvc.perform(get("/api/showtimes/" + showtimeId + "/seats"))
+			.andExpect(jsonPath("$[0].status").value("AVAILABLE"));
+	}
+
+	@Test
+	void lapsedHoldIsShownExpiredAndCannotBePaid() throws Exception {
+		Auditorium hall = auditorium();
+		UUID showtimeId = showtime(hall);
+		String token = customer();
+		UUID customerId = UUID.fromString(JsonPath.read(mvc.perform(get("/api/me")
+			.header("Authorization", "Bearer " + token)).andReturn().getResponse().getContentAsString(), "$.id"));
+		UUID id = bookings.book(customerId, showtimeId, List.of(hall.seats().get(0).id()),
+			Instant.now().minus(11, ChronoUnit.MINUTES)).id();
+
+		mvc.perform(get("/api/bookings").header("Authorization", "Bearer " + token))
+			.andExpect(jsonPath("$[0].status").value("EXPIRED"));
+		mvc.perform(post("/api/bookings/" + id + "/payment").header("Authorization", "Bearer " + token))
+			.andExpect(status().isConflict())
+			.andExpect(jsonPath("$.detail").value(containsString("EXPIRED")));
+	}
+
+	@Test
+	void someoneElsesBookingIsNotFound() throws Exception {
+		Auditorium hall = auditorium();
+		String id = hold(customer(), showtime(hall), hall.seats().get(0).id());
+		String other = customer();
+
+		mvc.perform(get("/api/bookings/" + id).header("Authorization", "Bearer " + other))
+			.andExpect(status().isNotFound())
+			.andExpect(content().contentType(MediaType.APPLICATION_PROBLEM_JSON));
+		mvc.perform(post("/api/bookings/" + id + "/payment").header("Authorization", "Bearer " + other))
+			.andExpect(status().isNotFound());
+		mvc.perform(delete("/api/bookings/" + id).header("Authorization", "Bearer " + other))
+			.andExpect(status().isNotFound());
+		mvc.perform(get("/api/bookings").header("Authorization", "Bearer " + other))
+			.andExpect(status().isOk())
+			.andExpect(jsonPath("$").isEmpty());
+	}
+
+	@Test
 	void bookingIsForCustomersOnlyAndMarkedProtectedInOpenApi() throws Exception {
 		String admin = JsonPath.read(mvc.perform(post("/api/auth/login").contentType(MediaType.APPLICATION_JSON)
 				.content("{\"email\":\"admin@cinema.local\",\"password\":\"admin12345\"}"))
@@ -99,8 +184,15 @@ class BookingApiTest {
 		mvc.perform(post("/api/bookings").header("Authorization", "Bearer " + admin)
 				.contentType(MediaType.APPLICATION_JSON).content(body))
 			.andExpect(status().isForbidden());
+		mvc.perform(get("/api/bookings")).andExpect(status().isUnauthorized());
+		mvc.perform(get("/api/bookings").header("Authorization", "Bearer " + admin))
+			.andExpect(status().isForbidden());
 		mvc.perform(get("/v3/api-docs")).andExpect(status().isOk())
-			.andExpect(jsonPath("$.paths['/api/bookings'].post.security[0].bearerAuth").exists());
+			.andExpect(jsonPath("$.paths['/api/bookings'].post.security[0].bearerAuth").exists())
+			.andExpect(jsonPath("$.paths['/api/bookings'].get.security[0].bearerAuth").exists())
+			.andExpect(jsonPath("$.paths['/api/bookings/{id}'].get.security[0].bearerAuth").exists())
+			.andExpect(jsonPath("$.paths['/api/bookings/{id}'].delete.security[0].bearerAuth").exists())
+			.andExpect(jsonPath("$.paths['/api/bookings/{id}/payment'].post.security[0].bearerAuth").exists());
 	}
 
 	private Auditorium auditorium() {
@@ -112,6 +204,12 @@ class BookingApiTest {
 		UUID movieId = movies.create("Film", "Synopsis", 90, "Drama", AgeRating.P, LocalDate.parse("2026-09-01"),
 			"poster").id();
 		return showtimes.create(movieId, hall.id(), Instant.now().plus(1, ChronoUnit.DAYS), 100_000).id();
+	}
+
+	private String hold(String token, UUID showtimeId, UUID seatId) throws Exception {
+		return JsonPath.read(mvc.perform(post("/api/bookings").header("Authorization", "Bearer " + token)
+				.contentType(MediaType.APPLICATION_JSON).content(bookingJson(showtimeId, seatId)))
+			.andExpect(status().isCreated()).andReturn().getResponse().getContentAsString(), "$.id");
 	}
 
 	private String customer() throws Exception {
