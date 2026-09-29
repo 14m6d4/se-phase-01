@@ -22,6 +22,7 @@ class JpaBookingRepository implements BookingRepository {
 	}
 
 	@Override
+	@Transactional(readOnly = true)
 	public Optional<Booking> findLivePending(UUID customerId, Instant now) {
 		return jpa.findLivePending(customerId, now).map(BookingEntity::toBooking);
 	}

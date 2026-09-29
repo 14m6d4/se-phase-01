@@ -11,6 +11,7 @@ import jakarta.persistence.Id;
 import jakarta.persistence.JoinColumn;
 import jakarta.persistence.Table;
 import java.time.Instant;
+import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
@@ -47,8 +48,9 @@ class BookingEntity {
 		entity.customerId = booking.customerId();
 		entity.showtimeId = booking.showtimeId();
 		entity.status = booking.status();
-		entity.createdAt = booking.createdAt();
-		entity.expiresAt = booking.expiresAt();
+		// timestamptz keeps microseconds; truncate so the saved Booking equals the one read back later.
+		entity.createdAt = booking.createdAt().truncatedTo(ChronoUnit.MICROS);
+		entity.expiresAt = booking.expiresAt().truncatedTo(ChronoUnit.MICROS);
 		entity.seats = booking.seats().stream()
 			.map(seat -> new BookedSeatEmbeddable(booking.showtimeId(), seat.seatId(), seat.price()))
 			.collect(ArrayList::new, List::add, List::addAll);
