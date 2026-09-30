@@ -41,6 +41,14 @@ public class ShowtimeService {
 		return showtimes.findByStartsAtBetween(fromInclusive, toExclusive, cinemaId, movieId);
 	}
 
+	public Showtime cancel(UUID id, CancellationReason reason, String note, Instant now) {
+		get(id);
+		if (!showtimes.cancel(id, new Cancellation(reason, note), now)) {
+			throw new ConflictException("Showtime is already Cancelled or has ended");
+		}
+		return get(id);
+	}
+
 	public void delete(UUID id) {
 		get(id);
 		showtimes.deleteById(id);
