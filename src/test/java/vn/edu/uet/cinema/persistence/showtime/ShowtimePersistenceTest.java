@@ -153,6 +153,22 @@ class ShowtimePersistenceTest {
 	}
 
 	@Test
+	void cancelledShowtimeNoLongerHoldsItsSlotInTheDatabase() {
+		UUID movieId = movies.create("Film", "Synopsis", 90, "Drama", AgeRating.P,
+			LocalDate.parse("2026-09-01"), "poster").id();
+		UUID cinemaId = cinemas.create("Cinema " + UUID.randomUUID(), "Address").id();
+		UUID auditoriumId = auditoriums.create(cinemaId, "Hall", 1, 1, List.of(), List.of()).id();
+		Showtime cancelled = showtimes.create(movieId, auditoriumId, Instant.parse("2026-10-01T12:00:00Z"), 100_000);
+		repository.cancel(cancelled.id(), new Cancellation(CancellationReason.POWER_OUTAGE, null),
+			cancelled.startsAt());
+
+		Showtime replacement = repository.save(new Showtime(UUID.randomUUID(), movieId, auditoriumId,
+			cancelled.startsAt(), cancelled.endsAt(), 100_000));
+
+		assertThat(showtimes.get(replacement.id())).isEqualTo(replacement);
+	}
+
+	@Test
 	void savesAndFiltersByStartingTimeCinemaAndMovie() {
 		UUID movieId = movies.create("Film", "Synopsis", 90, "Drama", AgeRating.P, LocalDate.parse("2026-09-01"), "poster").id();
 		UUID otherMovieId = movies.create("Other", "Synopsis", 90, "Drama", AgeRating.P, LocalDate.parse("2026-09-01"), "poster").id();
