@@ -3,6 +3,7 @@ package vn.edu.uet.cinema.api.showtime;
 import static org.hamcrest.Matchers.contains;
 import static org.hamcrest.Matchers.hasItem;
 import static org.hamcrest.Matchers.hasSize;
+import static org.hamcrest.Matchers.nullValue;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -53,11 +54,67 @@ class ShowtimeApiTest {
 			.andExpect(jsonPath("$.auditoriumId").value(auditoriumId.toString()))
 			.andExpect(jsonPath("$.startsAt").value("2026-09-27T13:00:00Z"))
 			.andExpect(jsonPath("$.basePrice").value(100_000))
+			.andExpect(jsonPath("$.status").value("SCHEDULED"))
+			.andExpect(jsonPath("$.cancellation").value(nullValue()))
 			.andReturn().getResponse().getContentAsString();
 		String id = JsonPath.read(created, "$.id");
 
 		mvc.perform(delete("/api/showtimes/" + id).header("Authorization", "Bearer " + admin))
 			.andExpect(status().isNoContent());
+	}
+
+	@Test
+	void adminCancelsShowtimeAndItKeepsItsCancellationReason() throws Exception {
+		String admin = token("admin@cinema.local", "admin12345");
+		UUID id = schedule(movieId(), auditoriumId(), Instant.now().plusSeconds(86_400));
+
+		mvc.perform(post("/api/showtimes/" + id + "/cancellation").header("Authorization", "Bearer " + admin)
+				.contentType(MediaType.APPLICATION_JSON)
+				.content("{\"reason\":\"EQUIPMENT_FAILURE\",\"note\":\"Projector lamp blew\"}"))
+			.andExpect(status().isOk())
+			.andExpect(jsonPath("$.id").value(id.toString()))
+			.andExpect(jsonPath("$.status").value("CANCELLED"))
+			.andExpect(jsonPath("$.cancellation.reason").value("EQUIPMENT_FAILURE"))
+			.andExpect(jsonPath("$.cancellation.note").value("Projector lamp blew"));
+
+		mvc.perform(get("/api/showtimes/" + id))
+			.andExpect(status().isOk())
+			.andExpect(jsonPath("$.status").value("CANCELLED"))
+			.andExpect(jsonPath("$.cancellation.reason").value("EQUIPMENT_FAILURE"));
+	}
+
+	@Test
+	void adminSchedulesAReplacementInACancelledShowtimesSlot() throws Exception {
+		String admin = token("admin@cinema.local", "admin12345");
+		UUID movieId = movieId();
+		UUID auditoriumId = auditoriumId();
+		Instant startsAt = Instant.now().plusSeconds(86_400).truncatedTo(java.time.temporal.ChronoUnit.SECONDS);
+		UUID id = schedule(movieId, auditoriumId, startsAt);
+		String replacement = showtimeJson(movieId, auditoriumId, startsAt.plusSeconds(1_800).toString(), 100_000);
+		mvc.perform(post("/api/showtimes").header("Authorization", "Bearer " + admin)
+				.contentType(MediaType.APPLICATION_JSON).content(replacement))
+			.andExpect(status().isConflict());
+
+		mvc.perform(post("/api/showtimes/" + id + "/cancellation").header("Authorization", "Bearer " + admin)
+				.contentType(MediaType.APPLICATION_JSON).content("{\"reason\":\"POWER_OUTAGE\"}"))
+			.andExpect(status().isOk());
+
+		mvc.perform(post("/api/showtimes").header("Authorization", "Bearer " + admin)
+				.contentType(MediaType.APPLICATION_JSON).content(replacement))
+			.andExpect(status().isCreated());
+	}
+
+	@Test
+	void cancelledShowtimeHasNoSeatMap() throws Exception {
+		String admin = token("admin@cinema.local", "admin12345");
+		UUID id = schedule(movieId(), auditoriumId(), Instant.now().plusSeconds(86_400));
+		mvc.perform(post("/api/showtimes/" + id + "/cancellation").header("Authorization", "Bearer " + admin)
+				.contentType(MediaType.APPLICATION_JSON).content("{\"reason\":\"EQUIPMENT_FAILURE\"}"))
+			.andExpect(status().isOk());
+
+		mvc.perform(get("/api/showtimes/" + id + "/seats"))
+			.andExpect(status().isConflict())
+			.andExpect(content().contentType(MediaType.APPLICATION_PROBLEM_JSON));
 	}
 
 	@Test
@@ -76,6 +133,14 @@ class ShowtimeApiTest {
 				.contentType(MediaType.APPLICATION_JSON).content(body))
 			.andExpect(status().isForbidden())
 			.andExpect(content().contentType(MediaType.APPLICATION_PROBLEM_JSON));
+
+		String cancellation = "{\"reason\":\"EMERGENCY\"}";
+		String path = "/api/showtimes/" + UUID.randomUUID() + "/cancellation";
+		mvc.perform(post(path).contentType(MediaType.APPLICATION_JSON).content(cancellation))
+			.andExpect(status().isUnauthorized());
+		mvc.perform(post(path).header("Authorization", "Bearer " + customer)
+				.contentType(MediaType.APPLICATION_JSON).content(cancellation))
+			.andExpect(status().isForbidden());
 	}
 
 	@Test
@@ -89,10 +154,37 @@ class ShowtimeApiTest {
 	}
 
 	@Test
+	void invalidCancellationIsBadRequestAndCancellingTwiceIsConflict() throws Exception {
+		String admin = token("admin@cinema.local", "admin12345");
+		UUID id = schedule(movieId(), auditoriumId(), Instant.now().plusSeconds(86_400));
+		String path = "/api/showtimes/" + id + "/cancellation";
+
+		for (String body : List.of("{}", "{\"reason\":\"BORED\"}", "{\"reason\":\"OTHER\"}",
+			"{\"reason\":\"OTHER\",\"note\":\"  \"}")) {
+			mvc.perform(post(path).header("Authorization", "Bearer " + admin)
+					.contentType(MediaType.APPLICATION_JSON).content(body))
+				.andExpect(status().isBadRequest())
+				.andExpect(content().contentType(MediaType.APPLICATION_PROBLEM_JSON));
+		}
+		mvc.perform(post(path).header("Authorization", "Bearer " + admin)
+				.contentType(MediaType.APPLICATION_JSON).content("{\"reason\":\"POWER_OUTAGE\"}"))
+			.andExpect(status().isOk());
+		mvc.perform(post(path).header("Authorization", "Bearer " + admin)
+				.contentType(MediaType.APPLICATION_JSON).content("{\"reason\":\"POWER_OUTAGE\"}"))
+			.andExpect(status().isConflict())
+			.andExpect(content().contentType(MediaType.APPLICATION_PROBLEM_JSON));
+		mvc.perform(post("/api/showtimes/" + UUID.randomUUID() + "/cancellation")
+				.header("Authorization", "Bearer " + admin)
+				.contentType(MediaType.APPLICATION_JSON).content("{\"reason\":\"POWER_OUTAGE\"}"))
+			.andExpect(status().isNotFound());
+	}
+
+	@Test
 	void showtimeWriteOperationsAreMarkedProtectedInOpenApi() throws Exception {
 		mvc.perform(get("/v3/api-docs")).andExpect(status().isOk())
 			.andExpect(jsonPath("$.paths['/api/showtimes'].post.security[0].bearerAuth").exists())
-			.andExpect(jsonPath("$.paths['/api/showtimes/{id}'].delete.security[0].bearerAuth").exists());
+			.andExpect(jsonPath("$.paths['/api/showtimes/{id}'].delete.security[0].bearerAuth").exists())
+			.andExpect(jsonPath("$.paths['/api/showtimes/{id}/cancellation'].post.security[0].bearerAuth").exists());
 	}
 
 	@Test

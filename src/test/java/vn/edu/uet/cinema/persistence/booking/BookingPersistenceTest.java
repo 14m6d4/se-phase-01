@@ -14,6 +14,7 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
+import java.util.concurrent.ThreadLocalRandom;
 import java.util.stream.IntStream;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -34,6 +35,7 @@ import vn.edu.uet.cinema.business.booking.SeatsTakenException;
 import vn.edu.uet.cinema.business.cinema.CinemaService;
 import vn.edu.uet.cinema.business.movie.AgeRating;
 import vn.edu.uet.cinema.business.movie.MovieService;
+import vn.edu.uet.cinema.business.showtime.CancellationReason;
 import vn.edu.uet.cinema.business.showtime.SeatOccupancyReader;
 import vn.edu.uet.cinema.business.showtime.SeatStatus;
 import vn.edu.uet.cinema.business.showtime.ShowtimeService;
@@ -202,6 +204,93 @@ class BookingPersistenceTest {
 
 		assertThat(repository.findByCustomer(customerId)).extracting(Booking::id)
 			.containsExactly(pending.id(), paid.id());
+	}
+
+	@Test
+	void cancellingAShowtimeDeletesItsPendingBookingsIncludingExpiredOnes() {
+		Auditorium hall = auditorium();
+		UUID showtimeId = showtime(hall);
+		Booking live = bookings.book(customer(), showtimeId, List.of(hall.seats().get(0).id()), now);
+		Booking expired = bookings.book(customer(), showtimeId, List.of(hall.seats().get(1).id()),
+			now.minus(11, ChronoUnit.MINUTES));
+
+		showtimes.cancel(showtimeId, CancellationReason.EQUIPMENT_FAILURE, null, now);
+
+		assertThat(repository.findById(live.id())).isEmpty();
+		assertThat(repository.findById(expired.id())).isEmpty();
+		assertThat(occupancy.statuses(showtimeId, now)).isEmpty();
+	}
+
+	@Test
+	void cancellingAShowtimeRefundsItsConfirmedBookings() {
+		Auditorium hall = auditorium();
+		UUID showtimeId = showtime(hall);
+		Booking paid = bookings.book(customer(), showtimeId, List.of(hall.seats().get(0).id()), now);
+		bookings.pay(paid.customerId(), paid.id(), now);
+
+		showtimes.cancel(showtimeId, CancellationReason.POWER_OUTAGE, null, now);
+
+		assertThat(bookings.get(paid.customerId(), paid.id()).status()).isEqualTo(BookingStatus.REFUNDED);
+		assertThat(bookings.get(paid.customerId(), paid.id()).totalPrice()).isEqualTo(paid.totalPrice());
+	}
+
+	@Test
+	void persistenceRefusesABookingOnACancelledShowtimeEvenWhenServiceGuardWasBypassed() {
+		Auditorium hall = auditorium();
+		UUID showtimeId = showtime(hall);
+		showtimes.cancel(showtimeId, CancellationReason.EMERGENCY, null, now);
+		Booking late = new Booking(UUID.randomUUID(), customer(), showtimeId, BookingStatus.PENDING, now,
+			now.plus(10, ChronoUnit.MINUTES), List.of(new BookedSeat(hall.seats().get(0).id(), 100_000)));
+
+		assertThatThrownBy(() -> repository.saveNew(late, now)).isInstanceOf(ConflictException.class);
+		assertThat(repository.findById(late.id())).isEmpty();
+	}
+
+	@Test
+	void noPendingOrConfirmedBookingOutlivesACancelWhateverTheInterleaving() throws Exception {
+		for (int round = 0; round < 5; round++) {
+			UUID cinemaId = cinemas.create("Cinema " + UUID.randomUUID(), "Address").id();
+			Auditorium hall = auditoriums.create(cinemaId, "Hall", 4, 4, List.of(), List.of());
+			UUID showtimeId = showtime(hall);
+			List<UUID> customers = hall.seats().stream().map(seat -> customer()).toList();
+			CountDownLatch start = new CountDownLatch(1);
+			List<Callable<Void>> work = new java.util.ArrayList<>();
+			for (int i = 0; i < customers.size(); i++) {
+				UUID customerId = customers.get(i);
+				UUID seatId = hall.seats().get(i).id();
+				work.add(() -> {
+					start.await();
+					try {
+						Booking booking = bookings.book(customerId, showtimeId, List.of(seatId), Instant.now());
+						bookings.pay(customerId, booking.id(), Instant.now());
+					} catch (ConflictException | NotFoundException cancelledMeanwhile) {
+						// Booking a Cancelled Showtime, or paying a Booking the cancel deleted or refunded.
+					}
+					return null;
+				});
+			}
+			work.add(() -> {
+				start.await();
+				// Land somewhere among the bookings and payments rather than always before them.
+				Thread.sleep(ThreadLocalRandom.current().nextInt(40));
+				showtimes.cancel(showtimeId, CancellationReason.EMERGENCY, null, Instant.now());
+				return null;
+			});
+
+			ExecutorService pool = Executors.newFixedThreadPool(work.size());
+			try {
+				List<Future<Void>> results = work.stream().map(pool::submit).toList();
+				start.countDown();
+				for (Future<Void> result : results) {
+					result.get();
+				}
+			} finally {
+				pool.shutdownNow();
+			}
+			List<BookingStatus> left = customers.stream().flatMap(customerId -> bookings.list(customerId).stream())
+				.map(Booking::status).toList();
+			assertThat(left).as("round %d", round).doesNotContain(BookingStatus.PENDING, BookingStatus.CONFIRMED);
+		}
 	}
 
 	private UUID customer() {

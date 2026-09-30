@@ -4,13 +4,16 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import java.time.Instant;
 import java.time.LocalDate;
+import java.util.Optional;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
 import vn.edu.uet.cinema.business.ConflictException;
+import vn.edu.uet.cinema.business.NotFoundException;
 import vn.edu.uet.cinema.business.auditorium.Auditorium;
 import vn.edu.uet.cinema.business.auditorium.AuditoriumService;
 import vn.edu.uet.cinema.business.movie.AgeRating;
@@ -79,5 +82,71 @@ class ShowtimeServiceTest {
 
 		assertThat(service.create(movieId, auditoriumId, startsAt, 100_000L).endsAt())
 			.isEqualTo(startsAt.plusSeconds(((long) Integer.MAX_VALUE + 15) * 60));
+	}
+
+	@Test
+	void cancellingReturnsTheCancelledShowtime() {
+		Showtime scheduled = new Showtime(UUID.randomUUID(), UUID.randomUUID(), UUID.randomUUID(),
+			Instant.parse("2026-10-01T14:00:00Z"), Instant.parse("2026-10-01T16:15:00Z"), 100_000L);
+		Cancellation fire = new Cancellation(CancellationReason.EMERGENCY, "Fire alarm");
+		Showtime cancelled = new Showtime(scheduled.id(), scheduled.movieId(), scheduled.auditoriumId(),
+			scheduled.startsAt(), scheduled.endsAt(), scheduled.basePrice(), ShowtimeStatus.CANCELLED, fire);
+		Instant now = Instant.parse("2026-10-01T15:00:00Z");
+		when(repository.findById(scheduled.id())).thenReturn(Optional.of(scheduled), Optional.of(cancelled));
+		when(repository.cancel(scheduled.id(), fire, now)).thenReturn(true);
+
+		assertThat(service.cancel(scheduled.id(), CancellationReason.EMERGENCY, "Fire alarm", now))
+			.isEqualTo(cancelled);
+		verify(repository).cancel(scheduled.id(), fire, now);
+	}
+
+	@Test
+	void unknownShowtimeCannotBeCancelled() {
+		UUID id = UUID.randomUUID();
+		when(repository.findById(id)).thenReturn(Optional.empty());
+
+		assertThatThrownBy(() -> service.cancel(id, CancellationReason.EMERGENCY, null, Instant.now()))
+			.isInstanceOf(NotFoundException.class);
+	}
+
+	@Test
+	void showtimeTheRepositoryWillNotCancelIsConflict() {
+		Showtime showtime = new Showtime(UUID.randomUUID(), UUID.randomUUID(), UUID.randomUUID(),
+			Instant.parse("2026-10-01T14:00:00Z"), Instant.parse("2026-10-01T16:15:00Z"), 100_000L);
+		when(repository.findById(showtime.id())).thenReturn(Optional.of(showtime));
+		when(repository.cancel(any(), any(), any())).thenReturn(false);
+
+		assertThatThrownBy(() -> service.cancel(showtime.id(), CancellationReason.POWER_OUTAGE, null,
+			Instant.parse("2026-10-01T17:00:00Z")))
+			.isInstanceOf(ConflictException.class);
+	}
+
+	@Test
+	void otherNeedsANoteAndABlankNoteIsNoNote() {
+		Showtime showtime = new Showtime(UUID.randomUUID(), UUID.randomUUID(), UUID.randomUUID(),
+			Instant.parse("2026-10-01T14:00:00Z"), Instant.parse("2026-10-01T16:15:00Z"), 100_000L);
+		Instant now = Instant.parse("2026-10-01T13:00:00Z");
+		when(repository.findById(showtime.id())).thenReturn(Optional.of(showtime));
+		when(repository.cancel(any(), any(), any())).thenReturn(true);
+
+		for (String missing : new String[] {null, "", "   "}) {
+			assertThatThrownBy(() -> service.cancel(showtime.id(), CancellationReason.OTHER, missing, now))
+				.as("note %s", missing).isInstanceOf(InvalidShowtimeException.class);
+		}
+		service.cancel(showtime.id(), CancellationReason.EQUIPMENT_FAILURE, "  ", now);
+		verify(repository).cancel(showtime.id(), new Cancellation(CancellationReason.EQUIPMENT_FAILURE, null), now);
+	}
+
+	@Test
+	void noteIsAtMostTwoHundredCharacters() {
+		Showtime showtime = new Showtime(UUID.randomUUID(), UUID.randomUUID(), UUID.randomUUID(),
+			Instant.parse("2026-10-01T14:00:00Z"), Instant.parse("2026-10-01T16:15:00Z"), 100_000L);
+		Instant now = Instant.parse("2026-10-01T13:00:00Z");
+		when(repository.findById(showtime.id())).thenReturn(Optional.of(showtime));
+		when(repository.cancel(any(), any(), any())).thenReturn(true);
+
+		assertThatThrownBy(() -> service.cancel(showtime.id(), CancellationReason.OTHER, "x".repeat(201), now))
+			.isInstanceOf(InvalidShowtimeException.class);
+		service.cancel(showtime.id(), CancellationReason.OTHER, "x".repeat(200), now);
 	}
 }

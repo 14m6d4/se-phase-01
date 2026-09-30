@@ -22,11 +22,14 @@ import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
 import vn.edu.uet.cinema.business.auditorium.AuditoriumService;
 import vn.edu.uet.cinema.business.auditorium.Seat;
+import vn.edu.uet.cinema.business.showtime.Cancellation;
+import vn.edu.uet.cinema.business.showtime.CancellationReason;
 import vn.edu.uet.cinema.business.showtime.SeatOccupancyReader;
 import vn.edu.uet.cinema.business.showtime.SeatPricing;
 import vn.edu.uet.cinema.business.showtime.SeatStatus;
 import vn.edu.uet.cinema.business.showtime.Showtime;
 import vn.edu.uet.cinema.business.showtime.ShowtimeService;
+import vn.edu.uet.cinema.business.showtime.ShowtimeStatus;
 import vn.edu.uet.cinema.config.OpenApiConfig;
 
 @RestController
@@ -67,12 +70,18 @@ class ShowtimeController {
 
 	@GetMapping("/api/showtimes/{id}/seats")
 	List<SeatMapResponse> seats(@PathVariable UUID id) {
-		Showtime showtime = showtimes.get(id);
+		Showtime showtime = showtimes.getScheduled(id);
 		Map<UUID, SeatStatus> statuses = occupancy.statuses(id, Instant.now());
 		return auditoriums.get(showtime.auditoriumId()).seats().stream()
 			.map(seat -> SeatMapResponse.from(seat, SeatPricing.price(seat.type(), showtime.basePrice()),
 				statuses.getOrDefault(seat.id(), SeatStatus.AVAILABLE)))
 			.toList();
+	}
+
+	@PostMapping("/api/showtimes/{id}/cancellation")
+	@SecurityRequirement(name = OpenApiConfig.BEARER_AUTH)
+	ShowtimeResponse cancel(@PathVariable UUID id, @Valid @RequestBody CancellationRequest request) {
+		return ShowtimeResponse.from(showtimes.cancel(id, request.reason(), request.note(), Instant.now()));
 	}
 
 	@DeleteMapping("/api/showtimes/{id}")
@@ -86,12 +95,22 @@ class ShowtimeController {
 		@NotNull @Positive Long basePrice) {
 	}
 
-	record ShowtimeResponse(UUID id, UUID movieId, UUID auditoriumId, Instant startsAt, Instant endsAt, long basePrice) {
+	record CancellationRequest(@NotNull CancellationReason reason, String note) {
+	}
+
+	/** {@code cancellation} is null unless the Showtime is Cancelled. */
+	record ShowtimeResponse(UUID id, UUID movieId, UUID auditoriumId, Instant startsAt, Instant endsAt, long basePrice,
+		ShowtimeStatus status, CancellationResponse cancellation) {
 
 		static ShowtimeResponse from(Showtime showtime) {
+			Cancellation cancellation = showtime.cancellation();
 			return new ShowtimeResponse(showtime.id(), showtime.movieId(), showtime.auditoriumId(), showtime.startsAt(),
-				showtime.endsAt(), showtime.basePrice());
+				showtime.endsAt(), showtime.basePrice(), showtime.status(),
+				cancellation == null ? null : new CancellationResponse(cancellation.reason(), cancellation.note()));
 		}
+	}
+
+	record CancellationResponse(CancellationReason reason, String note) {
 	}
 
 	record SeatMapResponse(UUID id, String row, int number, String label, String type, long price, SeatStatus status) {

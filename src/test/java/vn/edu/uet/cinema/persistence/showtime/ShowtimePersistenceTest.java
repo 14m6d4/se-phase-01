@@ -18,8 +18,11 @@ import vn.edu.uet.cinema.business.auditorium.AuditoriumService;
 import vn.edu.uet.cinema.business.cinema.CinemaService;
 import vn.edu.uet.cinema.business.movie.AgeRating;
 import vn.edu.uet.cinema.business.movie.MovieService;
+import vn.edu.uet.cinema.business.showtime.Cancellation;
+import vn.edu.uet.cinema.business.showtime.CancellationReason;
 import vn.edu.uet.cinema.business.showtime.Showtime;
 import vn.edu.uet.cinema.business.showtime.ShowtimeService;
+import vn.edu.uet.cinema.business.showtime.ShowtimeStatus;
 
 @SpringBootTest
 @Import(TestcontainersConfiguration.class)
@@ -110,6 +113,88 @@ class ShowtimePersistenceTest {
 		assertThatThrownBy(() -> auditoriumRepository.deleteById(auditoriumId)).isInstanceOf(ConflictException.class);
 		assertThat(movies.get(movieId)).isNotNull();
 		assertThat(auditoriums.get(auditoriumId)).isNotNull();
+	}
+
+	@Test
+	void cancelledShowtimeKeepsItsReasonAndNote() {
+		UUID movieId = movies.create("Film", "Synopsis", 90, "Drama", AgeRating.P,
+			LocalDate.parse("2026-09-01"), "poster").id();
+		UUID cinemaId = cinemas.create("Cinema " + UUID.randomUUID(), "Address").id();
+		UUID auditoriumId = auditoriums.create(cinemaId, "Hall", 1, 1, List.of(), List.of()).id();
+		Instant start = Instant.parse("2026-10-01T12:00:00Z");
+		Showtime showtime = showtimes.create(movieId, auditoriumId, start, 100_000);
+		Cancellation cancellation = new Cancellation(CancellationReason.OTHER, "Flooded auditorium");
+
+		assertThat(repository.cancel(showtime.id(), cancellation, start.minusSeconds(3_600))).isTrue();
+
+		Showtime cancelled = showtimes.get(showtime.id());
+		assertThat(cancelled.status()).isEqualTo(ShowtimeStatus.CANCELLED);
+		assertThat(cancelled.cancellation()).isEqualTo(cancellation);
+	}
+
+	@Test
+	void showtimeCanBeCancelledOnlyOnceAndOnlyUntilItEnds() {
+		UUID movieId = movies.create("Film", "Synopsis", 90, "Drama", AgeRating.P,
+			LocalDate.parse("2026-09-01"), "poster").id();
+		UUID cinemaId = cinemas.create("Cinema " + UUID.randomUUID(), "Address").id();
+		UUID auditoriumId = auditoriums.create(cinemaId, "Hall", 1, 1, List.of(), List.of()).id();
+		Showtime ended = showtimes.create(movieId, auditoriumId, Instant.parse("2026-10-01T12:00:00Z"), 100_000);
+		Showtime running = showtimes.create(movieId, auditoriumId, ended.endsAt(), 100_000);
+		Cancellation powerCut = new Cancellation(CancellationReason.POWER_OUTAGE, null);
+
+		assertThat(repository.cancel(ended.id(), powerCut, ended.endsAt())).isFalse();
+		assertThat(showtimes.get(ended.id()).status()).isEqualTo(ShowtimeStatus.SCHEDULED);
+
+		Instant midway = running.startsAt().plusSeconds(1_800);
+		assertThat(repository.cancel(running.id(), powerCut, midway)).isTrue();
+		assertThat(repository.cancel(running.id(), new Cancellation(CancellationReason.EMERGENCY, null), midway))
+			.isFalse();
+		assertThat(showtimes.get(running.id()).cancellation()).isEqualTo(powerCut);
+	}
+
+	@Test
+	void cancelledShowtimeNoLongerHoldsItsSlotInTheDatabase() {
+		UUID movieId = movies.create("Film", "Synopsis", 90, "Drama", AgeRating.P,
+			LocalDate.parse("2026-09-01"), "poster").id();
+		UUID cinemaId = cinemas.create("Cinema " + UUID.randomUUID(), "Address").id();
+		UUID auditoriumId = auditoriums.create(cinemaId, "Hall", 1, 1, List.of(), List.of()).id();
+		Showtime cancelled = showtimes.create(movieId, auditoriumId, Instant.parse("2026-10-01T12:00:00Z"), 100_000);
+		repository.cancel(cancelled.id(), new Cancellation(CancellationReason.POWER_OUTAGE, null),
+			cancelled.startsAt());
+
+		Showtime replacement = repository.save(new Showtime(UUID.randomUUID(), movieId, auditoriumId,
+			cancelled.startsAt(), cancelled.endsAt(), 100_000));
+
+		assertThat(showtimes.get(replacement.id())).isEqualTo(replacement);
+	}
+
+	@Test
+	void replacementShowtimeCanTakeACancelledOnesSlot() {
+		UUID movieId = movies.create("Film", "Synopsis", 90, "Drama", AgeRating.P,
+			LocalDate.parse("2026-09-01"), "poster").id();
+		UUID cinemaId = cinemas.create("Cinema " + UUID.randomUUID(), "Address").id();
+		UUID auditoriumId = auditoriums.create(cinemaId, "Hall", 1, 1, List.of(), List.of()).id();
+		Showtime cancelled = showtimes.create(movieId, auditoriumId, Instant.parse("2026-10-01T12:00:00Z"), 100_000);
+		showtimes.cancel(cancelled.id(), CancellationReason.EMERGENCY, null, cancelled.startsAt());
+
+		Showtime replacement = showtimes.create(movieId, auditoriumId, cancelled.startsAt().plusSeconds(1_800),
+			100_000);
+
+		assertThat(showtimes.get(replacement.id()).status()).isEqualTo(ShowtimeStatus.SCHEDULED);
+	}
+
+	@Test
+	void cancelledShowtimeIsLeftOutOfTheListing() {
+		UUID movieId = movies.create("Film", "Synopsis", 90, "Drama", AgeRating.P,
+			LocalDate.parse("2026-09-01"), "poster").id();
+		UUID cinemaId = cinemas.create("Cinema " + UUID.randomUUID(), "Address").id();
+		UUID auditoriumId = auditoriums.create(cinemaId, "Hall", 1, 1, List.of(), List.of()).id();
+		Instant start = Instant.parse("2026-10-01T12:00:00Z");
+		Showtime cancelled = showtimes.create(movieId, auditoriumId, start, 100_000);
+		showtimes.cancel(cancelled.id(), CancellationReason.EMERGENCY, null, start);
+		Showtime showing = showtimes.create(movieId, auditoriumId, start, 100_000);
+
+		assertThat(showtimes.list(start, start.plusSeconds(1), cinemaId, movieId)).containsExactly(showing);
 	}
 
 	@Test

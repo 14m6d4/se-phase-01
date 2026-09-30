@@ -10,6 +10,7 @@ import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Repository;
 import org.springframework.transaction.annotation.Transactional;
 import vn.edu.uet.cinema.business.ConflictException;
+import vn.edu.uet.cinema.business.showtime.Cancellation;
 import vn.edu.uet.cinema.business.showtime.Showtime;
 import vn.edu.uet.cinema.business.showtime.ShowtimeRepository;
 
@@ -70,6 +71,18 @@ class JpaShowtimeRepository implements ShowtimeRepository {
 			}
 			throw e;
 		}
+	}
+
+	@Override
+	@Transactional
+	public boolean cancel(UUID id, Cancellation cancellation, Instant now) {
+		if (jpa.cancel(id, cancellation.reason().name(), cancellation.note(), now) == 0) {
+			return false;
+		}
+		// Delete before refunding: a payment that commits in between is then refunded, never left Confirmed.
+		jpa.deletePendingBookings(id);
+		jpa.refundConfirmedBookings(id);
+		return true;
 	}
 
 	@Override

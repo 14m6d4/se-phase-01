@@ -15,6 +15,7 @@ import vn.edu.uet.cinema.business.auditorium.Seat;
 import vn.edu.uet.cinema.business.showtime.SeatPricing;
 import vn.edu.uet.cinema.business.showtime.Showtime;
 import vn.edu.uet.cinema.business.showtime.ShowtimeService;
+import vn.edu.uet.cinema.business.showtime.ShowtimeStatus;
 
 public class BookingService {
 
@@ -39,6 +40,9 @@ public class BookingService {
 			throw new InvalidBookingException("Duplicate seatIds");
 		}
 		Showtime showtime = showtimes.get(showtimeId);
+		if (showtime.status() == ShowtimeStatus.CANCELLED) {
+			throw new ConflictException("Showtime is Cancelled");
+		}
 		if (!now.isBefore(showtime.startsAt())) {
 			throw new ConflictException("Showtime has already started");
 		}
@@ -89,8 +93,8 @@ public class BookingService {
 		if (get(customerId, id).status() == BookingStatus.PENDING && bookings.deletePending(id)) {
 			return;
 		}
-		// Nothing deleted: it is Confirmed, was paid just now, or is already gone (then this is 404).
-		get(customerId, id);
-		throw new ConflictException("A Confirmed Booking cannot be abandoned");
+		// Nothing deleted: it is Confirmed or Refunded, was paid just now, or is already gone (then this is 404).
+		BookingStatus status = get(customerId, id).status();
+		throw new ConflictException("Booking is " + status + ", only a Pending Booking can be abandoned");
 	}
 }
