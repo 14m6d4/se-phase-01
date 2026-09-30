@@ -8,4 +8,5 @@ The same pattern enforces "at most one live Pending Booking per Customer": a par
 
 - No history of abandoned or Expired Bookings. Acceptable: nothing reads it.
 - Lapsed Holds on Seats nobody re-books linger as rows until touched; they never block anyone — not a new Booking, and not deleting their Showtime.
+- A Hold claims its Seats whether or not it is ever paid, so many Customer accounts can keep a Showtime's Seats held without buying. Accepted: countering it is anti-abuse work (rate limits, verified accounts), not a booking rule.
 - Pessimistic/optimistic locking and queue-based booking were deliberately left out as phase 2 comparison points.

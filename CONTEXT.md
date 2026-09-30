@@ -30,6 +30,12 @@ _Avoid_: Film, title
 One scheduled screening of a Movie in an Auditorium at a specific start time.
 _Avoid_: Screening, session, show
 
+**Cancelled**:
+A Showtime an Admin called off, before it starts or while it is running, because of a problem on the cinema's side (broken projector, fire, power cut). The Admin must give a Cancellation Reason. Final: it is never restored. It can no longer be booked, its Pending Bookings disappear, and it drops out of what is showing, but it stays reachable from its Refunded Bookings so Customers can see what they were refunded for. It no longer occupies its Auditorium: a replacement Showtime may take its time slot.
+
+**Cancellation Reason**:
+Why a Showtime was Cancelled: one of Equipment Failure, Power Outage, Emergency or Other, plus a note, which Other requires and the rest may omit. Customers see it on the Cancelled Showtime.
+
 **Base Price**:
 The price of a Standard Seat for a given Showtime; VIP and Couple prices are derived from it by fixed surcharges.
 _Avoid_: Ticket price, fare
@@ -51,7 +57,11 @@ A Booking whose Hold is running and which has not been paid yet. A Customer can 
 A Pending Booking whose Hold has lapsed. It can no longer be paid and is eventually removed.
 
 **Confirmed**:
-A paid Booking. Final: it can never be cancelled or refunded; a Customer who can't attend passes it on themselves.
+A paid Booking. The Customer can never cancel it or get a refund; a Customer who can't attend passes it on themselves. Only the cinema cancelling its Showtime ends it, as Refunded.
+
+**Refunded**:
+A Confirmed Booking whose Showtime was Cancelled; its full price is returned. Final. Never triggered by, or on behalf of, a Customer.
+_Avoid_: Cancelled (a Customer never cancels a Booking)
 
 ### People
 

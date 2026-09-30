@@ -40,7 +40,14 @@ Each use case saves exactly one aggregate; the persistence adapter owns the tran
 - A **Movie** has `title`, `description`, `durationMinutes`, `genre`, `ageRating` (`P`, `K`, `T13`, `T16`, `T18`; display only), `releaseDate`, `posterUrl`.
 - A **Showtime** has `movieId`, `auditoriumId`, `startsAt`, `basePrice`. `endsAt = startsAt + durationMinutes + 15 min` (cleaning) is fixed at creation; later Movie edits do not change it.
 - Showtimes in the same Auditorium may not overlap on `[startsAt, endsAt)`.
-- Deletes are hard deletes, refused with `409` while dependants exist: Cinema with Auditoriums, Auditorium with Showtimes, Movie with Showtimes, Showtime with a Confirmed or live Pending Booking (lapsed Holds are deleted along with the Showtime).
+- Deletes are hard deletes, refused with `409` while dependants exist: Cinema with Auditoriums, Auditorium with Showtimes, Movie with Showtimes, Showtime with a Confirmed or live Pending Booking (lapsed Holds are deleted along with the Showtime); such a Showtime can be Cancelled instead.
+
+### Showtime cancellation
+- An Admin can **Cancel** a Showtime because of a problem on the cinema's side, from creation until its `endsAt`; later, or if already Cancelled → `409`. Cancelled is final.
+- A **Cancellation Reason** is required: `EQUIPMENT_FAILURE`, `POWER_OUTAGE`, `EMERGENCY` or `OTHER`, plus a `note` (≤ 200 characters) that `OTHER` requires.
+- Its Confirmed Bookings become **Refunded** (full `totalPrice`, simulated), its Pending Bookings are deleted, and it can no longer be booked.
+- A Cancelled Showtime is left out of `GET /showtimes`, but `GET /showtimes/{id}` still returns it with its status and Cancellation Reason.
+- It no longer takes part in the no-overlap rule: a replacement Showtime may use its time slot.
 
 ### Pricing
 - Standard = **Base Price**; VIP = Base Price + 20,000; Couple = 2 × Base Price + 10,000. Surcharges are constants.
@@ -52,10 +59,10 @@ Each use case saves exactly one aggregate; the persistence adapter owns the tran
 - Cannot book a Showtime that has already started.
 - A new Booking is **Pending** with a **Hold** of 10 minutes (`expiresAt`).
 - A Customer may have at most one live Pending Booking; booking again while it is live → `409` naming that Booking's id.
-- `POST /bookings/{id}/payment` (simulated, always succeeds) makes it **Confirmed** if the Hold is still live, else `409`. The Hold alone decides: payment after the Showtime has started is allowed.
-- A Pending Booking can be abandoned (`DELETE`): it is removed and its Seats freed. A Confirmed Booking is final: no cancel, no refund (`409`).
+- `POST /bookings/{id}/payment` (simulated, always succeeds) makes it **Confirmed** if the Hold is still live, else `409`. The Hold alone decides: payment after the Showtime has started is allowed. Paying an already Confirmed Booking returns it unchanged (`200`), so a client can retry safely.
+- A Pending Booking can be abandoned (`DELETE`): it is removed and its Seats freed. A Confirmed Booking cannot be cancelled or refunded by the Customer (`409`); only Cancelling its Showtime makes it Refunded.
 - A Pending Booking past `expiresAt` is **Expired**: shown as such, cannot be paid, and removed the next time anyone books one of its Seats ([ADR 0004](adr/0004-seat-contention-via-unique-constraint-and-lazy-holds.md)).
-- Double booking is prevented by `UNIQUE(showtime_id, seat_id)` on booked seats; the loser gets `409`.
+- Double booking is prevented by `UNIQUE(showtime_id, seat_id)` on booked seats; the loser gets `409` listing which of the requested `seatIds` are taken. A booking that loses a database deadlock is retried once before reporting anything.
 - A Customer only sees their own Bookings; someone else's Booking id returns `404`.
 
 ### Time
@@ -83,7 +90,7 @@ All under `/api`. Errors are RFC 9457 `application/problem+json`.
 | | `GET /cinemas/{id}/auditoriums`, `GET /auditoriums/{id}` (with seats) | public |
 | Movie | `POST /movies`, `PUT /movies/{id}`, `DELETE /movies/{id}` | ADMIN |
 | | `GET /movies`, `GET /movies/{id}` | public |
-| Showtime | `POST /showtimes`, `DELETE /showtimes/{id}` | ADMIN |
+| Showtime | `POST /showtimes`, `DELETE /showtimes/{id}`, `POST /showtimes/{id}/cancellation` `{reason, note}` | ADMIN |
 | | `GET /showtimes?date=&cinemaId=&movieId=` (`date` required) | public |
 | | `GET /showtimes/{id}`, `GET /showtimes/{id}/seats` (seat map: status `AVAILABLE`/`HELD`/`SOLD` + price) | public |
 | Booking | `POST /bookings` `{showtimeId, seatIds}` | CUSTOMER |
@@ -103,7 +110,7 @@ On a Kaggle CPU notebook ([ADR 0003](adr/0003-load-test-on-kaggle-without-docker
 
 ## Out of scope (phase 1)
 
-Real payment, promotions, concessions, tickets/QR/check-in, refunds, pagination, refresh tokens, email verification, hosting/CD beyond publishing the image.
+Real payment, promotions, concessions, tickets/QR/check-in, refunds other than Showtime cancellation, out-of-service Seats (staff reseat on site), limits on holding Seats without paying, pagination, refresh tokens, email verification, hosting/CD beyond publishing the image.
 
 ## Workflow
 
