@@ -31,6 +31,7 @@ import vn.edu.uet.cinema.business.booking.BookingService;
 import vn.edu.uet.cinema.business.cinema.CinemaService;
 import vn.edu.uet.cinema.business.movie.AgeRating;
 import vn.edu.uet.cinema.business.movie.MovieService;
+import vn.edu.uet.cinema.business.showtime.CancellationReason;
 import vn.edu.uet.cinema.business.showtime.ShowtimeService;
 
 @SpringBootTest
@@ -124,6 +125,29 @@ class BookingApiTest {
 			.andExpect(status().isOk())
 			.andExpect(jsonPath("$[*].id").value(contains(id)))
 			.andExpect(jsonPath("$[0].status").value("CONFIRMED"));
+	}
+
+	@Test
+	void customerWhoPaidSeesTheBookingRefundedWhenTheShowtimeIsCancelled() throws Exception {
+		Auditorium hall = auditorium();
+		UUID showtimeId = showtime(hall);
+		String token = customer();
+		String id = hold(token, showtimeId, hall.seats().get(0).id());
+		mvc.perform(post("/api/bookings/" + id + "/payment").header("Authorization", "Bearer " + token))
+			.andExpect(status().isOk());
+
+		showtimes.cancel(showtimeId, CancellationReason.POWER_OUTAGE, null, Instant.now());
+
+		mvc.perform(get("/api/bookings").header("Authorization", "Bearer " + token))
+			.andExpect(status().isOk())
+			.andExpect(jsonPath("$[0].id").value(id))
+			.andExpect(jsonPath("$[0].status").value("REFUNDED"))
+			.andExpect(jsonPath("$[0].totalPrice").value(100_000));
+		mvc.perform(delete("/api/bookings/" + id).header("Authorization", "Bearer " + token))
+			.andExpect(status().isConflict())
+			.andExpect(jsonPath("$.detail").value(containsString("REFUNDED")));
+		mvc.perform(get("/api/showtimes/" + showtimeId))
+			.andExpect(jsonPath("$.cancellation.reason").value("POWER_OUTAGE"));
 	}
 
 	@Test
