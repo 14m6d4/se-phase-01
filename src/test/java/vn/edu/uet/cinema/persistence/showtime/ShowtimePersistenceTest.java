@@ -184,6 +184,20 @@ class ShowtimePersistenceTest {
 	}
 
 	@Test
+	void cancelledShowtimeIsLeftOutOfTheListing() {
+		UUID movieId = movies.create("Film", "Synopsis", 90, "Drama", AgeRating.P,
+			LocalDate.parse("2026-09-01"), "poster").id();
+		UUID cinemaId = cinemas.create("Cinema " + UUID.randomUUID(), "Address").id();
+		UUID auditoriumId = auditoriums.create(cinemaId, "Hall", 1, 1, List.of(), List.of()).id();
+		Instant start = Instant.parse("2026-10-01T12:00:00Z");
+		Showtime cancelled = showtimes.create(movieId, auditoriumId, start, 100_000);
+		showtimes.cancel(cancelled.id(), CancellationReason.EMERGENCY, null, start);
+		Showtime showing = showtimes.create(movieId, auditoriumId, start, 100_000);
+
+		assertThat(showtimes.list(start, start.plusSeconds(1), cinemaId, movieId)).containsExactly(showing);
+	}
+
+	@Test
 	void savesAndFiltersByStartingTimeCinemaAndMovie() {
 		UUID movieId = movies.create("Film", "Synopsis", 90, "Drama", AgeRating.P, LocalDate.parse("2026-09-01"), "poster").id();
 		UUID otherMovieId = movies.create("Other", "Synopsis", 90, "Drama", AgeRating.P, LocalDate.parse("2026-09-01"), "poster").id();

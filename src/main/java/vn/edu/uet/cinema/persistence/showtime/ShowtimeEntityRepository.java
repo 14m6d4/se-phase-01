@@ -12,6 +12,7 @@ interface ShowtimeEntityRepository extends JpaRepository<ShowtimeEntity, UUID> {
 
 	@Query("""
 		select s from ShowtimeEntity s where s.startsAt >= :from and s.startsAt < :to
+		and s.status <> vn.edu.uet.cinema.business.showtime.ShowtimeStatus.CANCELLED
 		and (:cinemaId is null or s.auditoriumId in (select a.id from AuditoriumEntity a where a.cinemaId = :cinemaId))
 		and (:movieId is null or s.movieId = :movieId) order by s.startsAt, s.id
 		""")
