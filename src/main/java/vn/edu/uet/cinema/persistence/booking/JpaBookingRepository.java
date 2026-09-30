@@ -72,7 +72,8 @@ class JpaBookingRepository implements BookingRepository {
 		} catch (DataIntegrityViolationException e) {
 			// The insert that loses the race fails here (ADR 0004).
 			if (hasConstraint(e, "uq_booked_seat_showtime_seat")) {
-				// Rolled back by now, so the winner's Seats are visible to a fresh read.
+				// Rolled back by now, so the winner's Seats are visible to a fresh read. If the winner was abandoned
+				// in between, the list is empty: the Seats are free again and the client can simply retry.
 				Set<UUID> occupied = jpa.findOccupiedSeats(booking.showtimeId(), now).stream()
 					.map(BookingEntityRepository.OccupiedSeat::getSeatId).collect(Collectors.toSet());
 				throw new SeatsTakenException(seatIds.stream().filter(occupied::contains).toList());
