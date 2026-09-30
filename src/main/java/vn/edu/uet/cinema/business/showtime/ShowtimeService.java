@@ -41,9 +41,14 @@ public class ShowtimeService {
 		return showtimes.findByStartsAtBetween(fromInclusive, toExclusive, cinemaId, movieId);
 	}
 
+	/** A blank note counts as no note. */
 	public Showtime cancel(UUID id, CancellationReason reason, String note, Instant now) {
+		String given = note == null || note.isBlank() ? null : note;
+		if (reason == CancellationReason.OTHER && given == null) {
+			throw new InvalidShowtimeException("A Cancellation Reason of Other needs a note");
+		}
 		get(id);
-		if (!showtimes.cancel(id, new Cancellation(reason, note), now)) {
+		if (!showtimes.cancel(id, new Cancellation(reason, given), now)) {
 			throw new ConflictException("Showtime is already Cancelled or has ended");
 		}
 		return get(id);

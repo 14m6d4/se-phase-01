@@ -120,4 +120,20 @@ class ShowtimeServiceTest {
 			Instant.parse("2026-10-01T17:00:00Z")))
 			.isInstanceOf(ConflictException.class);
 	}
+
+	@Test
+	void otherNeedsANoteAndABlankNoteIsNoNote() {
+		Showtime showtime = new Showtime(UUID.randomUUID(), UUID.randomUUID(), UUID.randomUUID(),
+			Instant.parse("2026-10-01T14:00:00Z"), Instant.parse("2026-10-01T16:15:00Z"), 100_000L);
+		Instant now = Instant.parse("2026-10-01T13:00:00Z");
+		when(repository.findById(showtime.id())).thenReturn(Optional.of(showtime));
+		when(repository.cancel(any(), any(), any())).thenReturn(true);
+
+		for (String missing : new String[] {null, "", "   "}) {
+			assertThatThrownBy(() -> service.cancel(showtime.id(), CancellationReason.OTHER, missing, now))
+				.as("note %s", missing).isInstanceOf(InvalidShowtimeException.class);
+		}
+		service.cancel(showtime.id(), CancellationReason.EQUIPMENT_FAILURE, "  ", now);
+		verify(repository).cancel(showtime.id(), new Cancellation(CancellationReason.EQUIPMENT_FAILURE, null), now);
+	}
 }
