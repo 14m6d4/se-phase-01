@@ -30,7 +30,7 @@ Single Maven module, packages by layer under `vn.edu.uet.cinema`:
 | `persistence` | JPA entities, Spring Data repositories, adapters implementing `business` repository interfaces | `business`, JPA |
 | `config` | Security, bean wiring (`@Bean` for services), OpenAPI | everything |
 
-Each use case saves exactly one aggregate; the persistence adapter owns the transaction. No `@Transactional` in `business`.
+Each use case saves exactly one aggregate; the persistence adapter owns the transaction. No `@Transactional` in `business`. The one exception is cancelling a Showtime, which also deletes or refunds its Bookings in the same adapter transaction ([ADR 0005](adr/0005-showtime-cancellation-in-one-adapter-transaction.md)).
 
 ## Business rules
 
