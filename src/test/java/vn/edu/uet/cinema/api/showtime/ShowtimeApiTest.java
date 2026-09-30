@@ -120,6 +120,32 @@ class ShowtimeApiTest {
 	}
 
 	@Test
+	void invalidCancellationIsBadRequestAndCancellingTwiceIsConflict() throws Exception {
+		String admin = token("admin@cinema.local", "admin12345");
+		UUID id = schedule(movieId(), auditoriumId(), Instant.now().plusSeconds(86_400));
+		String path = "/api/showtimes/" + id + "/cancellation";
+
+		for (String body : List.of("{}", "{\"reason\":\"BORED\"}", "{\"reason\":\"OTHER\"}",
+			"{\"reason\":\"OTHER\",\"note\":\"  \"}")) {
+			mvc.perform(post(path).header("Authorization", "Bearer " + admin)
+					.contentType(MediaType.APPLICATION_JSON).content(body))
+				.andExpect(status().isBadRequest())
+				.andExpect(content().contentType(MediaType.APPLICATION_PROBLEM_JSON));
+		}
+		mvc.perform(post(path).header("Authorization", "Bearer " + admin)
+				.contentType(MediaType.APPLICATION_JSON).content("{\"reason\":\"POWER_OUTAGE\"}"))
+			.andExpect(status().isOk());
+		mvc.perform(post(path).header("Authorization", "Bearer " + admin)
+				.contentType(MediaType.APPLICATION_JSON).content("{\"reason\":\"POWER_OUTAGE\"}"))
+			.andExpect(status().isConflict())
+			.andExpect(content().contentType(MediaType.APPLICATION_PROBLEM_JSON));
+		mvc.perform(post("/api/showtimes/" + UUID.randomUUID() + "/cancellation")
+				.header("Authorization", "Bearer " + admin)
+				.contentType(MediaType.APPLICATION_JSON).content("{\"reason\":\"POWER_OUTAGE\"}"))
+			.andExpect(status().isNotFound());
+	}
+
+	@Test
 	void showtimeWriteOperationsAreMarkedProtectedInOpenApi() throws Exception {
 		mvc.perform(get("/v3/api-docs")).andExpect(status().isOk())
 			.andExpect(jsonPath("$.paths['/api/showtimes'].post.security[0].bearerAuth").exists())
