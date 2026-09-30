@@ -34,6 +34,7 @@ import vn.edu.uet.cinema.business.booking.SeatsTakenException;
 import vn.edu.uet.cinema.business.cinema.CinemaService;
 import vn.edu.uet.cinema.business.movie.AgeRating;
 import vn.edu.uet.cinema.business.movie.MovieService;
+import vn.edu.uet.cinema.business.showtime.CancellationReason;
 import vn.edu.uet.cinema.business.showtime.SeatOccupancyReader;
 import vn.edu.uet.cinema.business.showtime.SeatStatus;
 import vn.edu.uet.cinema.business.showtime.ShowtimeService;
@@ -202,6 +203,21 @@ class BookingPersistenceTest {
 
 		assertThat(repository.findByCustomer(customerId)).extracting(Booking::id)
 			.containsExactly(pending.id(), paid.id());
+	}
+
+	@Test
+	void cancellingAShowtimeDeletesItsPendingBookingsIncludingExpiredOnes() {
+		Auditorium hall = auditorium();
+		UUID showtimeId = showtime(hall);
+		Booking live = bookings.book(customer(), showtimeId, List.of(hall.seats().get(0).id()), now);
+		Booking expired = bookings.book(customer(), showtimeId, List.of(hall.seats().get(1).id()),
+			now.minus(11, ChronoUnit.MINUTES));
+
+		showtimes.cancel(showtimeId, CancellationReason.EQUIPMENT_FAILURE, null, now);
+
+		assertThat(repository.findById(live.id())).isEmpty();
+		assertThat(repository.findById(expired.id())).isEmpty();
+		assertThat(occupancy.statuses(showtimeId, now)).isEmpty();
 	}
 
 	private UUID customer() {

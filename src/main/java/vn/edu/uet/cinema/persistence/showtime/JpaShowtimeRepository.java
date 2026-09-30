@@ -76,7 +76,11 @@ class JpaShowtimeRepository implements ShowtimeRepository {
 	@Override
 	@Transactional
 	public boolean cancel(UUID id, Cancellation cancellation, Instant now) {
-		return jpa.cancel(id, cancellation.reason().name(), cancellation.note(), now) == 1;
+		if (jpa.cancel(id, cancellation.reason().name(), cancellation.note(), now) == 0) {
+			return false;
+		}
+		jpa.deletePendingBookings(id);
+		return true;
 	}
 
 	@Override

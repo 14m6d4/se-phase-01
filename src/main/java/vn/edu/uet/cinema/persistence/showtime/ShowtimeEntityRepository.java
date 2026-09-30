@@ -40,6 +40,11 @@ interface ShowtimeEntityRepository extends JpaRepository<ShowtimeEntity, UUID> {
 		""")
 	int cancel(UUID id, String reason, String note, Instant now);
 
+	/** Expired ones too: they are stored as PENDING. booked_seat rows go by ON DELETE CASCADE. */
+	@Modifying
+	@Query(nativeQuery = true, value = "delete from booking where showtime_id = :showtimeId and status = 'PENDING'")
+	void deletePendingBookings(UUID showtimeId);
+
 	boolean existsByMovieId(UUID movieId);
 
 	boolean existsByAuditoriumId(UUID auditoriumId);
