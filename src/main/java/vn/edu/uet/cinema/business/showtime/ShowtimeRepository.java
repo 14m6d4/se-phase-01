@@ -18,6 +18,9 @@ public interface ShowtimeRepository {
 	 */
 	void deleteById(UUID id);
 
+	/** Cancels the Showtime if it is Scheduled and has not ended at {@code now}; false otherwise. */
+	boolean cancel(UUID id, Cancellation cancellation, Instant now);
+
 	List<Showtime> findByStartsAtBetween(Instant fromInclusive, Instant toExclusive, UUID cinemaId, UUID movieId);
 
 	boolean existsOverlapping(UUID auditoriumId, Instant startsAt, Instant endsAt);

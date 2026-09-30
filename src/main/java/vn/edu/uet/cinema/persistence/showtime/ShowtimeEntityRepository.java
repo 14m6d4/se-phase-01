@@ -31,6 +31,13 @@ interface ShowtimeEntityRepository extends JpaRepository<ShowtimeEntity, UUID> {
 		""")
 	void deleteLapsedHolds(UUID showtimeId, Instant now);
 
+	@Modifying
+	@Query(nativeQuery = true, value = """
+		update showtime set status = 'CANCELLED', cancellation_reason = :reason, cancellation_note = :note
+		where id = :id and status = 'SCHEDULED' and ends_at > :now
+		""")
+	int cancel(UUID id, String reason, String note, Instant now);
+
 	boolean existsByMovieId(UUID movieId);
 
 	boolean existsByAuditoriumId(UUID auditoriumId);

@@ -18,8 +18,11 @@ import vn.edu.uet.cinema.business.auditorium.AuditoriumService;
 import vn.edu.uet.cinema.business.cinema.CinemaService;
 import vn.edu.uet.cinema.business.movie.AgeRating;
 import vn.edu.uet.cinema.business.movie.MovieService;
+import vn.edu.uet.cinema.business.showtime.Cancellation;
+import vn.edu.uet.cinema.business.showtime.CancellationReason;
 import vn.edu.uet.cinema.business.showtime.Showtime;
 import vn.edu.uet.cinema.business.showtime.ShowtimeService;
+import vn.edu.uet.cinema.business.showtime.ShowtimeStatus;
 
 @SpringBootTest
 @Import(TestcontainersConfiguration.class)
@@ -110,6 +113,23 @@ class ShowtimePersistenceTest {
 		assertThatThrownBy(() -> auditoriumRepository.deleteById(auditoriumId)).isInstanceOf(ConflictException.class);
 		assertThat(movies.get(movieId)).isNotNull();
 		assertThat(auditoriums.get(auditoriumId)).isNotNull();
+	}
+
+	@Test
+	void cancelledShowtimeKeepsItsReasonAndNote() {
+		UUID movieId = movies.create("Film", "Synopsis", 90, "Drama", AgeRating.P,
+			LocalDate.parse("2026-09-01"), "poster").id();
+		UUID cinemaId = cinemas.create("Cinema " + UUID.randomUUID(), "Address").id();
+		UUID auditoriumId = auditoriums.create(cinemaId, "Hall", 1, 1, List.of(), List.of()).id();
+		Instant start = Instant.parse("2026-10-01T12:00:00Z");
+		Showtime showtime = showtimes.create(movieId, auditoriumId, start, 100_000);
+		Cancellation cancellation = new Cancellation(CancellationReason.OTHER, "Flooded auditorium");
+
+		assertThat(repository.cancel(showtime.id(), cancellation, start.minusSeconds(3_600))).isTrue();
+
+		Showtime cancelled = showtimes.get(showtime.id());
+		assertThat(cancelled.status()).isEqualTo(ShowtimeStatus.CANCELLED);
+		assertThat(cancelled.cancellation()).isEqualTo(cancellation);
 	}
 
 	@Test
