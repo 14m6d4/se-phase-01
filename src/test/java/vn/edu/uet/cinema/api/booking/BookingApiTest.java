@@ -77,11 +77,13 @@ class BookingApiTest {
 			.andExpect(status().isCreated());
 
 		String other = customer();
+		UUID freeSeatId = hall.seats().get(1).id();
 		mvc.perform(post("/api/bookings").header("Authorization", "Bearer " + other)
-				.contentType(MediaType.APPLICATION_JSON).content(bookingJson(showtimeId, seatId)))
+				.contentType(MediaType.APPLICATION_JSON).content(bookingJson(showtimeId, freeSeatId, seatId)))
 			.andExpect(status().isConflict())
 			.andExpect(content().contentType(MediaType.APPLICATION_PROBLEM_JSON))
-			.andExpect(jsonPath("$.detail").value(containsString("Seat")));
+			.andExpect(jsonPath("$.detail").value(containsString("Seat")))
+			.andExpect(jsonPath("$.seatIds").value(contains(seatId.toString())));
 		for (String body : List.of(bookingJson(showtimeId), bookingJson(showtimeId, seatId, seatId),
 			bookingJson(showtimeId, UUID.randomUUID()), "{\"showtimeId\":\"%s\"}".formatted(showtimeId))) {
 			mvc.perform(post("/api/bookings").header("Authorization", "Bearer " + other)

@@ -3,24 +3,30 @@ package vn.edu.uet.cinema.persistence.booking;
 import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
+import java.util.stream.Collectors;
 import org.hibernate.exception.ConstraintViolationException;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.dao.PessimisticLockingFailureException;
 import org.springframework.stereotype.Repository;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionOperations;
 import vn.edu.uet.cinema.business.ConflictException;
 import vn.edu.uet.cinema.business.booking.BookedSeat;
 import vn.edu.uet.cinema.business.booking.Booking;
 import vn.edu.uet.cinema.business.booking.BookingRepository;
+import vn.edu.uet.cinema.business.booking.SeatsTakenException;
 
 @Repository
 class JpaBookingRepository implements BookingRepository {
 
 	private final BookingEntityRepository jpa;
+	private final TransactionOperations transaction;
 
-	JpaBookingRepository(BookingEntityRepository jpa) {
+	JpaBookingRepository(BookingEntityRepository jpa, TransactionOperations transaction) {
 		this.jpa = jpa;
+		this.transaction = transaction;
 	}
 
 	@Override
@@ -41,17 +47,35 @@ class JpaBookingRepository implements BookingRepository {
 		return jpa.findLivePending(customerId, now).map(BookingEntity::toBooking);
 	}
 
+	/** Not {@code @Transactional}: each attempt runs in its own transaction, so a deadlock loser can retry. */
 	@Override
-	@Transactional
 	public Booking saveNew(Booking booking, Instant now) {
 		try {
-			jpa.deleteLapsedHolds(booking.customerId(), booking.showtimeId(),
-				booking.seats().stream().map(BookedSeat::seatId).toList(), now);
-			return jpa.saveAndFlush(BookingEntity.from(booking)).toBooking();
+			return insert(booking, now);
+		} catch (PessimisticLockingFailureException deadlock) {
+			// Overlapping lapsed-Hold deletes can deadlock even when the two Bookings want different Seats.
+			try {
+				return insert(booking, now);
+			} catch (PessimisticLockingFailureException again) {
+				throw new ConflictException("Seats are being booked by others right now, try again");
+			}
+		}
+	}
+
+	private Booking insert(Booking booking, Instant now) {
+		List<UUID> seatIds = booking.seats().stream().map(BookedSeat::seatId).toList();
+		try {
+			return transaction.execute(status -> {
+				jpa.deleteLapsedHolds(booking.customerId(), booking.showtimeId(), seatIds, now);
+				return jpa.saveAndFlush(BookingEntity.from(booking)).toBooking();
+			});
 		} catch (DataIntegrityViolationException e) {
 			// The insert that loses the race fails here (ADR 0004).
 			if (hasConstraint(e, "uq_booked_seat_showtime_seat")) {
-				throw new ConflictException("Seat already taken");
+				// Rolled back by now, so the winner's Seats are visible to a fresh read.
+				Set<UUID> occupied = jpa.findOccupiedSeats(booking.showtimeId(), now).stream()
+					.map(BookingEntityRepository.OccupiedSeat::getSeatId).collect(Collectors.toSet());
+				throw new SeatsTakenException(seatIds.stream().filter(occupied::contains).toList());
 			}
 			if (hasConstraint(e, "uq_booking_customer_pending")) {
 				throw new ConflictException("Customer already has a Pending Booking");
@@ -60,9 +84,6 @@ class JpaBookingRepository implements BookingRepository {
 				throw new ConflictException("Showtime no longer exists");
 			}
 			throw e;
-		} catch (PessimisticLockingFailureException e) {
-			// A deadlock between overlapping lapsed-Hold deletes: someone else is taking these Seats right now.
-			throw new ConflictException("Seat already taken");
 		}
 	}
 

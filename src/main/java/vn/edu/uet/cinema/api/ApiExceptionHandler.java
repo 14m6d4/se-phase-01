@@ -9,6 +9,7 @@ import vn.edu.uet.cinema.business.NotFoundException;
 import vn.edu.uet.cinema.business.account.InvalidCredentialsException;
 import vn.edu.uet.cinema.business.auditorium.InvalidSeatLayoutException;
 import vn.edu.uet.cinema.business.booking.InvalidBookingException;
+import vn.edu.uet.cinema.business.booking.SeatsTakenException;
 import vn.edu.uet.cinema.business.showtime.InvalidShowtimeException;
 
 /**
@@ -26,6 +27,13 @@ class ApiExceptionHandler {
 	@ExceptionHandler
 	ProblemDetail conflict(ConflictException e) {
 		return ProblemDetail.forStatusAndDetail(HttpStatus.CONFLICT, e.getMessage());
+	}
+
+	@ExceptionHandler
+	ProblemDetail seatsTaken(SeatsTakenException e) {
+		ProblemDetail problem = conflict(e);
+		problem.setProperty("seatIds", e.seatIds());
+		return problem;
 	}
 
 	@ExceptionHandler
