@@ -66,7 +66,7 @@ The notebook seeds the database automatically after the service is healthy.
 
 **`smoke`**: `setup()` registers 50 Customers `smoke-{0..49}@loadtest.local` (existing ones are reused) and logs each in once. Every VU then calls `GET /api/me` with its own token under `ramping-arrival-rate`: 30 s ramp to `RATE`, hold for `HOLD`, 10 s ramp down.
 
-**`browse`**: no login — the measured endpoints are public. Every iteration calls `GET /api/showtimes?date=<today in Vietnam>` and then `GET /api/showtimes/{id}/seats` for one of the returned showtimes (120 seats per map). Requires `seed.sql` to have been run, so there is something to browse; otherwise only the list request is measured. Same `ramping-arrival-rate` shape as `smoke`.
+**`browse`**: no login — the measured endpoints are public. Every iteration calls `GET /api/showtimes?date=<today in Vietnam>` and then `GET /api/showtimes/{id}/seats` for one of the returned showtimes (120 seats per map). Requires `seed.sql` to have been run, so there is something to browse; otherwise the run fails with `no showtimes seeded for today or tomorrow`. Same `ramping-arrival-rate` shape as `smoke`.
 
 To add a scenario, add `k6/<name>.js` and set `SCENARIO = "<name>"`. The script must:
 

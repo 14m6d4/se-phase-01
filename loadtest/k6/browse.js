@@ -49,7 +49,7 @@ export default function () {
 		check(list, { 'showtimes (tomorrow) status is 200': (r) => r.status === 200 });
 		if (list.status !== 200) fail(`GET /api/showtimes: HTTP ${list.status} ${list.body}`);
 	}
-	if (list.json().length === 0) return; // nothing seeded for today or tomorrow
+	if (list.json().length === 0) fail('no showtimes seeded for today or tomorrow');
 
 	// Each iteration opens one (deterministically spread) showtime's seat map.
 	const showtimes = list.json();
