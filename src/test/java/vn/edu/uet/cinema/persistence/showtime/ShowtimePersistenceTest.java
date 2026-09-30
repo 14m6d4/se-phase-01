@@ -133,6 +133,26 @@ class ShowtimePersistenceTest {
 	}
 
 	@Test
+	void showtimeCanBeCancelledOnlyOnceAndOnlyUntilItEnds() {
+		UUID movieId = movies.create("Film", "Synopsis", 90, "Drama", AgeRating.P,
+			LocalDate.parse("2026-09-01"), "poster").id();
+		UUID cinemaId = cinemas.create("Cinema " + UUID.randomUUID(), "Address").id();
+		UUID auditoriumId = auditoriums.create(cinemaId, "Hall", 1, 1, List.of(), List.of()).id();
+		Showtime ended = showtimes.create(movieId, auditoriumId, Instant.parse("2026-10-01T12:00:00Z"), 100_000);
+		Showtime running = showtimes.create(movieId, auditoriumId, ended.endsAt(), 100_000);
+		Cancellation powerCut = new Cancellation(CancellationReason.POWER_OUTAGE, null);
+
+		assertThat(repository.cancel(ended.id(), powerCut, ended.endsAt())).isFalse();
+		assertThat(showtimes.get(ended.id()).status()).isEqualTo(ShowtimeStatus.SCHEDULED);
+
+		Instant midway = running.startsAt().plusSeconds(1_800);
+		assertThat(repository.cancel(running.id(), powerCut, midway)).isTrue();
+		assertThat(repository.cancel(running.id(), new Cancellation(CancellationReason.EMERGENCY, null), midway))
+			.isFalse();
+		assertThat(showtimes.get(running.id()).cancellation()).isEqualTo(powerCut);
+	}
+
+	@Test
 	void savesAndFiltersByStartingTimeCinemaAndMovie() {
 		UUID movieId = movies.create("Film", "Synopsis", 90, "Drama", AgeRating.P, LocalDate.parse("2026-09-01"), "poster").id();
 		UUID otherMovieId = movies.create("Other", "Synopsis", 90, "Drama", AgeRating.P, LocalDate.parse("2026-09-01"), "poster").id();
