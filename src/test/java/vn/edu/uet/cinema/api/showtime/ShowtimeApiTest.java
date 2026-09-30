@@ -3,6 +3,7 @@ package vn.edu.uet.cinema.api.showtime;
 import static org.hamcrest.Matchers.contains;
 import static org.hamcrest.Matchers.hasItem;
 import static org.hamcrest.Matchers.hasSize;
+import static org.hamcrest.Matchers.nullValue;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -53,6 +54,8 @@ class ShowtimeApiTest {
 			.andExpect(jsonPath("$.auditoriumId").value(auditoriumId.toString()))
 			.andExpect(jsonPath("$.startsAt").value("2026-09-27T13:00:00Z"))
 			.andExpect(jsonPath("$.basePrice").value(100_000))
+			.andExpect(jsonPath("$.status").value("SCHEDULED"))
+			.andExpect(jsonPath("$.cancellation").value(nullValue()))
 			.andReturn().getResponse().getContentAsString();
 		String id = JsonPath.read(created, "$.id");
 
