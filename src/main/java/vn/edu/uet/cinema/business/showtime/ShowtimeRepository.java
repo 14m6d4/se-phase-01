@@ -14,11 +14,14 @@ public interface ShowtimeRepository {
 	/**
 	 * Lapsed Holds are deleted along with the Showtime.
 	 *
-	 * @throws vn.edu.uet.cinema.business.ConflictException if it has a Confirmed or live Pending Booking
+	 * @throws vn.edu.uet.cinema.business.ConflictException if it has a Confirmed, Refunded or live Pending Booking
 	 */
 	void deleteById(UUID id);
 
-	/** Cancels the Showtime if it is Scheduled and has not ended at {@code now}; false otherwise. */
+	/**
+	 * Cancels the Showtime if it is Scheduled and has not ended at {@code now}; false otherwise. In the same
+	 * transaction its Pending Bookings are deleted and its Confirmed ones become Refunded.
+	 */
 	boolean cancel(UUID id, Cancellation cancellation, Instant now);
 
 	List<Showtime> findByStartsAtBetween(Instant fromInclusive, Instant toExclusive, UUID cinemaId, UUID movieId);

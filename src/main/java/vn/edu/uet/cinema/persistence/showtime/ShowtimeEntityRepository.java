@@ -45,6 +45,12 @@ interface ShowtimeEntityRepository extends JpaRepository<ShowtimeEntity, UUID> {
 	@Query(nativeQuery = true, value = "delete from booking where showtime_id = :showtimeId and status = 'PENDING'")
 	void deletePendingBookings(UUID showtimeId);
 
+	@Modifying
+	@Query(nativeQuery = true, value = """
+		update booking set status = 'REFUNDED' where showtime_id = :showtimeId and status = 'CONFIRMED'
+		""")
+	void refundConfirmedBookings(UUID showtimeId);
+
 	boolean existsByMovieId(UUID movieId);
 
 	boolean existsByAuditoriumId(UUID auditoriumId);

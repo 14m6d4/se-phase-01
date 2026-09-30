@@ -79,7 +79,9 @@ class JpaShowtimeRepository implements ShowtimeRepository {
 		if (jpa.cancel(id, cancellation.reason().name(), cancellation.note(), now) == 0) {
 			return false;
 		}
+		// Delete before refunding: a payment that commits in between is then refunded, never left Confirmed.
 		jpa.deletePendingBookings(id);
+		jpa.refundConfirmedBookings(id);
 		return true;
 	}
 

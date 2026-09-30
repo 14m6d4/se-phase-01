@@ -220,6 +220,19 @@ class BookingPersistenceTest {
 		assertThat(occupancy.statuses(showtimeId, now)).isEmpty();
 	}
 
+	@Test
+	void cancellingAShowtimeRefundsItsConfirmedBookings() {
+		Auditorium hall = auditorium();
+		UUID showtimeId = showtime(hall);
+		Booking paid = bookings.book(customer(), showtimeId, List.of(hall.seats().get(0).id()), now);
+		bookings.pay(paid.customerId(), paid.id(), now);
+
+		showtimes.cancel(showtimeId, CancellationReason.POWER_OUTAGE, null, now);
+
+		assertThat(bookings.get(paid.customerId(), paid.id()).status()).isEqualTo(BookingStatus.REFUNDED);
+		assertThat(bookings.get(paid.customerId(), paid.id()).totalPrice()).isEqualTo(paid.totalPrice());
+	}
+
 	private UUID customer() {
 		return accounts.registerCustomer("booking-" + UUID.randomUUID() + "@example.com", "password123", "Customer")
 			.id();

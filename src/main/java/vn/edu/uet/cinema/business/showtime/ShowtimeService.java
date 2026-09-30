@@ -43,7 +43,7 @@ public class ShowtimeService {
 		return showtimes.findByStartsAtBetween(fromInclusive, toExclusive, cinemaId, movieId);
 	}
 
-	/** A blank note counts as no note. */
+	/** Its Pending Bookings are deleted and its Confirmed ones become Refunded. A blank note counts as no note. */
 	public Showtime cancel(UUID id, CancellationReason reason, String note, Instant now) {
 		String given = note == null || note.isBlank() ? null : note;
 		if (reason == CancellationReason.OTHER && given == null) {
