@@ -32,19 +32,42 @@ export const options = {
 
 // Today's date in the Vietnam timezone, as the API expects it (`?date=` is
 // interpreted in Asia/Ho_Chi_Minh).
-function vietnamToday() {
+function today() {
 	return new Date(Date.now() + 7 * 3600 * 1000).toISOString().slice(0, 10);
+}
+
+function tomorrow() {
+	return new Date(Date.now() + (7 + 24) * 3600 * 1000).toISOString().slice(0, 10);
+}
+
+// Preflight: abort the whole run before any VU starts when nothing is seeded.
+// A `fail()` inside an iteration only logs a GoError but still exits 0, so the
+// empty-seed check must happen in setup(), where a thrown error exits 107.
+// This request is untagged (no LOAD), so it stays out of the measured numbers.
+export function setup() {
+	preflightShowtimes();
+	return {};
+}
+
+function preflightShowtimes() {
+	const d = today();
+	for (const date of [d, tomorrow()]) {
+		const r = http.get(`${BASE_URL}/api/showtimes?date=${date}`);
+		if (r.status !== 200) throw new Error(`GET /api/showtimes: HTTP ${r.status} ${r.body}`);
+		if (r.json().length > 0) return;
+	}
+	throw new Error('no showtimes seeded for today or tomorrow');
 }
 
 export default function () {
 	// Seed data starts on tomorrow's VN date (it must be strictly future at seed
 	// time), so fall back to tomorrow when today has no showtimes.
-	let date = vietnamToday();
+	let date = today();
 	let list = http.get(`${BASE_URL}/api/showtimes?date=${date}`, LOAD);
 	const okList = check(list, { 'showtimes status is 200': (r) => r.status === 200 });
 	if (!okList) fail(`GET /api/showtimes: HTTP ${list.status} ${list.body}`);
 	if (list.json().length === 0) {
-		date = new Date(Date.now() + (7 + 24) * 3600 * 1000).toISOString().slice(0, 10); // tomorrow, VN
+		date = tomorrow();
 		list = http.get(`${BASE_URL}/api/showtimes?date=${date}`, LOAD);
 		check(list, { 'showtimes (tomorrow) status is 200': (r) => r.status === 200 });
 		if (list.status !== 200) fail(`GET /api/showtimes: HTTP ${list.status} ${list.body}`);
