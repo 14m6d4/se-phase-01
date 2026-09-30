@@ -64,6 +64,26 @@ class ShowtimeApiTest {
 	}
 
 	@Test
+	void adminCancelsShowtimeAndItKeepsItsCancellationReason() throws Exception {
+		String admin = token("admin@cinema.local", "admin12345");
+		UUID id = schedule(movieId(), auditoriumId(), Instant.now().plusSeconds(86_400));
+
+		mvc.perform(post("/api/showtimes/" + id + "/cancellation").header("Authorization", "Bearer " + admin)
+				.contentType(MediaType.APPLICATION_JSON)
+				.content("{\"reason\":\"EQUIPMENT_FAILURE\",\"note\":\"Projector lamp blew\"}"))
+			.andExpect(status().isOk())
+			.andExpect(jsonPath("$.id").value(id.toString()))
+			.andExpect(jsonPath("$.status").value("CANCELLED"))
+			.andExpect(jsonPath("$.cancellation.reason").value("EQUIPMENT_FAILURE"))
+			.andExpect(jsonPath("$.cancellation.note").value("Projector lamp blew"));
+
+		mvc.perform(get("/api/showtimes/" + id))
+			.andExpect(status().isOk())
+			.andExpect(jsonPath("$.status").value("CANCELLED"))
+			.andExpect(jsonPath("$.cancellation.reason").value("EQUIPMENT_FAILURE"));
+	}
+
+	@Test
 	void showtimeWritesRequireAdmin() throws Exception {
 		String body = showtimeJson(UUID.randomUUID(), UUID.randomUUID(), "2026-09-27T20:00:00+07:00", 100_000);
 		mvc.perform(post("/api/showtimes").contentType(MediaType.APPLICATION_JSON).content(body))

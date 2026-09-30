@@ -78,6 +78,12 @@ class ShowtimeController {
 			.toList();
 	}
 
+	@PostMapping("/api/showtimes/{id}/cancellation")
+	@SecurityRequirement(name = OpenApiConfig.BEARER_AUTH)
+	ShowtimeResponse cancel(@PathVariable UUID id, @Valid @RequestBody CancellationRequest request) {
+		return ShowtimeResponse.from(showtimes.cancel(id, request.reason(), request.note(), Instant.now()));
+	}
+
 	@DeleteMapping("/api/showtimes/{id}")
 	@ResponseStatus(HttpStatus.NO_CONTENT)
 	@SecurityRequirement(name = OpenApiConfig.BEARER_AUTH)
@@ -87,6 +93,9 @@ class ShowtimeController {
 
 	record ShowtimeRequest(@NotNull UUID movieId, @NotNull UUID auditoriumId, @NotNull OffsetDateTime startsAt,
 		@NotNull @Positive Long basePrice) {
+	}
+
+	record CancellationRequest(@NotNull CancellationReason reason, String note) {
 	}
 
 	/** {@code cancellation} is null unless the Showtime is Cancelled. */
