@@ -181,6 +181,15 @@ class BookingServiceTest {
 	}
 
 	@Test
+	void refundedBookingCannotBeAbandonedAndIsToldSo() {
+		Booking refunded = stored(BookingStatus.REFUNDED, NOW.plusSeconds(60));
+
+		assertThatThrownBy(() -> service.abandon(customerId, refunded.id()))
+			.isInstanceOf(ConflictException.class).hasMessageContaining("REFUNDED");
+		verify(repository, never()).deletePending(refunded.id());
+	}
+
+	@Test
 	void abandoningABookingThatVanishedMeanwhileIsNotFound() {
 		Booking pending = stored(BookingStatus.PENDING, NOW.plusSeconds(60));
 		when(repository.findById(pending.id())).thenReturn(Optional.of(pending), Optional.empty());
