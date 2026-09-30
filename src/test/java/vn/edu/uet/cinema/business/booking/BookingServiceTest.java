@@ -22,8 +22,11 @@ import vn.edu.uet.cinema.business.auditorium.Auditorium;
 import vn.edu.uet.cinema.business.auditorium.AuditoriumService;
 import vn.edu.uet.cinema.business.auditorium.Seat;
 import vn.edu.uet.cinema.business.auditorium.SeatType;
+import vn.edu.uet.cinema.business.showtime.Cancellation;
+import vn.edu.uet.cinema.business.showtime.CancellationReason;
 import vn.edu.uet.cinema.business.showtime.Showtime;
 import vn.edu.uet.cinema.business.showtime.ShowtimeService;
+import vn.edu.uet.cinema.business.showtime.ShowtimeStatus;
 
 class BookingServiceTest {
 
@@ -72,6 +75,18 @@ class BookingServiceTest {
 
 		assertThatThrownBy(() -> service.book(customerId, started.id(), List.of(standard.id()), NOW))
 			.isInstanceOf(ConflictException.class);
+		verifyNoInteractions(repository);
+	}
+
+	@Test
+	void cancelledShowtimeCannotBeBooked() {
+		Showtime cancelled = new Showtime(showtime.id(), showtime.movieId(), showtime.auditoriumId(),
+			showtime.startsAt(), showtime.endsAt(), showtime.basePrice(), ShowtimeStatus.CANCELLED,
+			new Cancellation(CancellationReason.EMERGENCY, null));
+		when(showtimes.get(showtime.id())).thenReturn(cancelled);
+
+		assertThatThrownBy(() -> service.book(customerId, showtime.id(), List.of(standard.id()), NOW))
+			.isInstanceOf(ConflictException.class).hasMessageContaining("Cancelled");
 		verifyNoInteractions(repository);
 	}
 

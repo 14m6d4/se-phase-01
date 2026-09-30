@@ -15,6 +15,7 @@ import vn.edu.uet.cinema.business.auditorium.Seat;
 import vn.edu.uet.cinema.business.showtime.SeatPricing;
 import vn.edu.uet.cinema.business.showtime.Showtime;
 import vn.edu.uet.cinema.business.showtime.ShowtimeService;
+import vn.edu.uet.cinema.business.showtime.ShowtimeStatus;
 
 public class BookingService {
 
@@ -39,6 +40,9 @@ public class BookingService {
 			throw new InvalidBookingException("Duplicate seatIds");
 		}
 		Showtime showtime = showtimes.get(showtimeId);
+		if (showtime.status() == ShowtimeStatus.CANCELLED) {
+			throw new ConflictException("Showtime is Cancelled");
+		}
 		if (!now.isBefore(showtime.startsAt())) {
 			throw new ConflictException("Showtime has already started");
 		}
