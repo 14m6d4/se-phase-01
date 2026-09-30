@@ -14,6 +14,7 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
+import java.util.concurrent.ThreadLocalRandom;
 import java.util.stream.IntStream;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -243,6 +244,53 @@ class BookingPersistenceTest {
 
 		assertThatThrownBy(() -> repository.saveNew(late, now)).isInstanceOf(ConflictException.class);
 		assertThat(repository.findById(late.id())).isEmpty();
+	}
+
+	@Test
+	void noPendingOrConfirmedBookingOutlivesACancelWhateverTheInterleaving() throws Exception {
+		for (int round = 0; round < 5; round++) {
+			UUID cinemaId = cinemas.create("Cinema " + UUID.randomUUID(), "Address").id();
+			Auditorium hall = auditoriums.create(cinemaId, "Hall", 4, 4, List.of(), List.of());
+			UUID showtimeId = showtime(hall);
+			List<UUID> customers = hall.seats().stream().map(seat -> customer()).toList();
+			CountDownLatch start = new CountDownLatch(1);
+			List<Callable<Void>> work = new java.util.ArrayList<>();
+			for (int i = 0; i < customers.size(); i++) {
+				UUID customerId = customers.get(i);
+				UUID seatId = hall.seats().get(i).id();
+				work.add(() -> {
+					start.await();
+					try {
+						Booking booking = bookings.book(customerId, showtimeId, List.of(seatId), Instant.now());
+						bookings.pay(customerId, booking.id(), Instant.now());
+					} catch (ConflictException | NotFoundException cancelledMeanwhile) {
+						// Booking a Cancelled Showtime, or paying a Booking the cancel deleted or refunded.
+					}
+					return null;
+				});
+			}
+			work.add(() -> {
+				start.await();
+				// Land somewhere among the bookings and payments rather than always before them.
+				Thread.sleep(ThreadLocalRandom.current().nextInt(40));
+				showtimes.cancel(showtimeId, CancellationReason.EMERGENCY, null, Instant.now());
+				return null;
+			});
+
+			ExecutorService pool = Executors.newFixedThreadPool(work.size());
+			try {
+				List<Future<Void>> results = work.stream().map(pool::submit).toList();
+				start.countDown();
+				for (Future<Void> result : results) {
+					result.get();
+				}
+			} finally {
+				pool.shutdownNow();
+			}
+			List<BookingStatus> left = customers.stream().flatMap(customerId -> bookings.list(customerId).stream())
+				.map(Booking::status).toList();
+			assertThat(left).as("round %d", round).doesNotContain(BookingStatus.PENDING, BookingStatus.CONFIRMED);
+		}
 	}
 
 	private UUID customer() {
