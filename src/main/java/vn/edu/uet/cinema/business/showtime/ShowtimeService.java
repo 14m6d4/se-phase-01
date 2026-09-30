@@ -10,6 +10,8 @@ import vn.edu.uet.cinema.business.movie.MovieService;
 
 public class ShowtimeService {
 
+	private static final int MAX_NOTE_LENGTH = 200;
+
 	private final MovieService movies;
 	private final AuditoriumService auditoriums;
 	private final ShowtimeRepository showtimes;
@@ -46,6 +48,9 @@ public class ShowtimeService {
 		String given = note == null || note.isBlank() ? null : note;
 		if (reason == CancellationReason.OTHER && given == null) {
 			throw new InvalidShowtimeException("A Cancellation Reason of Other needs a note");
+		}
+		if (given != null && given.length() > MAX_NOTE_LENGTH) {
+			throw new InvalidShowtimeException("A cancellation note has at most " + MAX_NOTE_LENGTH + " characters");
 		}
 		get(id);
 		if (!showtimes.cancel(id, new Cancellation(reason, given), now)) {

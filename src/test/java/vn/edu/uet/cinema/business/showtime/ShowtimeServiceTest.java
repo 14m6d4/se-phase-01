@@ -136,4 +136,17 @@ class ShowtimeServiceTest {
 		service.cancel(showtime.id(), CancellationReason.EQUIPMENT_FAILURE, "  ", now);
 		verify(repository).cancel(showtime.id(), new Cancellation(CancellationReason.EQUIPMENT_FAILURE, null), now);
 	}
+
+	@Test
+	void noteIsAtMostTwoHundredCharacters() {
+		Showtime showtime = new Showtime(UUID.randomUUID(), UUID.randomUUID(), UUID.randomUUID(),
+			Instant.parse("2026-10-01T14:00:00Z"), Instant.parse("2026-10-01T16:15:00Z"), 100_000L);
+		Instant now = Instant.parse("2026-10-01T13:00:00Z");
+		when(repository.findById(showtime.id())).thenReturn(Optional.of(showtime));
+		when(repository.cancel(any(), any(), any())).thenReturn(true);
+
+		assertThatThrownBy(() -> service.cancel(showtime.id(), CancellationReason.OTHER, "x".repeat(201), now))
+			.isInstanceOf(InvalidShowtimeException.class);
+		service.cancel(showtime.id(), CancellationReason.OTHER, "x".repeat(200), now);
+	}
 }
