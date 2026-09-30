@@ -17,10 +17,11 @@ public interface BookingRepository {
 
 	/**
 	 * Inserts a new Booking after deleting, in the same transaction, the lapsed Holds (as of {@code now}) on its
-	 * Seats and the Customer's own lapsed Pending Booking.
+	 * Seats and the Customer's own lapsed Pending Booking. A transaction that loses a deadlock is retried once.
 	 *
-	 * @throws vn.edu.uet.cinema.business.ConflictException if a Seat is taken or the Customer already has a
-	 * Pending Booking
+	 * @throws SeatsTakenException naming the requested Seats that are HELD or SOLD
+	 * @throws vn.edu.uet.cinema.business.ConflictException if the Customer already has a Pending Booking, or the
+	 * retry lost a deadlock too
 	 */
 	Booking saveNew(Booking booking, Instant now);
 

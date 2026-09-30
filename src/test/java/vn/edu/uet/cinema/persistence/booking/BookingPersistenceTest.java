@@ -30,6 +30,7 @@ import vn.edu.uet.cinema.business.booking.Booking;
 import vn.edu.uet.cinema.business.booking.BookingRepository;
 import vn.edu.uet.cinema.business.booking.BookingService;
 import vn.edu.uet.cinema.business.booking.BookingStatus;
+import vn.edu.uet.cinema.business.booking.SeatsTakenException;
 import vn.edu.uet.cinema.business.cinema.CinemaService;
 import vn.edu.uet.cinema.business.movie.AgeRating;
 import vn.edu.uet.cinema.business.movie.MovieService;
@@ -69,7 +70,8 @@ class BookingPersistenceTest {
 				try {
 					bookings.book(customerId, showtimeId, seatIds, Instant.now());
 					return true;
-				} catch (ConflictException seatTaken) {
+				} catch (SeatsTakenException seatsTaken) {
+					assertThat(seatsTaken.seatIds()).containsExactlyElementsOf(seatIds);
 					return false;
 				}
 			};
