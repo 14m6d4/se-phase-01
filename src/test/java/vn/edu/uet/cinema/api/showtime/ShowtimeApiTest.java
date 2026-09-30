@@ -99,6 +99,14 @@ class ShowtimeApiTest {
 				.contentType(MediaType.APPLICATION_JSON).content(body))
 			.andExpect(status().isForbidden())
 			.andExpect(content().contentType(MediaType.APPLICATION_PROBLEM_JSON));
+
+		String cancellation = "{\"reason\":\"EMERGENCY\"}";
+		String path = "/api/showtimes/" + UUID.randomUUID() + "/cancellation";
+		mvc.perform(post(path).contentType(MediaType.APPLICATION_JSON).content(cancellation))
+			.andExpect(status().isUnauthorized());
+		mvc.perform(post(path).header("Authorization", "Bearer " + customer)
+				.contentType(MediaType.APPLICATION_JSON).content(cancellation))
+			.andExpect(status().isForbidden());
 	}
 
 	@Test
@@ -115,7 +123,8 @@ class ShowtimeApiTest {
 	void showtimeWriteOperationsAreMarkedProtectedInOpenApi() throws Exception {
 		mvc.perform(get("/v3/api-docs")).andExpect(status().isOk())
 			.andExpect(jsonPath("$.paths['/api/showtimes'].post.security[0].bearerAuth").exists())
-			.andExpect(jsonPath("$.paths['/api/showtimes/{id}'].delete.security[0].bearerAuth").exists());
+			.andExpect(jsonPath("$.paths['/api/showtimes/{id}'].delete.security[0].bearerAuth").exists())
+			.andExpect(jsonPath("$.paths['/api/showtimes/{id}/cancellation'].post.security[0].bearerAuth").exists());
 	}
 
 	@Test
