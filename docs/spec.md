@@ -40,12 +40,14 @@ Each use case saves exactly one aggregate; the persistence adapter owns the tran
 - A **Movie** has `title`, `description`, `durationMinutes`, `genre`, `ageRating` (`P`, `K`, `T13`, `T16`, `T18`; display only), `releaseDate`, `posterUrl`.
 - A **Showtime** has `movieId`, `auditoriumId`, `startsAt`, `basePrice`. `endsAt = startsAt + durationMinutes + 15 min` (cleaning) is fixed at creation; later Movie edits do not change it.
 - Showtimes in the same Auditorium may not overlap on `[startsAt, endsAt)`.
-- Deletes are hard deletes, refused with `409` while dependants exist: Cinema with Auditoriums, Auditorium with Showtimes, Movie with Showtimes, Showtime with a Confirmed or live Pending Booking (lapsed Holds are deleted along with the Showtime); such a Showtime can be Cancelled instead.
+- Deletes are hard deletes, refused with `409` while dependants exist: Cinema with Auditoriums, Auditorium with Showtimes, Movie with Showtimes, Showtime with a Confirmed, Refunded or live Pending Booking (lapsed Holds are deleted along with the Showtime); such a Showtime can be Cancelled instead. A Cancelled Showtime with no Bookings left can still be deleted.
 
 ### Showtime cancellation
 - An Admin can **Cancel** a Showtime because of a problem on the cinema's side, from creation until its `endsAt`; later, or if already Cancelled → `409`. Cancelled is final.
-- A **Cancellation Reason** is required: `EQUIPMENT_FAILURE`, `POWER_OUTAGE`, `EMERGENCY` or `OTHER`, plus a `note` (≤ 200 characters) that `OTHER` requires.
-- Its Confirmed Bookings become **Refunded** (full `totalPrice`, simulated), its Pending Bookings are deleted, and it can no longer be booked.
+- A **Cancellation Reason** is required: `EQUIPMENT_FAILURE`, `POWER_OUTAGE`, `EMERGENCY` or `OTHER`, plus a `note` (≤ 200 characters) that `OTHER` requires. A blank note counts as none. A missing or unknown reason, or `OTHER` without a note → `400`.
+- Cancelling returns `200` with the Cancelled Showtime.
+- In one transaction, its Confirmed Bookings become **Refunded** (full `totalPrice`, simulated) and its Pending Bookings, Expired ones included, are deleted ([ADR 0005](adr/0005-showtime-cancellation-in-one-adapter-transaction.md)). Paying one of those deleted Bookings → `404`.
+- A Cancelled Showtime can no longer be booked (`409`), and its seat map → `409`.
 - A Cancelled Showtime is left out of `GET /showtimes`, but `GET /showtimes/{id}` still returns it with its status and Cancellation Reason.
 - It no longer takes part in the no-overlap rule: a replacement Showtime may use its time slot.
 
@@ -56,11 +58,11 @@ Each use case saves exactly one aggregate; the persistence adapter owns the tran
 
 ### Booking
 - One **Booking** = one Showtime, 1–8 Seats (a Couple Seat counts as one), all in that Showtime's Auditorium. Duplicate `seatIds` → `400`.
-- Cannot book a Showtime that has already started.
+- Cannot book a Showtime that has already started, or one that is Cancelled.
 - A new Booking is **Pending** with a **Hold** of 10 minutes (`expiresAt`).
 - A Customer may have at most one live Pending Booking; booking again while it is live → `409` naming that Booking's id.
 - `POST /bookings/{id}/payment` (simulated, always succeeds) makes it **Confirmed** if the Hold is still live, else `409`. The Hold alone decides: payment after the Showtime has started is allowed. Paying an already Confirmed Booking returns it unchanged (`200`), so a client can retry safely.
-- A Pending Booking can be abandoned (`DELETE`): it is removed and its Seats freed. A Confirmed Booking cannot be cancelled or refunded by the Customer (`409`); only Cancelling its Showtime makes it Refunded.
+- A Pending Booking can be abandoned (`DELETE`): it is removed and its Seats freed. A Confirmed or Refunded Booking cannot be (`409`, naming its status): a Customer can never cancel or refund a Booking themselves; only Cancelling its Showtime makes it Refunded.
 - A Pending Booking past `expiresAt` is **Expired**: shown as such, cannot be paid, and removed the next time anyone books one of its Seats ([ADR 0004](adr/0004-seat-contention-via-unique-constraint-and-lazy-holds.md)).
 - Double booking is prevented by `UNIQUE(showtime_id, seat_id)` on booked seats; the loser gets `409` listing which of the requested `seatIds` are taken. A booking that loses a database deadlock is retried once before reporting anything.
 - A Customer only sees their own Bookings; someone else's Booking id returns `404`.
