@@ -124,17 +124,32 @@ class BookingServiceTest {
 	}
 
 	@Test
-	void paymentOfAnExpiredConfirmedOrJustLapsedBookingIsConflict() {
+	void paymentOfAnExpiredOrJustLapsedBookingIsConflict() {
 		Booking expired = stored(BookingStatus.PENDING, NOW);
-		Booking confirmed = stored(BookingStatus.CONFIRMED, NOW.plusSeconds(60));
 		Booking lapsesDuringPayment = stored(BookingStatus.PENDING, NOW.plusSeconds(60));
 
-		for (Booking booking : List.of(expired, confirmed, lapsesDuringPayment)) {
+		for (Booking booking : List.of(expired, lapsesDuringPayment)) {
 			assertThatThrownBy(() -> service.pay(customerId, booking.id(), NOW)).as("%s", booking)
 				.isInstanceOf(ConflictException.class);
 		}
 		verify(repository, never()).confirm(expired.id(), NOW);
+	}
+
+	@Test
+	void payingAConfirmedBookingReturnsItUnchanged() {
+		Booking confirmed = stored(BookingStatus.CONFIRMED, NOW.plusSeconds(60));
+
+		assertThat(service.pay(customerId, confirmed.id(), NOW)).isEqualTo(confirmed);
 		verify(repository, never()).confirm(confirmed.id(), NOW);
+	}
+
+	@Test
+	void payingTwiceAtOnceReturnsTheConfirmedBookingToTheLoserToo() {
+		Booking pending = stored(BookingStatus.PENDING, NOW.plusSeconds(60));
+		// The other payment confirmed it between our read and our conditional update.
+		when(repository.findById(pending.id())).thenReturn(Optional.of(pending), Optional.of(pending.confirmed()));
+
+		assertThat(service.pay(customerId, pending.id(), NOW)).isEqualTo(pending.confirmed());
 	}
 
 	@Test

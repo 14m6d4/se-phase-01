@@ -69,17 +69,19 @@ public class BookingService {
 			.orElseThrow(() -> new NotFoundException("Booking not found"));
 	}
 
-	/** Simulated payment: always succeeds, so only the Hold decides. */
+	/** Simulated payment: always succeeds, so only the Hold decides. Paying a Confirmed Booking returns it. */
 	public Booking pay(UUID customerId, UUID id, Instant now) {
 		Booking booking = get(customerId, id);
-		BookingStatus status = booking.statusAt(now);
-		if (status != BookingStatus.PENDING) {
+		if (booking.statusAt(now) == BookingStatus.PENDING && bookings.confirm(id, now)) {
+			return booking.confirmed();
+		}
+		// Not confirmed by us: it was already, or a concurrent payment just did, or the Hold has lapsed.
+		Booking current = get(customerId, id);
+		BookingStatus status = current.statusAt(now);
+		if (status != BookingStatus.CONFIRMED) {
 			throw new ConflictException("Booking is " + status + ", only a Pending Booking can be paid");
 		}
-		if (!bookings.confirm(id, now)) {
-			throw new ConflictException("Booking is no longer Pending");
-		}
-		return booking.confirmed();
+		return current;
 	}
 
 	/** An Expired Booking can be abandoned too: it is removed like any lapsed Hold. */

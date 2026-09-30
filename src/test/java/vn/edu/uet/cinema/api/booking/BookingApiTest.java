@@ -108,9 +108,11 @@ class BookingApiTest {
 			.andExpect(jsonPath("$.id").value(id))
 			.andExpect(jsonPath("$.status").value("CONFIRMED"));
 
+		// A retried payment is safe: same Booking, still 200.
 		mvc.perform(post("/api/bookings/" + id + "/payment").header("Authorization", "Bearer " + token))
-			.andExpect(status().isConflict())
-			.andExpect(content().contentType(MediaType.APPLICATION_PROBLEM_JSON));
+			.andExpect(status().isOk())
+			.andExpect(jsonPath("$.id").value(id))
+			.andExpect(jsonPath("$.status").value("CONFIRMED"));
 		mvc.perform(delete("/api/bookings/" + id).header("Authorization", "Bearer " + token))
 			.andExpect(status().isConflict())
 			.andExpect(content().contentType(MediaType.APPLICATION_PROBLEM_JSON));
