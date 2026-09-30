@@ -31,6 +31,13 @@ interface BookingEntityRepository extends JpaRepository<BookingEntity, UUID> {
 	@Query(nativeQuery = true, value = "delete from booking where id = :id and status = 'PENDING'")
 	int deletePending(UUID id);
 
+	/**
+	 * Holds the Showtime row until commit, so a cancel waits for this Booking and then deletes it, or has already
+	 * committed and is seen here. Null if the Showtime does not exist.
+	 */
+	@Query(nativeQuery = true, value = "select status from showtime where id = :showtimeId for share")
+	String lockShowtimeStatus(UUID showtimeId);
+
 	/** Lapsed Holds on these Seats, and the Customer's own lapsed one. booked_seat rows go by ON DELETE CASCADE. */
 	@Modifying
 	@Query(nativeQuery = true, value = """

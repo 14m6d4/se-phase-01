@@ -20,8 +20,8 @@ public interface BookingRepository {
 	 * Seats and the Customer's own lapsed Pending Booking. A transaction that loses a deadlock is retried once.
 	 *
 	 * @throws SeatsTakenException naming the requested Seats that are HELD or SOLD
-	 * @throws vn.edu.uet.cinema.business.ConflictException if the Customer already has a Pending Booking, or the
-	 * retry lost a deadlock too
+	 * @throws vn.edu.uet.cinema.business.ConflictException if the Showtime is Cancelled, the Customer already has a
+	 * Pending Booking, or the retry lost a deadlock too
 	 */
 	Booking saveNew(Booking booking, Instant now);
 

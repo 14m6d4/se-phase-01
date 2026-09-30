@@ -66,6 +66,9 @@ class JpaBookingRepository implements BookingRepository {
 		List<UUID> seatIds = booking.seats().stream().map(BookedSeat::seatId).toList();
 		try {
 			return transaction.execute(status -> {
+				if ("CANCELLED".equals(jpa.lockShowtimeStatus(booking.showtimeId()))) {
+					throw new ConflictException("Showtime is Cancelled");
+				}
 				jpa.deleteLapsedHolds(booking.customerId(), booking.showtimeId(), seatIds, now);
 				return jpa.saveAndFlush(BookingEntity.from(booking)).toBooking();
 			});

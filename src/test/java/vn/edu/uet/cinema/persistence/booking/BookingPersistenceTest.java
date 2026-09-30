@@ -233,6 +233,18 @@ class BookingPersistenceTest {
 		assertThat(bookings.get(paid.customerId(), paid.id()).totalPrice()).isEqualTo(paid.totalPrice());
 	}
 
+	@Test
+	void persistenceRefusesABookingOnACancelledShowtimeEvenWhenServiceGuardWasBypassed() {
+		Auditorium hall = auditorium();
+		UUID showtimeId = showtime(hall);
+		showtimes.cancel(showtimeId, CancellationReason.EMERGENCY, null, now);
+		Booking late = new Booking(UUID.randomUUID(), customer(), showtimeId, BookingStatus.PENDING, now,
+			now.plus(10, ChronoUnit.MINUTES), List.of(new BookedSeat(hall.seats().get(0).id(), 100_000)));
+
+		assertThatThrownBy(() -> repository.saveNew(late, now)).isInstanceOf(ConflictException.class);
+		assertThat(repository.findById(late.id())).isEmpty();
+	}
+
 	private UUID customer() {
 		return accounts.registerCustomer("booking-" + UUID.randomUUID() + "@example.com", "password123", "Customer")
 			.id();
