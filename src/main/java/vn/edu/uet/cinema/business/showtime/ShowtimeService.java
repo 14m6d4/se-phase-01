@@ -39,6 +39,15 @@ public class ShowtimeService {
 		return showtimes.findById(id).orElseThrow(() -> new NotFoundException("Showtime not found"));
 	}
 
+	/** A Showtime whose Seats can still be chosen: a Cancelled one is a conflict. */
+	public Showtime getScheduled(UUID id) {
+		Showtime showtime = get(id);
+		if (showtime.status() == ShowtimeStatus.CANCELLED) {
+			throw new ConflictException("Showtime is Cancelled");
+		}
+		return showtime;
+	}
+
 	public List<Showtime> list(Instant fromInclusive, Instant toExclusive, UUID cinemaId, UUID movieId) {
 		return showtimes.findByStartsAtBetween(fromInclusive, toExclusive, cinemaId, movieId);
 	}

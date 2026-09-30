@@ -70,7 +70,7 @@ class ShowtimeController {
 
 	@GetMapping("/api/showtimes/{id}/seats")
 	List<SeatMapResponse> seats(@PathVariable UUID id) {
-		Showtime showtime = showtimes.get(id);
+		Showtime showtime = showtimes.getScheduled(id);
 		Map<UUID, SeatStatus> statuses = occupancy.statuses(id, Instant.now());
 		return auditoriums.get(showtime.auditoriumId()).seats().stream()
 			.map(seat -> SeatMapResponse.from(seat, SeatPricing.price(seat.type(), showtime.basePrice()),

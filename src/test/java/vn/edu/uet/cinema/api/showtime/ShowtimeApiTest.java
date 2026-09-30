@@ -105,6 +105,19 @@ class ShowtimeApiTest {
 	}
 
 	@Test
+	void cancelledShowtimeHasNoSeatMap() throws Exception {
+		String admin = token("admin@cinema.local", "admin12345");
+		UUID id = schedule(movieId(), auditoriumId(), Instant.now().plusSeconds(86_400));
+		mvc.perform(post("/api/showtimes/" + id + "/cancellation").header("Authorization", "Bearer " + admin)
+				.contentType(MediaType.APPLICATION_JSON).content("{\"reason\":\"EQUIPMENT_FAILURE\"}"))
+			.andExpect(status().isOk());
+
+		mvc.perform(get("/api/showtimes/" + id + "/seats"))
+			.andExpect(status().isConflict())
+			.andExpect(content().contentType(MediaType.APPLICATION_PROBLEM_JSON));
+	}
+
+	@Test
 	void showtimeWritesRequireAdmin() throws Exception {
 		String body = showtimeJson(UUID.randomUUID(), UUID.randomUUID(), "2026-09-27T20:00:00+07:00", 100_000);
 		mvc.perform(post("/api/showtimes").contentType(MediaType.APPLICATION_JSON).content(body))
