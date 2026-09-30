@@ -84,6 +84,27 @@ class ShowtimeApiTest {
 	}
 
 	@Test
+	void adminSchedulesAReplacementInACancelledShowtimesSlot() throws Exception {
+		String admin = token("admin@cinema.local", "admin12345");
+		UUID movieId = movieId();
+		UUID auditoriumId = auditoriumId();
+		Instant startsAt = Instant.now().plusSeconds(86_400).truncatedTo(java.time.temporal.ChronoUnit.SECONDS);
+		UUID id = schedule(movieId, auditoriumId, startsAt);
+		String replacement = showtimeJson(movieId, auditoriumId, startsAt.plusSeconds(1_800).toString(), 100_000);
+		mvc.perform(post("/api/showtimes").header("Authorization", "Bearer " + admin)
+				.contentType(MediaType.APPLICATION_JSON).content(replacement))
+			.andExpect(status().isConflict());
+
+		mvc.perform(post("/api/showtimes/" + id + "/cancellation").header("Authorization", "Bearer " + admin)
+				.contentType(MediaType.APPLICATION_JSON).content("{\"reason\":\"POWER_OUTAGE\"}"))
+			.andExpect(status().isOk());
+
+		mvc.perform(post("/api/showtimes").header("Authorization", "Bearer " + admin)
+				.contentType(MediaType.APPLICATION_JSON).content(replacement))
+			.andExpect(status().isCreated());
+	}
+
+	@Test
 	void showtimeWritesRequireAdmin() throws Exception {
 		String body = showtimeJson(UUID.randomUUID(), UUID.randomUUID(), "2026-09-27T20:00:00+07:00", 100_000);
 		mvc.perform(post("/api/showtimes").contentType(MediaType.APPLICATION_JSON).content(body))
