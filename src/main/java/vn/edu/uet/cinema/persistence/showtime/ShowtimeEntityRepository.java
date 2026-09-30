@@ -21,6 +21,7 @@ interface ShowtimeEntityRepository extends JpaRepository<ShowtimeEntity, UUID> {
 	@Query("""
 		select case when count(s) > 0 then true else false end from ShowtimeEntity s
 		where s.auditoriumId = :auditoriumId and s.startsAt < :endsAt and s.endsAt > :startsAt
+		and s.status <> vn.edu.uet.cinema.business.showtime.ShowtimeStatus.CANCELLED
 		""")
 	boolean existsOverlapping(UUID auditoriumId, Instant startsAt, Instant endsAt);
 
