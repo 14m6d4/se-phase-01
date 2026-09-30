@@ -151,6 +151,25 @@ class BookingApiTest {
 	}
 
 	@Test
+	void holdOnACancelledShowtimeIsGoneAndTheShowtimeCannotBeBooked() throws Exception {
+		Auditorium hall = auditorium();
+		UUID showtimeId = showtime(hall);
+		String token = customer();
+		String id = hold(token, showtimeId, hall.seats().get(0).id());
+
+		showtimes.cancel(showtimeId, CancellationReason.EMERGENCY, "Fire alarm", Instant.now());
+
+		mvc.perform(post("/api/bookings/" + id + "/payment").header("Authorization", "Bearer " + token))
+			.andExpect(status().isNotFound());
+		mvc.perform(get("/api/bookings").header("Authorization", "Bearer " + token))
+			.andExpect(jsonPath("$").isEmpty());
+		mvc.perform(post("/api/bookings").header("Authorization", "Bearer " + token)
+				.contentType(MediaType.APPLICATION_JSON).content(bookingJson(showtimeId, hall.seats().get(1).id())))
+			.andExpect(status().isConflict())
+			.andExpect(content().contentType(MediaType.APPLICATION_PROBLEM_JSON));
+	}
+
+	@Test
 	void abandonedHoldIsGoneAndItsSeatsAreFree() throws Exception {
 		Auditorium hall = auditorium();
 		UUID showtimeId = showtime(hall);
