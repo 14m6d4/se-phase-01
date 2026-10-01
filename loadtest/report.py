@@ -5,7 +5,7 @@ Usage: python3 loadtest/report.py [loadtest/results/summary.json]
 import json
 import sys
 
-# Smoke thresholds: reported as PASS/FAIL, never used to abort the run.
+# Advisory thresholds: reported as PASS/FAIL, never used to abort the run.
 MAX_ERROR_RATE = 0.01
 MAX_P95_MS = 500
 
@@ -38,7 +38,7 @@ def main(path):
 
     rows = [
         ("Requests", fmt(requests, ",.0f")),
-        # Averaged over the whole run, ramps and setup included, so below the target rate.
+        # Actual HTTP request rate; a scenario iteration can make multiple requests.
         ("RPS (run average)", fmt(rps)),
         ("p50", fmt(p50, unit=" ms")),
         ("p95", fmt(p95, unit=" ms")),
