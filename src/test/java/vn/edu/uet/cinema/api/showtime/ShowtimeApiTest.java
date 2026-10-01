@@ -3,6 +3,7 @@ package vn.edu.uet.cinema.api.showtime;
 import static org.hamcrest.Matchers.contains;
 import static org.hamcrest.Matchers.hasItem;
 import static org.hamcrest.Matchers.hasSize;
+import static org.hamcrest.Matchers.not;
 import static org.hamcrest.Matchers.nullValue;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -193,18 +194,26 @@ class ShowtimeApiTest {
 		UUID movie2 = movieId();
 		UUID cinema1 = cinemas.create("Cinema " + UUID.randomUUID(), "Address").id();
 		UUID cinema2 = cinemas.create("Cinema " + UUID.randomUUID(), "Address").id();
-		schedule(movie1, auditoriumId(cinema1), Instant.parse("2026-10-01T16:59:59.999999Z"));
+		UUID beforeMidnight = schedule(movie1, auditoriumId(cinema1), Instant.parse("2026-10-01T16:59:59.999999Z"));
 		UUID midnight = schedule(movie1, auditoriumId(cinema1), Instant.parse("2026-10-01T17:00:00Z"));
 		UUID lastMoment = schedule(movie2, auditoriumId(cinema2), Instant.parse("2026-10-02T16:59:59.999999Z"));
-		schedule(movie1, auditoriumId(cinema2), Instant.parse("2026-10-02T17:00:00Z"));
+		UUID nextMidnight = schedule(movie1, auditoriumId(cinema2), Instant.parse("2026-10-02T17:00:00Z"));
+		UUID otherShowtime = schedule(movieId(), auditoriumId(), Instant.parse("2026-10-02T05:00:00Z"));
 
+		// API tests share a Testcontainers database, so assert membership rather than a global result count.
 		mvc.perform(get("/api/showtimes").param("date", "2026-10-02"))
-			.andExpect(status().isOk()).andExpect(jsonPath("$", hasSize(2)))
+			.andExpect(status().isOk())
 			.andExpect(jsonPath("$[*].id").value(hasItem(midnight.toString())))
-			.andExpect(jsonPath("$[*].id").value(hasItem(lastMoment.toString())));
+			.andExpect(jsonPath("$[*].id").value(hasItem(lastMoment.toString())))
+			.andExpect(jsonPath("$[*].id").value(hasItem(otherShowtime.toString())))
+			.andExpect(jsonPath("$[*].id").value(not(hasItem(beforeMidnight.toString()))))
+			.andExpect(jsonPath("$[*].id").value(not(hasItem(nextMidnight.toString()))));
 		mvc.perform(get("/api/showtimes").param("date", "2026-10-02").param("cinemaId", cinema1.toString()))
 			.andExpect(status().isOk()).andExpect(jsonPath("$", hasSize(1)))
 			.andExpect(jsonPath("$[0].id").value(midnight.toString()));
+		mvc.perform(get("/api/showtimes").param("date", "2026-10-02").param("cinemaId", cinema2.toString()))
+			.andExpect(status().isOk()).andExpect(jsonPath("$", hasSize(1)))
+			.andExpect(jsonPath("$[0].id").value(lastMoment.toString()));
 		mvc.perform(get("/api/showtimes").param("date", "2026-10-02").param("movieId", movie2.toString()))
 			.andExpect(status().isOk()).andExpect(jsonPath("$", hasSize(1)))
 			.andExpect(jsonPath("$[0].id").value(lastMoment.toString()));
