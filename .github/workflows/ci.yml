@@ -15,6 +15,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+      - run: |
+          node -e 'if (+process.versions.node.split(".")[0] < 18) throw Error("Node 18+ is required")'
+          python3 loadtest/test_loadtest.py
       - uses: actions/setup-java@v6
         with:
           distribution: temurin
