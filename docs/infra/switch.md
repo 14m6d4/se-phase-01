@@ -80,6 +80,10 @@ Every unused port is disabled, so plugging a cable into one gives no access to a
 4. **System Settings → Account Settings:** set a new admin password (kept outside this repo).
 5. **System Settings → IP Settings:** VLAN `10`, Auto Obtain IP disabled, IP `10.10.10.2`, mask `255.255.255.0`, gateway and DNS `10.10.10.1`. The browser loses the switch here; reconnect from VLAN 10.
 
+## Verify
+
+Run [`verify-switch.sh`](verify-switch.sh) on the DL380 G9 host OS after any change to the switch or the cabling. It walks through the web UI pages above, checks each VLAN from the host, and writes a Markdown report to paste on the issue.
+
 ## Known issues
 
 - Ports 2, 4, 6 and 8 negotiate **100M/Full**; the uplink on port 16 runs at 1000M. Suspected cable crosstalk; to be fixed by re-cabling.
