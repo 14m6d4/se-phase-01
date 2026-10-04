@@ -1,0 +1,46 @@
+// Tailnet policy for the homelab (#31). See router.md → Tailscale.
+//
+// Apply: copy into Admin console → Access controls, replace the two
+// placeholder logins below with real ones, and save. Saving runs `tests`;
+// the console refuses a policy whose tests fail.
+{
+	"groups": {
+		// The tailnet owner: every device and every VLAN.
+		"group:admin": ["admin@example.com"],
+		// Team members: OpenStack and the cinema project's VMs only.
+		"group:team": ["teammate@example.com"],
+	},
+
+	"hosts": {
+		"mgmt":          "10.10.10.0/24",
+		"services":      "10.10.20.0/24",
+		"workload":      "10.10.30.0/24",
+		// Horizon (443) and the OpenStack APIs.
+		"openstack-api": "10.10.20.12",
+		// Cinema floating IPs, outside Neutron's allocation pool.
+		"cinema":        "10.10.30.16/28",
+	},
+
+	"grants": [
+		// Subnet routes are listed explicitly so they don't rely on "*".
+		{"src": ["group:admin"], "dst": ["*"], "ip": ["*"]},
+		{"src": ["group:admin"], "dst": ["mgmt", "services", "workload"], "ip": ["*"]},
+
+		{"src": ["group:team"], "dst": ["openstack-api", "cinema"], "ip": ["*"]},
+
+		{"src": ["autogroup:member"], "dst": ["autogroup:self"], "ip": ["*"]},
+	],
+
+	"tests": [
+		{
+			"src":    "group:admin",
+			"accept": ["10.10.10.1:22", "10.10.10.10:443", "10.10.20.11:22", "10.10.30.150:22"],
+		},
+		{
+			"src":    "group:team",
+			"accept": ["10.10.20.12:443", "10.10.30.17:443", "10.10.30.17:22"],
+			// Router, switch, iLO, host OS, and another project's floating IP.
+			"deny":   ["10.10.10.1:22", "10.10.10.2:80", "10.10.10.10:443", "10.10.20.11:22", "10.10.30.150:22"],
+		},
+	],
+}
