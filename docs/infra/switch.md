@@ -40,6 +40,12 @@ The OpenWrt Router is `.1` on every VLAN and the only DHCP server. Infrastructur
 | `10.10.10.2` | Ruijie Switch |
 | `10.10.10.10` | iLO |
 | `10.10.10.11` | OpenStack host OS (`eno1`) |
+| `10.10.20.11` | OpenStack host OS (`eno2`) |
+| `10.10.20.12` | OpenStack API VIP (`/32` on `eno2`) |
+
+`eno3` has no host address: it is a port of the Open vSwitch bridge `br-ex`, and VLAN 30 addresses live on the Neutron routers' gateway ports (`qg-*`, in `qrouter-*` namespaces) and their floating IPs.
+
+The OpenWrt Router firewall rejects traffic to the router itself from VLAN 20 and 30, ping and LuCI included (by design, see `router.md`, #31). A `Destination Port Unreachable` from `.1` on those VLANs therefore still proves the switch path works.
 
 ## Ports
 
