@@ -241,10 +241,18 @@ ping_from() {
   else run sudo ip netns exec "$1" ping -c 3 -W 1 "$3"; fi
 }
 
+# neigh_of NS IFACE TARGET shows the ARP entry for TARGET (inside NS unless "-").
+neigh_of() {
+  if [[ "$1" == "-" ]]; then run ip neigh show to "$3" dev "$2"
+  else run sudo ip -n "$1" neigh show to "$3" dev "$2"; fi
+}
+
 # check_vlan VLAN NIC: the VLAN has an address in its subnet, and its gateway
-# answers from that address.
+# is reachable across the switch from that address. The gateway's firewall may
+# reject the ping (VLAN 20 and 30 by design), so the proof is that ARP resolved
+# the gateway's MAC address, not that ping got an echo reply.
 check_vlan() {
-  local vlan="$1" nic="$2" prefix="$GW_PREFIX.$1." found ns iface addr
+  local vlan="$1" nic="$2" prefix="$GW_PREFIX.$1." found ns iface addr out
   found=$(find_addr "$prefix")
   printf '$ addresses in %s0/24\n%s\n\n' "$prefix" "${found:-(none)}" >> "$RAW"
   if [[ -z "$found" ]]; then
@@ -255,8 +263,14 @@ check_vlan() {
   if [[ "$ns" == "-" ]]; then say "Found $addr on $iface"
   else say "Found $addr on $iface (netns $ns)"; fi
   record PASS "VLAN $vlan: $iface has $addr (expected via $nic)"
-  if ping_from "$ns" "$addr" "${prefix}1"; then record PASS "VLAN $vlan: gateway ${prefix}1 answers"
-  else record FAIL "VLAN $vlan: gateway ${prefix}1 answers"; fi
+  ping_from "$ns" "$addr" "${prefix}1" || note "No echo reply; the router firewall may reject ping on this VLAN."
+  out=$(neigh_of "$ns" "$iface" "${prefix}1" || true)
+  printf '%s\n' "$out"
+  if grep -q lladdr <<< "$out"; then
+    record PASS "VLAN $vlan: gateway ${prefix}1 reachable (ARP resolved its MAC)"
+  else
+    record FAIL "VLAN $vlan: gateway ${prefix}1 reachable" "ARP did not resolve"
+  fi
 }
 
 banner "Switch verification (#30)"
