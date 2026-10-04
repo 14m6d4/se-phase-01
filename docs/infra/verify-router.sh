@@ -553,7 +553,7 @@ done
 pause
 
 stage "Tailscale on the router"
-routes=$(r "tailscale debug prefs" | awk '/"AdvertiseRoutes"/ { on = 1; next } on && /\]/ { exit } on' | tr -d ' ",')
+routes=$(r "tailscale debug prefs" | awk '/"AdvertiseRoutes"/ { on = 1; next } on && /\]/ { exit } on' | tr -d ' \t",')
 printf '$ tailscale debug prefs: AdvertiseRoutes\n%s\n\n' "$routes" >> "$RAW"
 printf '%s\n' "$routes" | sed 's/^/    /'
 for net in 10.10.10.0/24 10.10.20.0/24 10.10.30.0/24; do
