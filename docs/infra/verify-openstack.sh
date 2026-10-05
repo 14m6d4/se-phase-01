@@ -219,16 +219,16 @@ for c in "$(command -v openstack 2>/dev/null)" /home/*/*/bin/openstack /opt/*/bi
 done
 CTR=$(command -v docker || command -v podman)
 set -a; . /etc/kolla/admin-openrc.sh; set +a
-# An openrc written before internal TLS was enabled still says http://; the
-# VIP then drops the connection. Switch to https, trusting the Kolla CA when
-# it verifies and skipping verification otherwise.
+# An openrc written before internal TLS was enabled still says http://<VIP>;
+# the VIP then drops the connection. Switch to https on the internal FQDN,
+# which the certificate covers, and skip verification only if that fails too.
 OPENRC_URL=$OS_AUTH_URL
 INSECURE=""
 if [ "${OS_AUTH_URL#http://}" != "$OS_AUTH_URL" ] && ! curl -s -m 3 -o /dev/null "$OS_AUTH_URL"; then
-  OS_AUTH_URL="https://${OS_AUTH_URL#http://}"
-  CA=/etc/kolla/certificates/ca/root.crt
-  if [ -f "$CA" ] && curl -s -m 3 -o /dev/null --cacert "$CA" "$OS_AUTH_URL"; then export OS_CACERT=$CA
-  else INSECURE=--insecure; fi
+  FQDN=$(sed -n "s/^kolla_internal_fqdn: *[\"]*\([^\"]*\)[\"]*/\1/p" /etc/kolla/globals.yml)
+  rest=${OS_AUTH_URL#http://}
+  OS_AUTH_URL="https://${FQDN:-${rest%%[:/]*}}${rest#${rest%%[:/]*}}"
+  curl -s -m 3 -o /dev/null "$OS_AUTH_URL" || INSECURE=--insecure
 fi
 osc() {
   if [ -n "$OSC" ]; then "$OSC" $INSECURE "$@"
@@ -274,7 +274,7 @@ if [[ "$MODE" == inventory ]]; then
     warn "Couldn't run sudo on $HOST without a password. Fix that and re-run."
     exit 1
   fi
-  client=$(h 'echo "${OSC:-kolla_toolbox container}; openrc $OPENRC_URL, used $OS_AUTH_URL${OS_CACERT:+ (Kolla CA)}${INSECURE:+ (TLS not verified)}"')
+  client=$(h 'echo "${OSC:-kolla_toolbox container}; openrc $OPENRC_URL, used $OS_AUTH_URL${INSECURE:+ (TLS not verified)}"')
   note "OpenStack client: $client"
   if ! h 'osc token issue -f value -c expires' >/dev/null 2>&1; then
     warn "Keystone refused the admin credentials; the OpenStack sections will show the error."
@@ -317,6 +317,17 @@ if [[ "$MODE" == inventory ]]; then
   echo; echo "inventory files:"; ls -d /home/*/all-in-one /home/*/multinode /home/*/*/all-in-one /home/*/*/multinode /etc/kolla/inventory* 2>/dev/null
   echo; echo "/etc/kolla/config:"; (cd /etc/kolla/config 2>/dev/null && find . -type f | sort)'
   section "Config overrides (no secrets)" '(cd /etc/kolla/config 2>/dev/null && for f in $(find . -type f \( -name "*.conf" -o -name "*.ini" -o -name "*.yml" \) | sort); do echo "== $f"; grep -vE "^\s*(#|$)" "$f"; done)'
+  section "TLS certificate and renewal" '
+  fqdn=$(sed -n "s/^kolla_internal_fqdn: *[\"]*\([^\"]*\)[\"]*/\1/p" /etc/kolla/globals.yml)
+  echo "served on $fqdn:5000:"
+  echo | openssl s_client -connect "$fqdn:5000" -servername "$fqdn" 2>/dev/null | openssl x509 -noout -subject -issuer -enddate
+  echo; echo "/etc/kolla/certificates (names and dates only):"
+  find /etc/kolla/certificates -printf "%TY-%Tm-%Td %p\n" 2>/dev/null | sort -k2
+  echo; echo "ACME clients and renewal:"
+  ls -d /etc/letsencrypt/live/* /root/.acme.sh /home/*/.acme.sh /etc/lego /root/.lego /home/*/.lego 2>/dev/null
+  systemctl list-timers --all --no-pager 2>/dev/null | grep -iE "certbot|acme|lego|cert"
+  grep -rlsE "certbot|acme|lego|haproxy.*pem|kolla-ansible" /etc/cron* /var/spool/cron /etc/letsencrypt/renewal-hooks /etc/systemd/system 2>/dev/null
+  for f in /etc/letsencrypt/renewal/*.conf; do [ -f "$f" ] && { echo "== $f"; grep -E "^(authenticator|renew_hook|post_hook|deploy_hook)" "$f"; }; done'
   section "Containers" '"$CTR" ps -a --format "{{.Names}}\t{{.Status}}" | sort'
   pause
 
@@ -540,10 +551,7 @@ repo=$(grep -vE '^\s*(#|$)' "$REPO_GLOBALS")
 if [[ "$live" != "$repo" ]]; then
   say "/etc/kolla/globals.yml differs from docs/infra/kolla/globals.yml (comments ignored):"
   diff <(printf '%s\n' "$live") <(printf '%s\n' "$repo") | sed 's/^/    /' || true
-  if ! v 'test -f /etc/kolla/certificates/ca/root.crt && echo yes' | grep -q yes; then
-    warn "/etc/kolla/certificates/ca/root.crt is missing; kolla_admin_openrc_cacert would point nowhere."
-    warn "Skipping. Fix the CA (kolla-ansible certificates) or drop that line from the repo copy."
-  elif confirm "Replace the host's globals.yml with the repo copy? (backup in $BACKUP)"; then
+  if confirm "Replace the host's globals.yml with the repo copy? (backup in $BACKUP)"; then
     if ssh "${SSH_OPTS[@]}" "$HOST" 'sudo -n tee /etc/kolla/globals.yml >/dev/null' < "$REPO_GLOBALS"; then
       printf '  %s+%s globals.yml replaced\n' "$GREEN" "$RESET"; printf 'done: globals.yml replaced\n' >> "$RAW"
     fi
@@ -569,7 +577,15 @@ if ! openrc_ok; then
     fi
   fi
 fi
-check "admin-openrc.sh works as is (https, CA trusted)" openrc_ok
+check "admin-openrc.sh works as is (https, certificate verified)" openrc_ok
+FQDN=$(sed -n 's/^kolla_internal_fqdn: *"*\([^"]*\)"*/\1/p' "$REPO_GLOBALS")
+cert_end=$(echo | openssl s_client -connect "$FQDN:5000" -servername "$FQDN" -verify_return_error 2>/dev/null \
+  | openssl x509 -noout -enddate 2>/dev/null | cut -d= -f2) || true
+if [[ -n "$cert_end" ]] && (( ($(date -d "$cert_end" +%s) - $(date +%s)) / 86400 >= 14 )); then
+  record PASS "TLS certificate for $FQDN verified, valid until $(date -d "$cert_end" +%F)"
+else
+  record FAIL "TLS certificate for $FQDN verified, 14+ days left" "${cert_end:-not verified}"
+fi
 check "Cinder image-volume cache override in place" \
   test "$(v 'grep -c "^image_volume_cache_enabled = true" /etc/kolla/config/cinder/cinder-volume.conf')" = 1
 raw "Kolla-Ansible" 'echo "kolla-ansible $(/home/*/kolla-venv/bin/pip show kolla-ansible 2>/dev/null | sed -n "s/^Version: //p")"; grep -rh "^openstack_release:" /home/*/kolla-venv/share/kolla-ansible/ansible/group_vars 2>/dev/null | head -n1; . /etc/kolla/admin-openrc.sh; echo "OS_AUTH_URL=$OS_AUTH_URL OS_CACERT=${OS_CACERT:-}"'

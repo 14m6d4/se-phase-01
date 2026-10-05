@@ -15,7 +15,6 @@ kolla_enable_tls_internal: true
 database_enable_tls_backend: "{{ 'true' if kolla_enable_tls_backend | bool and enable_proxysql | bool else 'false' }}"
 database_enable_tls_internal: false
 kolla_enable_tls_backend: false
-kolla_admin_openrc_cacert: "{{ kolla_certificates_dir }}/ca/root.crt"
 enable_cinder: true
 enable_cinder_backup: false
 enable_cinder_backend_lvm: true

@@ -56,9 +56,10 @@ Interfaces:
 Services: Keystone, Glance, Nova, Neutron (Open vSwitch agent, L3, DHCP and metadata agents), Cinder (LVM backend over iSCSI, no backup service), Placement, Heat and Horizon, behind HAProxy and keepalived on the VIP, with MariaDB through ProxySQL and RabbitMQ.
 
 **TLS:**
-- Internal TLS is on, and Kolla generated its own CA and certificate. Every endpoint is `https://openstack.strycks.dpdns.org:<port>`.
-- Clients trust the CA from `/etc/kolla/certificates/ca/root.crt` on the host: `OS_CACERT`, or `cacert_file` in Terraform.
-- The CA certificate is public. The keys next to it are not.
+- Internal TLS is on. Every endpoint is `https://openstack.strycks.dpdns.org:<port>`.
+- The certificate is a Let's Encrypt certificate for that name, and the name resolves in public DNS to the VIP `10.10.20.12`. Clients trust it with their system CA store, so there's no CA to hand out.
+- The certificate covers the name, not the IP, so use the name.
+- HAProxy serves it from `/etc/kolla/certificates/`, where Kolla picks it up on `deploy`/`reconfigure`.
 - `admin-openrc.sh` and `clouds.yaml` are written by `kolla-ansible post-deploy`. Re-run it after every TLS or endpoint change, or they keep the old URLs.
 
 **Cinder override:** it turns on the image-volume cache, so booting from volume doesn't copy the image every time. The cache volumes are owned by Cinder's internal tenant, which is the `service` project and the `cinder` user:
@@ -156,14 +157,14 @@ Commands and choices only. The linked docs carry the details.
    cp ~/kolla-venv/share/kolla-ansible/ansible/inventory/all-in-one ~/
    cp docs/infra/kolla/globals.yml /etc/kolla/globals.yml   # from this repo
    kolla-genpwd
-   kolla-ansible certificates -i ~/all-in-one               # see the TLS guide
+   # Let's Encrypt certificate for openstack.strycks.dpdns.org → /etc/kolla/certificates/
    kolla-ansible bootstrap-servers -i ~/all-in-one
    kolla-ansible prechecks -i ~/all-in-one
    kolla-ansible deploy -i ~/all-in-one
    kolla-ansible post-deploy -i ~/all-in-one
    ```
 
-   Then write the Cinder override above and run `kolla-ansible reconfigure -i ~/all-in-one -t cinder`. The [TLS guide](https://docs.openstack.org/kolla-ansible/latest/admin/tls.html) covers the CA.
+   Then write the Cinder override above and run `kolla-ansible reconfigure -i ~/all-in-one -t cinder`. The [TLS guide](https://docs.openstack.org/kolla-ansible/latest/admin/tls.html) covers where the certificate files go.
 5. **External network, image, flavors** (as admin):
 
    ```sh
