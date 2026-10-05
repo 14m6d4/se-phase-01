@@ -1,6 +1,6 @@
 # Switch: VLANs, trunk and access ports
 
-The Ruijie Switch joins the DL380 G9 to the OpenWrt Router. It carries VLANs only; routing, DHCP and the firewall live on the OpenWrt Router (see `router.md`, #31).
+The Ruijie Switch joins the DL380 G9 to the OpenWrt Router. It carries VLANs only; routing, DHCP and the firewall live on the OpenWrt Router (see `router.md`).
 
 | | |
 |---|---|
@@ -32,7 +32,7 @@ Only the even ports are cabled: the cables come in from below the switch.
 | 20 | SERVICES | `10.10.20.0/24` | `10.10.20.1` | OpenStack APIs |
 | 30 | WORKLOAD | `10.10.30.0/24` | `10.10.30.1` | Neutron external network: VM floating IPs |
 
-The OpenWrt Router is `.1` on every VLAN and the only DHCP server. Infrastructure hosts use static addresses:
+The OpenWrt Router is `.1` on every VLAN and the only DHCP server. DHCP is off on VLAN 10: infrastructure hosts use static addresses:
 
 | Address | Host |
 |---|---|
@@ -45,7 +45,7 @@ The OpenWrt Router is `.1` on every VLAN and the only DHCP server. Infrastructur
 
 `eno3` has no host address: it is a port of the Open vSwitch bridge `br-ex`, and VLAN 30 addresses live on the Neutron routers' gateway ports (`qg-*`, in `qrouter-*` namespaces) and their floating IPs.
 
-The OpenWrt Router firewall rejects traffic to the router itself from VLAN 20 and 30, ping and LuCI included (by design, see `router.md`, #31). A `Destination Port Unreachable` from `.1` on those VLANs therefore still proves the switch path works.
+The OpenWrt Router firewall rejects traffic to the router itself from VLAN 20 and 30, ping and LuCI included (by design, see `router.md`). A `Destination Port Unreachable` from `.1` on those VLANs therefore still proves the switch path works.
 
 ## Ports
 
@@ -75,7 +75,7 @@ Every unused port is disabled, so plugging a cable into one gives no access to a
 ## Reaching the switch
 
 - **Normal:** `http://10.10.10.2` from VLAN 10, or from the tailnet through the router.
-- **Rescue:** the switch allows one management IP on one VLAN, so the switch has no address on VLAN 1. A laptop on the OpenWrt Router rescue port reaches `10.10.10.2:80` through a rescue-zone forwarding rule (see `router.md`, #31).
+- **Rescue:** the switch allows one management IP on one VLAN, so the switch has no address on VLAN 1. A laptop on the OpenWrt Router rescue port `lan3` reaches `10.10.10.2:80` through the `Allow-Rescue-Switch` rule (see `router.md`).
 - **Last resort:** **System Settings → Restore Default**, then rebuild from the steps below.
 
 ## Rebuild from factory defaults
