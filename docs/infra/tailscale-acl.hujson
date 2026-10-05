@@ -15,7 +15,8 @@
 		"mgmt":          "10.10.10.0/24",
 		"services":      "10.10.20.0/24",
 		"workload":      "10.10.30.0/24",
-		// Horizon (443) and the OpenStack APIs.
+		// OpenStack VIP: HAProxy in front of Horizon and the APIs, but also
+		// MariaDB, ProxySQL and RabbitMQ, so members get listed ports only.
 		"openstack-api": "10.10.20.12",
 		// Cinema floating IPs, outside Neutron's allocation pool.
 		"cinema":        "10.10.30.16/28",
@@ -26,7 +27,15 @@
 		{"src": ["group:admin"], "dst": ["*"], "ip": ["*"]},
 		{"src": ["group:admin"], "dst": ["mgmt", "services", "workload"], "ip": ["*"]},
 
-		{"src": ["group:team"], "dst": ["openstack-api", "cinema"], "ip": ["*"]},
+		// Horizon (80, 443), its noVNC console (6080), and the public APIs:
+		// Keystone 5000, Nova 8774, Cinder 8776, Heat 8004, Glance 9292,
+		// Neutron 9696.
+		{
+			"src": ["group:team"],
+			"dst": ["openstack-api"],
+			"ip":  ["tcp:80", "tcp:443", "tcp:5000", "tcp:6080", "tcp:8004", "tcp:8774", "tcp:8776", "tcp:9292", "tcp:9696"],
+		},
+		{"src": ["group:team"], "dst": ["cinema"], "ip": ["*"]},
 
 		{"src": ["autogroup:member"], "dst": ["autogroup:self"], "ip": ["*"]},
 	],
@@ -38,9 +47,13 @@
 		},
 		{
 			"src":    "group:team",
-			"accept": ["10.10.20.12:443", "10.10.30.17:443", "10.10.30.17:22"],
-			// Router, switch, iLO, host OS, and another project's floating IP.
-			"deny":   ["10.10.10.1:22", "10.10.10.2:80", "10.10.10.10:443", "10.10.20.11:22", "10.10.30.150:22"],
+			"accept": ["10.10.20.12:443", "10.10.20.12:5000", "10.10.20.12:6080", "10.10.30.17:443", "10.10.30.17:22"],
+			// Router, switch, iLO, host OS, another project's floating IP, and
+			// the VIP's SSH, MariaDB, ProxySQL admin, RabbitMQ UI, metadata API.
+			"deny":   [
+				"10.10.10.1:22", "10.10.10.2:80", "10.10.10.10:443", "10.10.20.11:22", "10.10.30.150:22",
+				"10.10.20.12:22", "10.10.20.12:3306", "10.10.20.12:6032", "10.10.20.12:15672", "10.10.20.12:8775",
+			],
 		},
 	],
 }

@@ -103,8 +103,10 @@ The tailnet policy lives in [`tailscale-acl.hujson`](tailscale-acl.hujson):
 | Who | Reaches |
 |---|---|
 | `group:admin` (the tailnet owner) | everything: every tailnet device and all three VLANs |
-| `group:team` (team members) | `10.10.20.12` (Horizon on 443, OpenStack APIs), `10.10.30.16/28` (cinema floating IPs), any port |
+| `group:team` (team members) | `10.10.20.12` on tcp 80, 443 (Horizon), 6080 (console), 5000, 8004, 8774, 8776, 9292, 9696 (public APIs); `10.10.30.16/28` (cinema floating IPs), any port |
 | every member | their own devices |
+
+The OpenStack VIP also carries MariaDB, ProxySQL, RabbitMQ, the metadata and Placement APIs, and the host's SSH, so team members get its client ports only. When a new OpenStack service is added, add its public API port to the `group:team` grant and to the `tests`.
 
 The repo copy holds placeholder logins (`admin@example.com`, `teammate@example.com`). To apply it, copy the file into **Admin console → Access controls**, replace the placeholders with real logins, and save. Saving runs the `tests` block, and the console refuses a policy whose tests fail. Add a new team member by adding their login to `group:team`.
 
