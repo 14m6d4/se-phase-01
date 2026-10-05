@@ -191,8 +191,12 @@ finish() {
 #   verify-openstack.sh inventory   read-only: collect the disk, boot, Kolla and
 #                                   OpenStack facts the doc is written from, and
 #                                   list the leftovers to clean up.
-#   verify-openstack.sh             apply and verify (not written yet; it is
-#                                   designed from the inventory output).
+#   verify-openstack.sh             apply and verify: clean up the leftovers,
+#                                   fix the boot setup, refresh the openrc, create
+#                                   the cinema project, boot a throwaway VM on
+#                                   10.10.30.17, and write a report for #32.
+#
+# Both are idempotent; changes already in place are skipped.
 #
 # Runs on the admin workstation. Everything on the host goes through
 # `ssh $HOST` with passwordless sudo and the Kolla admin openrc.
@@ -231,6 +235,8 @@ osc() {
   else "$CTR" exec $(env | sed -n "s/^\(OS_[A-Z_]*\)=.*/-e \1/p" | grep -v OS_CACERT) kolla_toolbox openstack --insecure "$@"
   fi
 }
+# oscp runs osc as the admin user scoped to the cinema project.
+oscp() { ( unset OS_PROJECT_ID OS_TENANT_ID; export OS_PROJECT_NAME=cinema OS_TENANT_NAME=cinema; osc "$@" ); }
 '
 
 # h 'COMMANDS' runs COMMANDS as root on the host, after PRELUDE.
@@ -250,121 +256,510 @@ section() {
   head -n 8 <<< "$body" | sed "s/^/    $DIM/; s/\$/$RESET/"
 }
 
-if [[ "$MODE" != inventory ]]; then
-  warn "Only the inventory pass exists so far: run '$0 inventory'."
-  exit 1
+# ──────────────────────────────────────────────────────────────────────────
+# Inventory: read-only.
+# ──────────────────────────────────────────────────────────────────────────
+
+if [[ "$MODE" == inventory ]]; then
+
+  REPORT="${REPORT:-$HOME/openstack-inventory-$(date +%F-%H%M).md}"
+  TOTAL_STAGES=9
+  banner "OpenStack: inventory (#32)"
+
+  stage "Before you start"
+  say "This only reads: nothing on the host changes. It collects what"
+  say "docs/infra/openstack.md is written from, and the leftovers to clean up."
+  note "Host: $HOST (override with HOST=...). Needs passwordless sudo there."
+  if ! h 'true' >/dev/null; then
+    warn "Couldn't run sudo on $HOST without a password. Fix that and re-run."
+    exit 1
+  fi
+  client=$(h 'echo "${OSC:-kolla_toolbox container}; openrc $OPENRC_URL, used $OS_AUTH_URL${OS_CACERT:+ (Kolla CA)}${INSECURE:+ (TLS not verified)}"')
+  note "OpenStack client: $client"
+  if ! h 'osc token issue -f value -c expires' >/dev/null 2>&1; then
+    warn "Keystone refused the admin credentials; the OpenStack sections will show the error."
+  fi
+  pause
+
+  stage "Disks and RAID"
+  section "Block devices" 'lsblk -o NAME,SIZE,TYPE,FSTYPE,PARTTYPENAME,PARTUUID,MOUNTPOINTS -e 7 | grep -v "cinder--volumes-volume"'
+  section "/proc/mdstat" 'cat /proc/mdstat'
+  section "mdadm --detail" 'for md in /dev/md?*; do [ -b "$md" ] && case "$md" in *p[0-9]*) ;; *) mdadm --detail "$md";; esac; done'
+  section "mdadm.conf" 'grep -vE "^\s*(#|$)" /etc/mdadm/mdadm.conf'
+  pause
+
+  stage "Boot setup"
+  section "EFI boot entries" 'efibootmgr -v'
+  section "/etc/fstab" 'grep -vE "^\s*(#|$)" /etc/fstab'
+  section "GRUB install devices" 'for p in grub-efi-amd64 grub-pc; do echo "[$p]"; debconf-show "$p" 2>/dev/null | grep -iE "install_devices|force_extra"; done; dpkg -l | awk "/grub|shim/ {print \$2, \$3}"'
+  section "ESP contents (file, sha256)" '
+  for dev in $(lsblk -rpno NAME,PARTTYPE | awk "tolower(\$2)==\"c12a7328-f81f-11d2-ba4b-00a0c93ec93b\" {print \$1}"); do
+    echo "== $dev  PARTUUID=$(blkid -s PARTUUID -o value "$dev")"
+    mnt=$(findmnt -rno TARGET "$dev" | head -n1)
+    tmp=""
+    if [ -z "$mnt" ]; then tmp=$(mktemp -d); mount -o ro "$dev" "$tmp" && mnt=$tmp; fi
+    [ -n "$mnt" ] && (cd "$mnt" && find . -type f -exec sha256sum {} + | sort -k2)
+    [ -n "$tmp" ] && { umount "$tmp"; rmdir "$tmp"; }
+  done'
+  pause
+
+  stage "Storage controller"
+  section "Controller and driver" 'lspci -nnk | grep -iEA3 "sata|raid|ahci|storage|smart array"; echo; for h in /sys/class/scsi_host/host*; do echo "$(basename "$h"): $(cat "$h/proc_name")"; done | sort -u -k2'
+  section "Kernel log (ahci)" 'dmesg | grep -iE "ahci|hpsa|hpdsa" | head -n 20'
+  pause
+
+  stage "Kolla-Ansible"
+  section "globals.yml (no comments)" 'grep -vE "^\s*(#|$)" /etc/kolla/globals.yml'
+  section "kolla-ansible install" '
+  for k in $(ls /home/*/*/bin/kolla-ansible /opt/*/bin/kolla-ansible /root/*/bin/kolla-ansible 2>/dev/null); do
+    echo "$k"; "$(dirname "$k")/pip" show kolla-ansible 2>/dev/null | grep -E "^(Name|Version)"
+  done
+  echo; echo "inventory files:"; ls -d /home/*/all-in-one /home/*/multinode /home/*/*/all-in-one /home/*/*/multinode /etc/kolla/inventory* 2>/dev/null
+  echo; echo "/etc/kolla/config:"; (cd /etc/kolla/config 2>/dev/null && find . -type f | sort)'
+  section "Config overrides (no secrets)" '(cd /etc/kolla/config 2>/dev/null && for f in $(find . -type f \( -name "*.conf" -o -name "*.ini" -o -name "*.yml" \) | sort); do echo "== $f"; grep -vE "^\s*(#|$)" "$f"; done)'
+  section "Containers" '"$CTR" ps -a --format "{{.Names}}\t{{.Status}}" | sort'
+  pause
+
+  stage "Host network and capacity"
+  section "Addresses and routes" 'ip -br addr; echo; ip route'
+  section "Open vSwitch" '"$CTR" exec openvswitch_vswitchd ovs-vsctl show'
+  section "CPU, RAM, LVM" 'echo "cpus: $(nproc)"; free -g; echo; vgs; echo; lvs -o lv_name,lv_size,data_percent,metadata_percent cinder-volumes | grep -v "volume-"'
+  pause
+
+  stage "OpenStack services"
+  section "Services and endpoints" 'osc service list; osc endpoint list --interface public -c "Service Name" -c URL'
+  section "Compute services" 'osc compute service list'
+  section "Volume services" 'osc volume service list'
+  section "Network agents" 'osc network agent list'
+  pause
+
+  stage "OpenStack resources"
+  section "Networks" 'osc network list --long'
+  section "Subnets" 'osc subnet list --long'
+  section "Routers" 'osc router list --long'
+  section "Floating IPs" 'osc floating ip list --long'
+  section "Images" 'osc image list --long'
+  section "Flavors" 'osc flavor list --all --long'
+  section "Projects, domains, roles, groups" 'osc project list --long; osc domain list; osc role list; osc group list'
+  section "Servers (all projects)" 'osc server list --all-projects --long'
+  section "Volumes (all projects)" 'osc volume list --all-projects --long'
+  section "Quotas (default)" 'osc quota show --default'
+  pause
+
+  stage "Leftovers"
+  say "The old cinema project and the lifecheck VM, with everything attached."
+  section "Old cinema project" '
+  for p in $(osc project list -f value -c ID -c Name | awk "tolower(\$2) ~ /cinema/ {print \$1}"); do
+    echo "===== project $p"; osc project show "$p"
+    for what in "server list" "volume list" "port list" "floating ip list" "router list" "network list" "subnet list" "security group list"; do
+      echo "--- $what"; osc $what --project "$p" 2>&1
+    done
+    echo "--- role assignments (IDs only)"; osc role assignment list --project "$p"
+    echo "--- quota"; osc quota show "$p"
+  done'
+  section "Check / test VMs" '
+  for id in $(osc server list --all-projects -f value -c ID -c Name | awk "tolower(\$2) ~ /live|life|check|smoke|test/ {print \$1}"); do
+    echo "===== server $id"
+    osc server show "$id"
+  done'
+  pause
+
+  {
+    printf '## OpenStack inventory — %s\n\n' "$(date '+%F %H:%M')"
+    printf 'Read-only. Host: `%s`. Client: %s.\n\n' "$HOST" "$client"
+    printf '%s' "$OUT"
+  } > "$REPORT"
+  chmod 600 "$REPORT"
+
+  finish
+  note "Wrote $REPORT (kept outside the repo)."
+  note "Paste it into the Claude session, not on the issue: it lists other projects."
+  printf '\n'
+  exit 0
 fi
 
-REPORT="${REPORT:-$HOME/openstack-inventory-$(date +%F-%H%M).md}"
-TOTAL_STAGES=9
-banner "OpenStack: inventory (#32)"
+# ──────────────────────────────────────────────────────────────────────────
+# Apply and verify: run on the admin workstation.
+# ──────────────────────────────────────────────────────────────────────────
+
+REPO_GLOBALS="$(cd "$(dirname "$0")" && pwd)/kolla/globals.yml"
+REPORT="${REPORT:-openstack-verify-$(date +%F).md}"
+BACKUP="${BACKUP:-$HOME/openstack-backup-$(date +%F-%H%M)}"
+RAW=$(mktemp)
+RESULTS=()
+FAILED=0
+FIP=10.10.30.17
+IMAGE="Ubuntu 24.04 LTS"
+TAG=infra-32
+ESP_GUID=c12a7328-f81f-11d2-ba4b-00a0c93ec93b
+
+# record PASS|FAIL "check" ["note"] adds one line to the result checklist.
+record() {
+  local mark="x"; [[ "$1" == PASS ]] || { mark=" "; FAILED=$((FAILED + 1)); }
+  RESULTS+=("- [$mark] $2${3:+ — $3}")
+  if [[ "$1" == PASS ]]; then printf '  %s✓ %s%s\n' "$GREEN" "$2" "$RESET"
+  else printf '  %s✗ %s%s\n' "$RED" "$2${3:+ ($3)}" "$RESET"; fi
+}
+
+# check "name" CMD... records PASS when CMD succeeds.
+check() {
+  local name="$1"; shift
+  if "$@"; then record PASS "$name"; else record FAIL "$name"; fi
+}
+
+# v 'COMMANDS' runs COMMANDS on the host and prints stdout only.
+v() { h "$1" 2>/dev/null || true; }
+
+# run "what" 'COMMANDS' runs a change on the host, logs it, and shows errors.
+run() {
+  local out
+  if out=$(h "$2" 2>&1); then
+    printf '  %s+%s %s\n' "$GREEN" "$RESET" "$1"
+    printf 'done: %s\n' "$1" >> "$RAW"
+  else
+    printf '  %s✗ %s%s\n%s\n' "$RED" "$1" "$RESET" "$(sed 's/^/    /' <<< "$out" | tail -n 5)"
+    printf 'failed: %s\n%s\n' "$1" "$(redact <<< "$out" | tail -n 5)" >> "$RAW"
+    return 1
+  fi
+}
+
+# raw "title" 'COMMANDS' appends the output of COMMANDS to the report.
+raw() { printf '== %s\n%s\n\n' "$1" "$(h "$2" 2>&1 | redact)" >> "$RAW"; }
+
+# write_report "title" writes the checklist and the raw output to $REPORT.
+write_report() {
+  {
+    printf '## %s — %s\n\n' "$1" "$(date '+%F %H:%M')"
+    printf 'Against `docs/infra/openstack.md` and `docs/infra/kolla/globals.yml`.\n\n'
+    printf '%s\n' "${RESULTS[@]}"
+    printf '\n<details><summary>Output</summary>\n\n```\n'
+    cat "$RAW"
+    printf '```\n\n</details>\n'
+  } > "$REPORT"
+  rm -f "$RAW"
+}
+
+# show 'COMMANDS' prints the output of COMMANDS, indented, on screen only.
+show() { v "$1" | sed 's/^/    /'; }
+
+TOTAL_STAGES=10
+banner "OpenStack: apply and verify (#32)"
 
 stage "Before you start"
-say "This only reads: nothing on the host changes. It collects what"
-say "docs/infra/openstack.md is written from, and the leftovers to clean up."
+say "This applies #32 to the DL380 G9 and checks it against docs/infra/openstack.md."
+say "Every change asks first. Run it on the admin workstation."
 note "Host: $HOST (override with HOST=...). Needs passwordless sudo there."
-if ! h 'true' >/dev/null; then
-  warn "Couldn't run sudo on $HOST without a password. Fix that and re-run."
-  exit 1
-fi
-client=$(h 'echo "${OSC:-kolla_toolbox container}; openrc $OPENRC_URL, used $OS_AUTH_URL${OS_CACERT:+ (Kolla CA)}${INSECURE:+ (TLS not verified)}"')
-note "OpenStack client: $client"
-if ! h 'osc token issue -f value -c expires' >/dev/null 2>&1; then
-  warn "Keystone refused the admin credentials; the OpenStack sections will show the error."
-fi
+h true >/dev/null || { warn "Couldn't run sudo on $HOST without a password."; exit 1; }
+record PASS "SSH and sudo on the host"
+( umask 077; mkdir -p "$BACKUP"
+  h 'cat /etc/fstab' > "$BACKUP/fstab"
+  h 'efibootmgr -v' > "$BACKUP/efibootmgr.txt"
+  h 'cat /etc/kolla/globals.yml' > "$BACKUP/globals.yml" )
+record PASS "Backup saved before changes"
+note "fstab, boot entries and globals.yml saved to $BACKUP (never commit it)."
 pause
 
-stage "Disks and RAID"
-section "Block devices" 'lsblk -o NAME,SIZE,TYPE,FSTYPE,PARTTYPENAME,PARTUUID,MOUNTPOINTS -e 7 | grep -v "cinder--volumes-volume"'
-section "/proc/mdstat" 'cat /proc/mdstat'
-section "mdadm --detail" 'for md in /dev/md?*; do [ -b "$md" ] && case "$md" in *p[0-9]*) ;; *) mdadm --detail "$md";; esac; done'
-section "mdadm.conf" 'grep -vE "^\s*(#|$)" /etc/mdadm/mdadm.conf'
-pause
-
-stage "Boot setup"
-section "EFI boot entries" 'efibootmgr -v'
-section "/etc/fstab" 'grep -vE "^\s*(#|$)" /etc/fstab'
-section "GRUB install devices" 'for p in grub-efi-amd64 grub-pc; do echo "[$p]"; debconf-show "$p" 2>/dev/null | grep -iE "install_devices|force_extra"; done; dpkg -l | awk "/grub|shim/ {print \$2, \$3}"'
-section "ESP contents (file, sha256)" '
-for dev in $(lsblk -rpno NAME,PARTTYPE | awk "tolower(\$2)==\"c12a7328-f81f-11d2-ba4b-00a0c93ec93b\" {print \$1}"); do
-  echo "== $dev  PARTUUID=$(blkid -s PARTUUID -o value "$dev")"
-  mnt=$(findmnt -rno TARGET "$dev" | head -n1)
-  tmp=""
-  if [ -z "$mnt" ]; then tmp=$(mktemp -d); mount -o ro "$dev" "$tmp" && mnt=$tmp; fi
-  [ -n "$mnt" ] && (cd "$mnt" && find . -type f -exec sha256sum {} + | sort -k2)
-  [ -n "$tmp" ] && { umount "$tmp"; rmdir "$tmp"; }
-done'
-pause
-
-stage "Storage controller"
-section "Controller and driver" 'lspci -nnk | grep -iEA3 "sata|raid|ahci|storage|smart array"; echo; for h in /sys/class/scsi_host/host*; do echo "$(basename "$h"): $(cat "$h/proc_name")"; done | sort -u -k2'
-section "Kernel log (ahci)" 'dmesg | grep -iE "ahci|hpsa|hpdsa" | head -n 20'
-pause
-
-stage "Kolla-Ansible"
-section "globals.yml (no comments)" 'grep -vE "^\s*(#|$)" /etc/kolla/globals.yml'
-section "kolla-ansible install" '
-for k in $(ls /home/*/*/bin/kolla-ansible /opt/*/bin/kolla-ansible /root/*/bin/kolla-ansible 2>/dev/null); do
-  echo "$k"; "$(dirname "$k")/pip" show kolla-ansible 2>/dev/null | grep -E "^(Name|Version)"
+stage "RAID"
+for md in md0 md1; do
+  state=$(v "mdadm --detail /dev/$md | sed -n 's/^ *State : *//p'" | sed 's/ *$//')
+  if [[ "$state" =~ clean|active ]] && ! [[ "$state" =~ degraded|FAILED|recovering|resyncing ]]; then
+    record PASS "$md healthy" "$state"
+  else
+    record FAIL "$md healthy" "${state:-no state}"
+  fi
 done
-echo; echo "inventory files:"; ls -d /home/*/all-in-one /home/*/multinode /home/*/*/all-in-one /home/*/*/multinode /etc/kolla/inventory* 2>/dev/null
-echo; echo "/etc/kolla/config:"; (cd /etc/kolla/config 2>/dev/null && find . -type f | sort)'
-section "Config overrides (no secrets)" '(cd /etc/kolla/config 2>/dev/null && for f in $(find . -type f \( -name "*.conf" -o -name "*.ini" -o -name "*.yml" \) | sort); do echo "== $f"; grep -vE "^\s*(#|$)" "$f"; done)'
-section "Containers" '"$CTR" ps -a --format "{{.Names}}\t{{.Status}}" | sort'
+check "/proc/mdstat shows [UU] on both arrays" test "$(v "grep -c '\[UU\]' /proc/mdstat")" = 2
+raw "/proc/mdstat" 'cat /proc/mdstat'
 pause
 
-stage "Host network and capacity"
-section "Addresses and routes" 'ip -br addr; echo; ip route'
-section "Open vSwitch" '"$CTR" exec openvswitch_vswitchd ovs-vsctl show'
-section "CPU, RAM, LVM" 'echo "cpus: $(nproc)"; free -g; echo; vgs; echo; lvs -o lv_name,lv_size,data_percent,metadata_percent cinder-volumes | grep -v "volume-"'
+stage "Boot from either disk"
+# ESPS: "device partuuid" for the ESP on each disk under md0.
+ESPS=$(v "
+for d in \$(mdadm --detail /dev/md0 | awk '/active sync/ {print \$NF}' | xargs -n1 lsblk -npdo PKNAME | sort -u); do
+  lsblk -rnpo NAME,PARTTYPE,PARTUUID \"\$d\" | awk 'tolower(\$2)==\"$ESP_GUID\" {print \$1, \$3}'
+done")
+printf '%s\n' "$ESPS" | sed 's/^/    ESP /'
+check "One ESP on each RAID disk" test "$(grep -c . <<< "$ESPS")" = 2
+
+sums=$(v "
+for dev in $(awk '{print $1}' <<< "$ESPS" | tr '\n' ' '); do
+  mnt=\$(findmnt -rno TARGET \"\$dev\" | head -n1); tmp=''
+  if [ -z \"\$mnt\" ]; then tmp=\$(mktemp -d); mount -o ro \"\$dev\" \"\$tmp\" && mnt=\$tmp; fi
+  (cd \"\$mnt\" && find . -type f -exec sha256sum {} + | sort -k2 | sha256sum | cut -c1-16)
+  [ -n \"\$tmp\" ] && { umount \"\$tmp\"; rmdir \"\$tmp\"; }
+done")
+check "Both ESPs hold the same files" test "$(sort -u <<< "$sums" | grep -c .)" = 1
+
+entries=$(v 'efibootmgr -v')
+while read -r dev puuid; do
+  [[ -n "$dev" ]] || continue
+  check "Boot entry 'Ubuntu' → $dev shimx64.efi" \
+    grep -qiE "^Boot[0-9A-F]{4}\* Ubuntu.*GPT,$puuid,.*shimx64\.efi" <<< "$entries"
+done <<< "$ESPS"
+
+installs=$(v "debconf-show grub-efi-amd64 | sed -n 's/^\* grub-efi\/install_devices: //p' | tr ',' '\n' | xargs -rn1 readlink -f")
+check "GRUB installs to both ESPs" \
+  test "$(awk '{print $1}' <<< "$ESPS" | grep -cxFf <(printf '%s\n' "$installs"))" = 2
+
+# stale lists "Boot#### label" for entries on a GPT partition that no disk has.
+stale() {
+  local uuids; uuids=$(v 'lsblk -rno PARTUUID')
+  v 'efibootmgr -v' | grep -E '^Boot[0-9A-F]{4}' | while read -r line; do
+    u=$(grep -oiE 'GPT,[0-9a-f-]{36}' <<< "$line" | cut -d, -f2) || true
+    [[ -n "$u" ]] && ! grep -qix "$u" <<< "$uuids" && sed -E 's/^(Boot[0-9A-F]{4})\*? +([^\t]*[^ \t]) *(HD|\t).*/\1 \2/' <<< "$line"
+  done || true
+}
+old=$(stale)
+if [[ -n "$old" ]]; then
+  say "Boot entries pointing at partitions that no longer exist:"
+  printf '%s\n' "$old" | sed 's/^/    /'
+  if confirm "Delete them?"; then
+    while read -r num _; do
+      run "delete boot entry ${num#Boot}" "efibootmgr -q -b ${num#Boot} -B" || true
+    done <<< "$old"
+  fi
+fi
+check "No boot entry points at a missing partition" test -z "$(stale)"
+
+say "/boot/efi mounts one ESP; without nofail a dead disk stops boot in the emergency shell."
+if ! v 'grep -E "[[:space:]]/boot/efi[[:space:]]" /etc/fstab' | grep -q nofail; then
+  if confirm "Add nofail,x-systemd.device-timeout=10s to /boot/efi in /etc/fstab?"; then
+    run "/boot/efi gets nofail" "
+      sed -i -E '/[[:space:]]\/boot\/efi[[:space:]]/ s/(vfat[[:space:]]+)([^[:space:]]+)/\1\2,nofail,x-systemd.device-timeout=10s/' /etc/fstab &&
+      { findmnt --verify --tab-file /etc/fstab; rc=\$?; systemctl daemon-reload; exit \$rc; }" || true
+  fi
+fi
+check "/boot/efi is nofail in fstab" bash -c '[[ "$0" == *nofail* ]]' "$(v 'grep -E "[[:space:]]/boot/efi[[:space:]]" /etc/fstab')"
+raw "Boot entries (Ubuntu)" "efibootmgr | grep -E '^(BootCurrent|BootOrder|Boot[0-9A-F]{4}\*? Ubuntu)' | sed -E 's/\t.*//'"
+raw "/etc/fstab" "grep -vE '^\s*(#|\$)' /etc/fstab"
+pause
+
+stage "Kolla config and admin credentials"
+live=$(v "grep -vE '^\s*(#|\$)' /etc/kolla/globals.yml")
+repo=$(grep -vE '^\s*(#|$)' "$REPO_GLOBALS")
+if [[ "$live" != "$repo" ]]; then
+  say "/etc/kolla/globals.yml differs from docs/infra/kolla/globals.yml (comments ignored):"
+  diff <(printf '%s\n' "$live") <(printf '%s\n' "$repo") | sed 's/^/    /' || true
+  if ! v 'test -f /etc/kolla/certificates/ca/root.crt && echo yes' | grep -q yes; then
+    warn "/etc/kolla/certificates/ca/root.crt is missing; kolla_admin_openrc_cacert would point nowhere."
+    warn "Skipping. Fix the CA (kolla-ansible certificates) or drop that line from the repo copy."
+  elif confirm "Replace the host's globals.yml with the repo copy? (backup in $BACKUP)"; then
+    if ssh "${SSH_OPTS[@]}" "$HOST" 'sudo -n tee /etc/kolla/globals.yml >/dev/null' < "$REPO_GLOBALS"; then
+      printf '  %s+%s globals.yml replaced\n' "$GREEN" "$RESET"; printf 'done: globals.yml replaced\n' >> "$RAW"
+    fi
+  fi
+fi
+check "globals.yml matches the repo" \
+  test "$(v "grep -vE '^\s*(#|\$)' /etc/kolla/globals.yml")" = "$repo"
+
+# openrc_ok: the plain admin openrc, sourced in a clean shell, gets a token.
+openrc_ok() {
+  v 'env -i PATH="$PATH" HOME=/root bash -c ". /etc/kolla/admin-openrc.sh && \"\$0\" token issue -f value -c expires" "$OSC"' | grep -q .
+}
+if ! openrc_ok; then
+  say "The admin openrc doesn't work as it is (stale URL or CA)."
+  say "kolla-ansible post-deploy rewrites admin-openrc.sh, admin-openrc-system.sh and"
+  say "clouds.yaml from globals.yml. It doesn't touch the services."
+  if confirm "Run kolla-ansible post-deploy now?"; then
+    if out=$(ssh "${SSH_OPTS[@]}" "$HOST" 'cd ~ && . kolla-venv/bin/activate && kolla-ansible post-deploy -i all-in-one' 2>&1); then
+      printf '  %s+%s post-deploy\n' "$GREEN" "$RESET"; printf 'done: kolla-ansible post-deploy\n' >> "$RAW"
+    else
+      warn "post-deploy failed:"; tail -n 15 <<< "$out" | sed 's/^/    /'
+      printf 'failed: kolla-ansible post-deploy\n%s\n' "$(tail -n 15 <<< "$out" | redact)" >> "$RAW"
+    fi
+  fi
+fi
+check "admin-openrc.sh works as is (https, CA trusted)" openrc_ok
+check "Cinder image-volume cache override in place" \
+  test "$(v 'grep -c "^image_volume_cache_enabled = true" /etc/kolla/config/cinder/cinder-volume.conf')" = 1
+raw "Kolla-Ansible" 'echo "kolla-ansible $(/home/*/kolla-venv/bin/pip show kolla-ansible 2>/dev/null | sed -n "s/^Version: //p")"; grep -rh "^openstack_release:" /home/*/kolla-venv/share/kolla-ansible/ansible/group_vars 2>/dev/null | head -n1; . /etc/kolla/admin-openrc.sh; echo "OS_AUTH_URL=$OS_AUTH_URL OS_CACERT=${OS_CACERT:-}"'
 pause
 
 stage "OpenStack services"
-section "Services and endpoints" 'osc service list; osc endpoint list --interface public -c "Service Name" -c URL'
-section "Compute services" 'osc compute service list'
-section "Volume services" 'osc volume service list'
-section "Network agents" 'osc network agent list'
+services=$(v 'osc service list -f value -c Name | sort | tr "\n" " "')
+check "Services: cinder glance heat heat-cfn keystone neutron nova placement" \
+  test "$services" = "cinder glance heat heat-cfn keystone neutron nova placement "
+check "All compute services up" test "$(v 'osc compute service list -f value -c State | grep -vc "^up$"')" = 0
+check "All volume services up" test "$(v 'osc volume service list -f value -c State | grep -vc "^up$"')" = 0
+check "All network agents alive and up" test "$(v "osc network agent list -f json | python3 -c 'import json,sys; print(sum(1 for a in json.load(sys.stdin) if not a[\"Alive\"] or a[\"State\"] in (False, \"DOWN\")))'")" = 0
+check "external-net is flat on physnet1" \
+  test "$(v 'osc network show external-net -f value -c provider:network_type -c provider:physical_network | tr "\n" " "')" = "flat physnet1 "
+check "external-subnet pool is .100–.199" \
+  bash -c "grep -q '10.10.30.100' <<< \"\$0\" && grep -q '10.10.30.199' <<< \"\$0\"" "$(v 'osc subnet show external-subnet -f value -c allocation_pools')"
+raw "Services" 'osc compute service list -c Binary -c State; osc volume service list -c Binary -c State; osc network agent list -c "Agent Type" -c Alive -c State'
 pause
 
-stage "OpenStack resources"
-section "Networks" 'osc network list --long'
-section "Subnets" 'osc subnet list --long'
-section "Routers" 'osc router list --long'
-section "Floating IPs" 'osc floating ip list --long'
-section "Images" 'osc image list --long'
-section "Flavors" 'osc flavor list --all --long'
-section "Projects, domains, roles, groups" 'osc project list --long; osc domain list; osc role list; osc group list'
-section "Servers (all projects)" 'osc server list --all-projects --long'
-section "Volumes (all projects)" 'osc volume list --all-projects --long'
-section "Quotas (default)" 'osc quota show --default'
+stage "Leftovers: the old cinema project"
+OLD=""
+for id in $(v "osc project list -f value -c ID -c Name | awk '\$2==\"cinema\" {print \$1}'"); do
+  v "osc project show $id -f value -c tags" | grep -q "$TAG" || OLD=$id
+done
+if [[ -z "$OLD" ]]; then
+  note "No old cinema project."
+else
+  say "Old project cinema ($OLD). Deleting in dependency order, asking per step."
+  # each step: label, list command, delete command for one ID (\$id).
+  del_step() {
+    local label="$1" list="$2" del="$3" items
+    items=$(v "$list")
+    [[ -n "$items" ]] || return 0
+    say "$label:"; printf '%s\n' "$items" | sed 's/^/    /'
+    confirm "Delete these?" || return 0
+    while read -r id _; do
+      [[ -n "$id" ]] && run "$label: delete $id" "id=$id; $del" || true
+    done <<< "$items"
+  }
+  del_step "VMs" "osc server list --project $OLD -f value -c ID -c Name" \
+    'osc server delete --wait "$id"'
+  del_step "Floating IPs (the address can be recreated in the new project)" \
+    "osc floating ip list --project $OLD -f value -c ID -c 'Floating IP Address'" \
+    'osc floating ip delete "$id"'
+  del_step "Routers" "osc router list --project $OLD -f value -c ID -c Name" \
+    'for p in $(osc port list --router "$id" --device-owner network:router_interface -f value -c ID); do osc router remove port "$id" "$p"; done
+     osc router unset --external-gateway "$id"; osc router delete "$id"'
+  del_step "Networks (with their subnets)" "osc network list --project $OLD -f value -c ID -c Name" \
+    'osc network delete "$id"'
+  del_step "Volumes" "osc volume list --project $OLD -f value -c ID -c Name -c Status" \
+    'osc volume delete "$id"'
+  del_step "Security groups" "osc security group list --project $OLD -f value -c ID -c Name" \
+    'osc security group delete "$id"'
+  if confirm "Delete the project $OLD itself?"; then
+    run "delete old project $OLD" "osc project delete $OLD" || true
+  fi
+fi
+check "No untagged cinema project left" bash -c '! grep -q . <<< "$0"' \
+  "$(for id in $(v "osc project list -f value -c ID -c Name | awk '\$2==\"cinema\" {print \$1}'"); do v "osc project show $id -f value -c tags" | grep -q "$TAG" || echo "$id"; done)"
 pause
 
-stage "Leftovers"
-say "The old cinema project and the lifecheck VM, with everything attached."
-section "Old cinema project" '
-for p in $(osc project list -f value -c ID -c Name | awk "tolower(\$2) ~ /cinema/ {print \$1}"); do
-  echo "===== project $p"; osc project show "$p"
-  for what in "server list" "volume list" "port list" "floating ip list" "router list" "network list" "subnet list" "security group list"; do
-    echo "--- $what"; osc $what --project "$p" 2>&1
+stage "cinema: project, group, members"
+if ! v 'osc project show cinema -f value -c id' | grep -q .; then
+  confirm "Create project cinema (tag $TAG)?" && \
+    run "project cinema" "osc project create --domain default --tag $TAG --description 'Cinema backend (docs/infra/openstack.md)' cinema" || true
+fi
+if ! v 'osc group show cinema-team -f value -c id' | grep -q .; then
+  confirm "Create group cinema-team?" && \
+    run "group cinema-team" "osc group create --domain default --description 'cinema project members' cinema-team" || true
+fi
+run "cinema-team is member of cinema" 'osc role add --group cinema-team --project cinema member' || true
+run "admin user is member of cinema" 'osc role add --user "$OS_USERNAME" --user-domain Default --project cinema member' || true
+
+say "Users (service accounts hidden). Names stay on this screen, never in the report:"
+show "comm -23 <(osc user list -f value -c Name | sort) <(osc role assignment list --project service --names -f value -c User | sed 's/@.*//' | sort)"
+say "Already in cinema-team:"
+show 'osc user list --group cinema-team -f value -c Name'
+step "Create missing team users in Horizon first: Identity → Users, default domain,"
+note "  no primary project; hand the password over out-of-band."
+ask TEAM "Users to add to cinema-team (space-separated, Enter for none):"
+for u in $TEAM; do run "add a user to cinema-team" "osc group add user cinema-team '$u'" || true; done
+check "cinema-team has role member on cinema" \
+  test "$(v 'osc role assignment list --group cinema-team --project cinema --names -f value -c Role')" = member
+admins=$(v 'for u in $(osc user list --group cinema-team -f value -c ID); do osc role assignment list --user "$u" --role admin -f value -c Project; done')
+check "No cinema-team member holds the admin role anywhere" test -z "$admins"
+note "cinema-team has $(v 'osc user list --group cinema-team -f value -c ID' | grep -c .) member(s)."
+pause
+
+stage "cinema: network, floating IP, quotas"
+if v 'osc subnet list -f value -c Subnet' | grep -qx '192.168.100.0/24' && ! v 'osc subnet show cinema-subnet -f value -c id' | grep -q .; then
+  warn "192.168.100.0/24 is already used by another subnet: pick another and update openstack.md."
+elif ! v 'osc network show cinema-net -f value -c id' | grep -q .; then
+  if confirm "Create cinema-net, cinema-subnet 192.168.100.0/24 and cinema-router?"; then
+    run "cinema-net" 'osc network create --project cinema cinema-net' &&
+    run "cinema-subnet" 'osc subnet create --project cinema --network cinema-net --subnet-range 192.168.100.0/24 --dns-nameserver 1.1.1.1 --dns-nameserver 8.8.8.8 cinema-subnet' &&
+    run "cinema-router" 'osc router create --project cinema cinema-router' &&
+    run "cinema-router gateway" 'osc router set --external-gateway external-net cinema-router' &&
+    run "cinema-router interface" 'osc router add subnet cinema-router cinema-subnet' || true
+  fi
+fi
+cid=$(v 'osc project show cinema -f value -c id')
+owner=$(v "osc floating ip list --floating-ip-address $FIP -f value -c Project")
+if [[ -z "$owner" ]]; then
+  confirm "Create floating IP $FIP in cinema?" && \
+    run "floating IP $FIP" "osc floating ip create --project cinema --floating-ip-address $FIP external-net" || true
+elif [[ "$owner" != "$cid" ]]; then
+  warn "$FIP belongs to another project ($owner). Delete it there first."
+fi
+fips=$(v "osc floating ip list --project cinema -f value -c ID" | grep -c .) || true
+want="instances 6 cores 12 ram 24576 volumes 10 gigabytes 200 routers 1 floating-ips $fips"
+quotas() { v "osc quota show cinema -f value" | awk '$1 ~ /^(instances|cores|ram|volumes|gigabytes|routers|floating-ips)$/ {print $1, $2}' | sort | tr '\n' ' '; }
+expect_q=$(tr ' ' '\n' <<< "$want" | paste -d' ' - - | sort | tr '\n' ' ')
+if [[ "$(quotas)" != "$expect_q" ]]; then
+  confirm "Set cinema quotas ($want)?" && \
+    run "cinema quotas" "osc quota set --instances 6 --cores 12 --ram 24576 --volumes 10 --gigabytes 200 --routers 1 --floating-ips $fips cinema" || true
+fi
+check "cinema-router: gateway on external-net, interface on cinema-subnet" \
+  test "$(v 'osc router show cinema-router -f value -c external_gateway_info | grep -ciE "enable_snat.{0,3}: *true"; osc port list --router cinema-router --device-owner network:router_interface -f value -c "Fixed IP Addresses" | grep -c "192.168.100.1"' | tr '\n' ' ')" = "1 1 "
+check "$FIP belongs to cinema" test "$(v "osc floating ip list --floating-ip-address $FIP -f value -c Project")" = "$cid"
+check "Quotas: $want" test "$(quotas)" = "$expect_q"
+pause
+
+stage "Image and flavors"
+for f in "c1.small 1 2048" "c2.medium 2 4096" "c2.large 2 8192"; do
+  read -r name cpu ram <<< "$f"
+  if ! v "osc flavor show $name -f value -c id" | grep -q .; then
+    confirm "Create flavor $name ($cpu vCPU, $((ram / 1024)) GB, disk 0)?" && \
+      run "flavor $name" "osc flavor create --public --vcpus $cpu --ram $ram --disk 0 $name" || true
+  fi
+  check "Flavor $name: $cpu vCPU, $ram MB, disk 0" \
+    test "$(v "osc flavor show $name -f json | python3 -c 'import json,sys; d=json.load(sys.stdin); print(d[\"vcpus\"], d[\"ram\"], d[\"disk\"])'")" = "$cpu $ram 0"
+done
+check "Image '$IMAGE' active and public" \
+  test "$(v "osc image show '$IMAGE' -f value -c status -c visibility | tr '\n' ' '")" = "active public "
+pause
+
+stage "Smoke test: a throwaway VM on $FIP"
+say "Boots smoke-vm in cinema (c1.small, 10 GB volume from '$IMAGE') on cinema-net,"
+say "attaches $FIP, checks it from here, then deletes the VM, its volume, key and"
+say "security group. $FIP stays in cinema."
+# cleanup removes everything the smoke test creates; safe to run twice.
+cleanup() {
+  h "oscp server remove floating ip smoke-vm $FIP; oscp server delete --wait smoke-vm
+     for i in \$(seq 30); do s=\$(oscp volume show smoke-vm-root -f value -c status 2>/dev/null) || break; [ \"\$s\" != in-use ] && break; sleep 2; done
+     oscp volume delete smoke-vm-root; oscp security group delete smoke-32; oscp keypair delete smoke-32" >/dev/null 2>&1 || true
+}
+if confirm "Run the smoke test?"; then
+  cleanup
+  KEYDIR=$(mktemp -d)
+  ssh-keygen -q -t ed25519 -N '' -C smoke-32 -f "$KEYDIR/id"
+  pub=$(cat "$KEYDIR/id.pub")
+  run "keypair smoke-32" "printf '%s\n' '$pub' > /tmp/smoke-32.pub && oscp keypair create --public-key /tmp/smoke-32.pub smoke-32 >/dev/null; rc=\$?; rm -f /tmp/smoke-32.pub; exit \$rc" &&
+  run "security group smoke-32 (icmp, tcp 22)" 'oscp security group create smoke-32 >/dev/null && oscp security group rule create --protocol icmp smoke-32 >/dev/null && oscp security group rule create --protocol tcp --dst-port 22 smoke-32 >/dev/null' &&
+  run "volume smoke-vm-root (10 GB)" "oscp volume create --image '$IMAGE' --size 10 --bootable smoke-vm-root >/dev/null
+    for i in \$(seq 150); do s=\$(oscp volume show smoke-vm-root -f value -c status); [ \"\$s\" = available ] && exit 0; [ \"\$s\" = error ] && exit 1; sleep 2; done; exit 1" &&
+  run "server smoke-vm" 'oscp server create --flavor c1.small --volume smoke-vm-root --network cinema-net --security-group smoke-32 --key-name smoke-32 --wait smoke-vm >/dev/null' &&
+  run "attach $FIP" "oscp server add floating ip smoke-vm $FIP" || true
+
+  check "smoke-vm ACTIVE on cinema-net" \
+    bash -c '[[ "$0" == *cinema-net=* && "$0" == *ACTIVE* ]]' "$(v 'oscp server show smoke-vm -f value -c status -c addresses | tr "\n" " "')"
+  say "Waiting for $FIP to answer (up to 2 min)…"
+  pinged=""
+  for _ in $(seq 60); do ping -c1 -W2 "$FIP" >/dev/null 2>&1 && { pinged=1; break; }; sleep 1; done
+  check "$FIP answers ping from the admin workstation" test -n "$pinged"
+  say "Waiting for SSH and cloud-init (up to 5 min)…"
+  KOPTS=(-i "$KEYDIR/id" -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=5 -o LogLevel=ERROR)
+  got=""
+  for _ in $(seq 60); do
+    got=$(ssh "${KOPTS[@]}" "ubuntu@$FIP" 'cloud-init status --wait >/dev/null 2>&1; echo "$(hostname) $(curl -s -o /dev/null -w "%{http_code}" -m 10 https://cloud-images.ubuntu.com)"' 2>/dev/null) && break
+    sleep 5
   done
-  echo "--- role assignments (IDs only)"; osc role assignment list --project "$p"
-  echo "--- quota"; osc quota show "$p"
-done'
-section "Check / test VMs" '
-for id in $(osc server list --all-projects -f value -c ID -c Name | awk "tolower(\$2) ~ /live|life|check|smoke|test/ {print \$1}"); do
-  echo "===== server $id"
-  osc server show "$id"
-done'
+  check "SSH to ubuntu@$FIP" bash -c '[[ "$0" == smoke-vm* ]]' "$got"
+  check "smoke-vm reaches the internet through cinema-router" bash -c '[[ "$0" =~ \ (2|3)[0-9][0-9]$ ]]' "$got"
+  printf 'smoke-vm: %s\n\n' "${got:-no answer}" >> "$RAW"
+
+  say "Deleting smoke-vm, its volume, key and security group…"
+  cleanup
+  rm -rf "$KEYDIR"
+  check "smoke-vm and its volume deleted" \
+    test -z "$(v 'oscp server list --name "^smoke-vm$" -f value -c ID; oscp volume list --name smoke-vm-root -f value -c ID')"
+  check "$FIP still in cinema, unattached" \
+    test "$(v "osc floating ip list --floating-ip-address $FIP -f value -c Project -c 'Fixed IP Address' | tr '\n' ' '")" = "None $cid "
+else
+  record FAIL "Smoke test" "skipped"
+fi
 pause
 
-{
-  printf '## OpenStack inventory — %s\n\n' "$(date '+%F %H:%M')"
-  printf 'Read-only. Host: `%s`. Client: %s.\n\n' "$HOST" "$client"
-  printf '%s' "$OUT"
-} > "$REPORT"
-chmod 600 "$REPORT"
-
+write_report "OpenStack verification"
 finish
-note "Wrote $REPORT (kept outside the repo)."
-note "Paste it into the Claude session, not on the issue: it lists other projects."
+if (( FAILED )); then warn "$FAILED check(s) failed; see $REPORT"
+else note "All checks passed."; fi
+note "Paste $REPORT as a comment on issue #32."
 printf '\n'
