@@ -187,6 +187,7 @@ Commands and choices only. The linked docs carry the details.
 Run [`verify-openstack.sh`](verify-openstack.sh) from the admin workstation after any change to the host, the Kolla config or the `cinema` project. It works over `ssh hl-server`, asks before each change, and writes a Markdown report to paste on the issue. It checks:
 
 - RAID, boot setup and `fstab`
+- leftovers of deleted projects (orphaned VMs, volumes, floating IPs, routers, networks, security groups)
 - `globals.yml` against the repo
 - OpenStack services and agents
 - the `cinema` project

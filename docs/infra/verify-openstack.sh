@@ -256,6 +256,40 @@ section() {
   head -n 8 <<< "$body" | sed "s/^/    $DIM/; s/\$/$RESET/"
 }
 
+# v 'COMMANDS' runs COMMANDS on the host and prints stdout only.
+v() { h "$1" 2>/dev/null || true; }
+
+# LEFTOVERS_PY prints "kind id project name" for every resource owned by a
+# project that no longer exists in Keystone, or by the project in $EXTRA.
+LEFTOVERS_PY=$(cat <<'PY'
+import os, openstack
+c = openstack.connect(verify=os.environ.get("VERIFY") != "0")
+live = {p.id for p in c.identity.projects()}
+extra = os.environ.get("EXTRA", "")
+def out(kind, rid, pid, name):
+    if pid and (pid not in live or pid == extra):
+        print(kind, rid, pid, (name or "-").replace(" ", "_"))
+for s in c.compute.servers(all_projects=True): out("server", s.id, s.project_id, s.name)
+for f in c.network.ips(): out("fip", f.id, f.project_id, f.floating_ip_address)
+for r in c.network.routers(): out("router", r.id, r.project_id, r.name)
+for p in c.network.ports():
+    if not p.device_owner: out("port", p.id, p.project_id, p.name)
+for n in c.network.networks(): out("network", n.id, n.project_id, n.name)
+for s in c.block_storage.snapshots(details=True, all_projects=True): out("snapshot", s.id, s.project_id, s.name)
+for v in c.block_storage.volumes(details=True, all_projects=True): out("volume", v.id, v.project_id, v.name)
+for g in c.network.security_groups(): out("secgroup", g.id, g.project_id, g.name)
+for i in c.image.images():
+    if i.visibility != "public": out("image", i.id, i.owner, i.name)
+PY
+)
+# leftovers_cmd [PROJECT_ID] is the host command that runs LEFTOVERS_PY with
+# the OpenStack SDK next to the client.
+leftovers_cmd() {
+  printf '%s\n' "export EXTRA='$1' VERIFY=\$([ -n \"\$INSECURE\" ] && echo 0 || echo 1)" \
+    "\"\$(dirname \"\$OSC\")/python3\" - <<'PYEOF'" "$LEFTOVERS_PY" "PYEOF"
+}
+leftovers() { v "$(leftovers_cmd "$1")"; }
+
 # ──────────────────────────────────────────────────────────────────────────
 # Inventory: read-only.
 # ──────────────────────────────────────────────────────────────────────────
@@ -359,6 +393,7 @@ if [[ "$MODE" == inventory ]]; then
 
   stage "Leftovers"
   say "The old cinema project and the lifecheck VM, with everything attached."
+  section "Resources of deleted projects (kind, id, project, name)" "$(leftovers_cmd "")"
   section "Old cinema project" '
   for p in $(osc project list -f value -c ID -c Name | awk "tolower(\$2) ~ /cinema/ {print \$1}"); do
     echo "===== project $p"; osc project show "$p"
@@ -418,8 +453,6 @@ check() {
   if "$@"; then record PASS "$name"; else record FAIL "$name"; fi
 }
 
-# v 'COMMANDS' runs COMMANDS on the host and prints stdout only.
-v() { h "$1" 2>/dev/null || true; }
 
 # run "what" 'COMMANDS' runs a change on the host, logs it, and shows errors.
 run() {
@@ -605,46 +638,50 @@ check "external-subnet pool is .100–.199" \
 raw "Services" 'osc compute service list -c Binary -c State; osc volume service list -c Binary -c State; osc network agent list -c "Agent Type" -c Alive -c State'
 pause
 
-stage "Leftovers: the old cinema project"
+stage "Leftovers: old cinema project and orphans"
+say "Deleting a project in Keystone leaves its VMs, volumes, floating IPs, routers,"
+say "networks and security groups behind. This finds everything owned by a project"
+say "that no longer exists, or by the old (untagged) cinema project."
 OLD=""
 for id in $(v "osc project list -f value -c ID -c Name | awk '\$2==\"cinema\" {print \$1}'"); do
   v "osc project show $id -f value -c tags" | grep -q "$TAG" || OLD=$id
 done
-if [[ -z "$OLD" ]]; then
-  note "No old cinema project."
+[[ -n "$OLD" ]] && note "Old cinema project: $OLD"
+LEFT=$(leftovers "$OLD")
+if [[ -z "$LEFT" ]]; then
+  note "Nothing left over."
 else
-  say "Old project cinema ($OLD). Deleting in dependency order, asking per step."
-  # each step: label, list command, delete command for one ID (\$id).
+  # del_step KIND "label" 'DELETE $id': list the KIND lines, confirm, delete each.
   del_step() {
-    local label="$1" list="$2" del="$3" items
-    items=$(v "$list")
+    local items
+    items=$(awk -v k="$1" '$1 == k {$1 = ""; print substr($0, 2)}' <<< "$LEFT")
     [[ -n "$items" ]] || return 0
-    say "$label:"; printf '%s\n' "$items" | sed 's/^/    /'
+    say "$2 (id, owning project, name):"; printf '%s\n' "$items" | sed 's/^/    /'
     confirm "Delete these?" || return 0
     while read -r id _; do
-      [[ -n "$id" ]] && run "$label: delete $id" "id=$id; $del" || true
+      [[ -n "$id" ]] && { run "$1 $id deleted" "id=$id; $3" || true; }
     done <<< "$items"
   }
-  del_step "VMs" "osc server list --project $OLD -f value -c ID -c Name" \
-    'osc server delete --wait "$id"'
-  del_step "Floating IPs (the address can be recreated in the new project)" \
-    "osc floating ip list --project $OLD -f value -c ID -c 'Floating IP Address'" \
-    'osc floating ip delete "$id"'
-  del_step "Routers" "osc router list --project $OLD -f value -c ID -c Name" \
+  del_step server "VMs" 'osc server delete --wait "$id"'
+  del_step fip "Floating IPs (an admin recreates 10.10.30.17 in the new cinema)" 'osc floating ip delete "$id"'
+  del_step router "Routers" \
     'for p in $(osc port list --router "$id" --device-owner network:router_interface -f value -c ID); do osc router remove port "$id" "$p"; done
      osc router unset --external-gateway "$id"; osc router delete "$id"'
-  del_step "Networks (with their subnets)" "osc network list --project $OLD -f value -c ID -c Name" \
-    'osc network delete "$id"'
-  del_step "Volumes" "osc volume list --project $OLD -f value -c ID -c Name -c Status" \
-    'osc volume delete "$id"'
-  del_step "Security groups" "osc security group list --project $OLD -f value -c ID -c Name" \
-    'osc security group delete "$id"'
-  if confirm "Delete the project $OLD itself?"; then
-    run "delete old project $OLD" "osc project delete $OLD" || true
-  fi
+  del_step port "Unattached ports" 'osc port delete "$id"'
+  del_step network "Networks (with their subnets)" 'osc network delete "$id"'
+  del_step snapshot "Volume snapshots" 'osc volume snapshot delete "$id"'
+  del_step volume "Volumes" 'osc volume delete "$id"'
+  del_step secgroup "Security groups" 'osc security group delete "$id"'
+  del_step image "Private images" 'osc image delete "$id"'
+fi
+if [[ -n "$OLD" ]] && confirm "Delete the old cinema project $OLD itself?"; then
+  run "old project $OLD deleted" "osc project delete $OLD" || true
 fi
 check "No untagged cinema project left" bash -c '! grep -q . <<< "$0"' \
   "$(for id in $(v "osc project list -f value -c ID -c Name | awk '\$2==\"cinema\" {print \$1}'"); do v "osc project show $id -f value -c tags" | grep -q "$TAG" || echo "$id"; done)"
+LEFT=$(leftovers "")
+check "No resources owned by deleted projects" test -z "$LEFT"
+[[ -z "$LEFT" ]] || printf 'still orphaned:\n%s\n\n' "$LEFT" >> "$RAW"
 pause
 
 stage "cinema: project, group, members"
