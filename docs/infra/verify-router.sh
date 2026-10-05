@@ -284,12 +284,13 @@ if [[ "$MODE" == member ]]; then
   step "Run it off the homelab VLANs and the home LAN, so the tailnet is the only path."
   step "In the cinema project, attach floating IP 10.10.30.17 to a throwaway CirrOS VM"
   note "  whose security group allows tcp 22 and 443 (CirrOS answers 22; 443 is refused)."
-  say "Each probe waits up to 8 s. Open or refused means the policy let it through;"
+  say "A blocked probe waits 8 s. Open or refused means the policy let it through;"
   say "a timeout means it was dropped."
   pause "Ready? Press Enter"
 
   stage "Should be reachable"
   expect allow 10.10.20.12 443 "Horizon"
+  expect allow 10.10.20.12 5000 "Keystone API"
   expect allow 10.10.30.17 22 "cinema VM, ssh"
   expect allow 10.10.30.17 443 "cinema VM, https"
   pause
@@ -300,6 +301,9 @@ if [[ "$MODE" == member ]]; then
   expect deny 10.10.10.10 443 "iLO"
   expect deny 10.10.20.11 22 "host OS ssh"
   expect deny 10.10.30.150 22 "another project's floating IP"
+  expect deny 10.10.20.12 22 "host ssh via the VIP"
+  expect deny 10.10.20.12 3306 "MariaDB via the VIP"
+  expect deny 10.10.20.12 15672 "RabbitMQ UI via the VIP"
   pause
 
   write_report "Router: team member reachability"
