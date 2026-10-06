@@ -16,7 +16,8 @@ data "openstack_networking_network_v2" "external" {
 
 data "openstack_networking_floatingip_v2" "proxy" {
   address = var.floating_ip
-  pool    = data.openstack_networking_network_v2.external.name
+  # Despite its name, pool filters on the network's ID.
+  pool = data.openstack_networking_network_v2.external.id
 }
 
 data "openstack_images_image_v2" "base" {
