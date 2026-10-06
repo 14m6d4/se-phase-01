@@ -43,3 +43,34 @@ variable "proxy_sources" {
   type        = list(string)
   default     = ["10.10.30.1/32", "192.168.1.6/32"]
 }
+
+variable "vms" {
+  description = "Size and fixed address of each VM. Resizing an existing VM needs a rebuild (terraform.md)."
+  type = map(object({
+    flavor       = string
+    root_size_gb = number
+    fixed_ip     = string
+  }))
+  default = {
+    proxy = { flavor = "c1.small", root_size_gb = 10, fixed_ip = "192.168.100.10" }
+    app   = { flavor = "c2.medium", root_size_gb = 20, fixed_ip = "192.168.100.20" }
+    db    = { flavor = "c2.medium", root_size_gb = 20, fixed_ip = "192.168.100.30" }
+  }
+
+  validation {
+    condition     = toset(keys(var.vms)) == toset(["proxy", "app", "db"])
+    error_message = "vms must have exactly proxy, app and db."
+  }
+}
+
+variable "pgdata_size_gb" {
+  description = "Size of the volume holding PostgreSQL's data on db."
+  type        = number
+  default     = 20
+}
+
+variable "ssh_public_key_path" {
+  description = "Public key for the debian user on every VM. Team members' keys are added by hand (terraform.md)."
+  type        = string
+  default     = "~/.ssh/id_ed25519.pub"
+}
