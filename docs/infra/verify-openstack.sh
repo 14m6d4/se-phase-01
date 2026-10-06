@@ -436,6 +436,9 @@ RESULTS=()
 FAILED=0
 FIP=10.10.30.17
 IMAGE="Ubuntu 24.04 LTS"
+DEBIAN_IMAGE="Debian 13"
+DEBIAN_URL=https://cloud.debian.org/images/cloud/trixie/latest
+DEBIAN_FILE=debian-13-genericcloud-amd64.qcow2
 TAG=infra-32
 ESP_GUID=c12a7328-f81f-11d2-ba4b-00a0c93ec93b
 
@@ -763,6 +766,17 @@ for f in "c1.small 1 2048" "c2.medium 2 4096" "c2.large 2 8192"; do
 done
 check "Image '$IMAGE' active and public" \
   test "$(v "osc image show '$IMAGE' -f value -c status -c visibility | tr '\n' ' '")" = "active public "
+# The base image of the cinema VMs (#33). Terraform finds it by name.
+if ! v "osc image show '$DEBIAN_IMAGE' -f value -c id" | grep -q .; then
+  if confirm "Upload '$DEBIAN_IMAGE' ($DEBIAN_FILE) from cloud.debian.org, checked against SHA512SUMS?"; then
+    run "image $DEBIAN_IMAGE" "set -e; d=\$(mktemp -d); trap 'rm -rf \"\$d\"' EXIT; cd \"\$d\"
+      curl -fsSLO $DEBIAN_URL/$DEBIAN_FILE; curl -fsSLO $DEBIAN_URL/SHA512SUMS
+      grep ' $DEBIAN_FILE\$' SHA512SUMS | sha512sum -c --quiet -
+      osc image create --public --disk-format qcow2 --container-format bare --file $DEBIAN_FILE '$DEBIAN_IMAGE' >/dev/null" || true
+  fi
+fi
+check "Image '$DEBIAN_IMAGE' active and public" \
+  test "$(v "osc image show '$DEBIAN_IMAGE' -f value -c status -c visibility | tr '\n' ' '")" = "active public "
 pause
 
 stage "Smoke test: a throwaway VM on $FIP"
