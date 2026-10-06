@@ -95,6 +95,7 @@ Shared, public:
 | Image | |
 |---|---|
 | `Ubuntu 24.04 LTS` | Ubuntu cloud image (qcow2), default user `ubuntu` |
+| `Debian 13` | Debian `genericcloud` image (qcow2), default user `debian`. Base of the cinema VMs (#33, `terraform.md`) |
 
 | Flavor | vCPU | RAM | Disk |
 |---|---|---|---|
@@ -184,7 +185,7 @@ Commands and choices only. The linked docs carry the details.
    openstack flavor create --public --vcpus 2 --ram 8192 --disk 0 c2.large
    ```
 
-   Check the image against Ubuntu's `SHA256SUMS` before uploading.
+   Check the image against Ubuntu's `SHA256SUMS` before uploading. `verify-openstack.sh` uploads `Debian 13` itself, from `cloud.debian.org` after checking it against Debian's `SHA512SUMS`.
 6. **The cinema project:** run `verify-openstack.sh`. It creates everything in [The cinema project](#the-cinema-project).
 
 ## Verify
@@ -196,6 +197,7 @@ Run [`verify-openstack.sh`](verify-openstack.sh) from the admin workstation afte
 - `globals.yml` against the repo
 - OpenStack services and agents
 - the `cinema` project
+- images and flavors (it uploads `Debian 13` if it is missing)
 - a throwaway VM on `10.10.30.17`
 
 `verify-openstack.sh inventory` only reads, and prints everything this doc was written from.

@@ -40,3 +40,7 @@ build/
 
 ### Load test output ###
 loadtest/results/
+
+### Infra wizard reports (paste them on the issue, never commit) ###
+*-verify-*.md
+openstack-inventory-*.md

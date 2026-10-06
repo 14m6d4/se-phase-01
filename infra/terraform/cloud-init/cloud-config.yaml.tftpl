@@ -1,0 +1,91 @@
+#cloud-config
+# First boot of a cinema VM (#33). No secrets here: user data is readable by
+# anyone in the project. Read on first boot only; see terraform.md before
+# changing it.
+
+hostname: ${hostname}
+# /etc/hosts is written below; keep cloud-init from rewriting it on boot.
+manage_etc_hosts: false
+ssh_pwauth: false
+disable_root: true
+
+apt:
+  sources:
+    docker.list:
+      source: deb [signed-by=$KEY_FILE] https://download.docker.com/linux/debian $RELEASE stable
+      # Docker's release key (download.docker.com/linux/debian/gpg).
+      keyid: 9DC858229FC7DD38854AE2D88D81803C0EBFCD88
+
+package_update: true
+package_upgrade: true
+packages:
+  - docker-ce
+  - docker-ce-cli
+  - containerd.io
+  - docker-buildx-plugin
+  - docker-compose-plugin
+  - unattended-upgrades
+  - netcat-openbsd
+
+write_files:
+  - path: /etc/hosts
+    content: |
+      127.0.0.1 localhost
+      ::1 localhost ip6-localhost ip6-loopback
+      ff02::1 ip6-allnodes
+      ff02::2 ip6-allrouters
+%{ for name, ip in hosts ~}
+      ${ip} ${name}
+%{ endfor ~}
+
+  - path: /etc/docker/daemon.json
+    content: |
+      {
+        "log-driver": "json-file",
+        "log-opts": { "max-size": "10m", "max-file": "3" }
+      }
+
+  - path: /etc/systemd/journald.conf.d/size.conf
+    content: |
+      [Journal]
+      SystemMaxUse=100M
+
+  # sshd takes the first value it reads, and this file sorts first.
+  - path: /etc/ssh/sshd_config.d/10-hardening.conf
+    content: |
+      PasswordAuthentication no
+      KbdInteractiveAuthentication no
+      PermitRootLogin no
+
+  - path: /etc/apt/apt.conf.d/20auto-upgrades
+    content: |
+      APT::Periodic::Update-Package-Lists "1";
+      APT::Periodic::Unattended-Upgrade "1";
+
+  # Security updates and Docker only. No automatic reboot: there is one app
+  # and one db, so a reboot is downtime. Reboot by hand (runbook, #34).
+  - path: /etc/apt/apt.conf.d/52unattended-upgrades-cinema
+    content: |
+      #clear Unattended-Upgrade::Origins-Pattern;
+      Unattended-Upgrade::Origins-Pattern {
+        "origin=Debian,codename=$${distro_codename}-security,label=Debian-Security";
+        "origin=Docker,label=Docker CE";
+      };
+      Unattended-Upgrade::Automatic-Reboot "false";
+
+runcmd:
+  - systemctl restart systemd-journald ssh
+  - usermod -aG docker debian
+%{ if pgdata_serial != "" ~}
+  # The pgdata volume: format it only if it has no filesystem yet, so a
+  # rebuilt db keeps its data.
+  - |
+    set -e
+    dev=/dev/disk/by-id/virtio-${pgdata_serial}
+    for i in $(seq 30); do [ -e "$dev" ] && break; sleep 2; done
+    blkid "$dev" >/dev/null || mkfs.ext4 -q -L pgdata "$dev"
+    mkdir -p /srv/pgdata
+    grep -q '^LABEL=pgdata ' /etc/fstab || echo 'LABEL=pgdata /srv/pgdata ext4 defaults,nofail 0 2' >> /etc/fstab
+    systemctl daemon-reload
+    mountpoint -q /srv/pgdata || mount /srv/pgdata
+%{ endif ~}
