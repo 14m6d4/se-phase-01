@@ -64,13 +64,17 @@ ssh cinema-db
 
 ## Changing things later
 
-A VM is never replaced on its own. The `vm` module ignores later changes to the user data and the boot volume. Changing the cloud-init template, the image (a newer `Debian 13`, or a new Debian release), or a root volume's size does nothing to a running VM. A running VM can therefore lag behind the template. Fix small things over SSH, and put the same change in the template so the next rebuild has it.
+A VM is never replaced on its own. The `vm` module ignores later changes to the user data, the root volume's image and its size. Changing the cloud-init template, the image (a newer `Debian 13`, or a new Debian release), or a root volume's size does nothing to a running VM. A running VM can therefore lag behind the template. Fix small things over SSH, and put the same change in the template so the next rebuild has it.
 
-**Rebuild one VM on purpose:**
+**Rebuild one VM on purpose** by replacing its root volume. The instance is replaced with it:
 
 ```sh
-terraform apply -replace=module.app.openstack_compute_instance_v2.this
+terraform apply -replace=module.app.openstack_blockstorage_volume_v3.root
 ```
+
+Replacing only the instance would boot the new one from the old disk.
+
+The root volume is created and waited for before the instance boots: up to 60 minutes. On this host's disks, letting Nova create it at boot fails after about 3 minutes, leaving the instance in `ERROR`. Cinder's image-volume cache (`openstack.md`) makes later volumes from the same image quick clones.
 
 - **Kept:** the port, so the fixed IP, the security groups and the floating IP, and on `db` the `pgdata` volume.
 - **Lost:** the root volume and anything done by hand. That includes team members' keys and the SSH host key, so remove the old one with `ssh-keygen -R`.

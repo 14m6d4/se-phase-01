@@ -1,8 +1,8 @@
-# One VM: a port with a fixed IP, and an instance booting from a root volume
-# created from the image.
+# One VM: a port with a fixed IP, a root volume created from the image, and an
+# instance booting from that volume.
 #
 # The port is its own resource, so the address, the security groups and any
-# floating IP stay when the instance is replaced.
+# floating IP stay when the VM is rebuilt.
 
 resource "openstack_networking_port_v2" "this" {
   name               = var.name
@@ -12,6 +12,25 @@ resource "openstack_networking_port_v2" "this" {
   fixed_ip {
     subnet_id  = var.subnet_id
     ip_address = var.fixed_ip
+  }
+}
+
+# The root volume is created first, and the instance boots only once it is
+# available. Letting Nova create it at boot fails on this host's slow disks:
+# Nova waits about 3 minutes for the volume, then puts the instance in ERROR.
+resource "openstack_blockstorage_volume_v3" "root" {
+  name     = "${var.name}-root"
+  size     = var.root_size_gb
+  image_id = var.image_id
+
+  timeouts {
+    create = "60m"
+    delete = "30m"
+  }
+
+  # A newer image or a bigger size never rebuilds the VM by itself.
+  lifecycle {
+    ignore_changes = [image_id, size]
   }
 }
 
@@ -25,14 +44,12 @@ resource "openstack_compute_instance_v2" "this" {
     port = openstack_networking_port_v2.this.id
   }
 
-  # Root volume, deleted with the instance.
   block_device {
-    uuid                  = var.image_id
-    source_type           = "image"
+    uuid                  = openstack_blockstorage_volume_v3.root.id
+    source_type           = "volume"
     destination_type      = "volume"
-    volume_size           = var.root_size_gb
     boot_index            = 0
-    delete_on_termination = true
+    delete_on_termination = false
   }
 
   dynamic "block_device" {
@@ -46,10 +63,12 @@ resource "openstack_compute_instance_v2" "this" {
     }
   }
 
-  # Rebuilding a VM is expensive on this hardware, so a new image or a
-  # cloud-init change never replaces one by itself. Rebuild on purpose with
-  # terraform apply -replace=module.<name>.openstack_compute_instance_v2.this
+  # Rebuilding a VM is expensive on this hardware, so a cloud-init change
+  # never replaces one by itself. Rebuild on purpose by replacing the root
+  # volume; the instance follows:
+  #   terraform apply -replace=module.<name>.openstack_blockstorage_volume_v3.root
   lifecycle {
-    ignore_changes = [user_data, block_device]
+    ignore_changes       = [user_data, block_device]
+    replace_triggered_by = [openstack_blockstorage_volume_v3.root.id]
   }
 }
