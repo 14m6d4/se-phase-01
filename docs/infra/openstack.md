@@ -60,6 +60,11 @@ Services: Keystone, Glance, Nova, Neutron (Open vSwitch agent, L3, DHCP and meta
 - The certificate is a Let's Encrypt certificate for that name, and the name resolves in public DNS to the VIP `10.10.20.12`. Clients trust it with their system CA store, so there's no CA to hand out.
 - The certificate covers the name, not the IP, so use the name.
 - HAProxy serves it from `/etc/kolla/certificates/`, where Kolla picks it up on `deploy`/`reconfigure`.
+- **Renewal is manual**, before the certificate expires (Let's Encrypt certificates last 90 days):
+  1. Renew with a DNS-01 challenge. The name points at a private IP, so HTTP-01 can't reach it.
+  2. Put the new certificate in place under `/etc/kolla/certificates/`: the full chain followed by the key, replacing the old one.
+  3. Run `kolla-ansible reconfigure -i ~/all-in-one`.
+  4. Run `verify-openstack.sh`. It fails the TLS check when fewer than 14 days are left.
 - `admin-openrc.sh` and `clouds.yaml` are written by `kolla-ansible post-deploy`. Re-run it after every TLS or endpoint change, or they keep the old URLs.
 
 **Cinder override:** it turns on the image-volume cache, so booting from volume doesn't copy the image every time. The cache volumes are owned by Cinder's internal tenant, which is the `service` project and the `cinder` user:
