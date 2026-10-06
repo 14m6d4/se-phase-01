@@ -33,3 +33,13 @@ variable "image_name" {
   type        = string
   default     = "Debian 13"
 }
+
+variable "proxy_sources" {
+  description = <<-EOT
+    Sources allowed to reach proxy on 22 and 443. The router masquerades tailnet
+    traffic to 10.10.30.1 (router.md, Tailscale → SNAT); 192.168.1.6 is the admin
+    workstation on the home LAN, which the router already lets into 10.10.0.0/16.
+  EOT
+  type        = list(string)
+  default     = ["10.10.30.1/32", "192.168.1.6/32"]
+}
