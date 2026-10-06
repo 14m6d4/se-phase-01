@@ -294,7 +294,8 @@ pause
 stage "Docker, logs, SSH and updates"
 for vm in proxy app db; do
   got=$(on "$vm" 'sudo docker info --format "{{.ServerVersion}} {{.LoggingDriver}}"; docker compose version --short' 2>/dev/null | tr '\n' ' ') || true
-  check "$vm: docker info works, json-file logs, compose v2" bash -c '[[ "$0" =~ ^[0-9.]+\ json-file\ 2\. ]]' "$got"
+  raw "$vm docker" "$got"
+  check "$vm: docker info works, json-file logs, Compose plugin" bash -c '[[ "$0" =~ ^[0-9.]+\ json-file\ [0-9]+\.[0-9.]+\ $ ]]' "$got"
   got=$(on "$vm" 'sudo cat /etc/docker/daemon.json; sudo systemd-analyze cat-config systemd/journald.conf | grep -E "^SystemMaxUse="; sudo sshd -T | grep -E "^(passwordauthentication|kbdinteractiveauthentication|permitrootlogin) "; apt-config dump | grep -E "Origins-Pattern::|Automatic-Reboot "' 2>/dev/null) || true
   raw "$vm settings" "$got"
   check "$vm: Docker logs capped at 10m × 3" bash -c '[[ "$0" == *\"10m\"* && "$0" == *\"3\"* ]]' "$got"

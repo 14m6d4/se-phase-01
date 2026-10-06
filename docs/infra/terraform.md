@@ -90,6 +90,6 @@ Run [`verify-terraform.sh`](verify-terraform.sh) from the workstation after `app
 
 - `terraform fmt`, `validate`, and that `plan` shows no changes
 - SSH to `proxy` directly, and to `app` and `db` only through it, with cloud-init finished
-- Docker, Compose v2, the log limits, journald, sshd and `unattended-upgrades` on each VM
+- Docker, the Compose plugin (`docker compose`), the log limits, journald, sshd and `unattended-upgrades` on each VM
 - `/srv/pgdata` mounted on `db`
 - `db:5432` connects from `app` and times out from `proxy`. Until PostgreSQL runs there (#34), the script listens on the port for 30 s.
