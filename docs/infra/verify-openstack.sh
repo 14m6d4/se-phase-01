@@ -708,6 +708,12 @@ check "cinema-team has role member on cinema" \
   test "$(v 'osc role assignment list --group cinema-team --project cinema --names -f value -c Role')" = member
 admins=$(v 'for u in $(osc user list --group cinema-team -f value -c ID); do osc role assignment list --user "$u" --role admin -f value -c Project; done')
 check "No cinema-team member holds the admin role anywhere" test -z "$admins"
+if [[ -n "$admins" ]]; then
+  warn "In Keystone, admin on any project is admin over the whole cloud. Holders:"
+  show 'for u in $(osc user list --group cinema-team -f value -c ID); do osc role assignment list --user "$u" --role admin --names -f value -c User -c Project; done'
+  note "  Remove the user from cinema-team (your own admin account doesn't need it), or"
+  note "  remove the grant: openstack role remove --user <user> --project <project> admin"
+fi
 note "cinema-team has $(v 'osc user list --group cinema-team -f value -c ID' | grep -c .) member(s)."
 pause
 
@@ -782,7 +788,7 @@ if confirm "Run the smoke test?"; then
   run "attach $FIP" "oscp server add floating ip smoke-vm $FIP" || true
 
   check "smoke-vm ACTIVE on cinema-net" \
-    bash -c '[[ "$0" == *cinema-net=* && "$0" == *ACTIVE* ]]' "$(v 'oscp server show smoke-vm -f value -c status -c addresses | tr "\n" " "')"
+    bash -c '[[ "$0" == *cinema-net* && "$0" == *ACTIVE* ]]' "$(v 'oscp server show smoke-vm -f value -c status -c addresses | tr "\n" " "')"
   say "Waiting for $FIP to answer (up to 2 min)…"
   pinged=""
   for _ in $(seq 60); do ping -c1 -W2 "$FIP" >/dev/null 2>&1 && { pinged=1; break; }; sleep 1; done
