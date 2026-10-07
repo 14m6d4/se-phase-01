@@ -1,7 +1,0 @@
-# cp cloudflare.ini.example cloudflare.ini && chmod 600 cloudflare.ini, then
-# paste the token. On proxy it goes to /etc/letsencrypt/cloudflare.ini (root,
-# mode 600). Keep a copy in the password manager.
-#
-# A Cloudflare API token with Zone → DNS → Edit on strycks.dpdns.org only
-# (docs/infra/runbook.md → First setup → proxy).
-dns_cloudflare_api_token = change-me

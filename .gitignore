@@ -34,14 +34,9 @@ build/
 
 ### Local secrets ###
 .env
-deploy/proxy/cloudflare.ini
 
 ### Claude Code (personal settings) ###
 .claude/settings.local.json
 
 ### Load test output ###
 loadtest/results/
-
-### Infra wizard reports (paste them on the issue, never commit) ###
-*-verify-*.md
-openstack-inventory-*.md

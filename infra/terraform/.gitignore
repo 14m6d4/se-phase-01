@@ -1,8 +1,0 @@
-# Local state and plans hold resource IDs and addresses: never commit them.
-.terraform/
-*.tfstate
-*.tfstate.*
-*.tfplan
-*.tfvars
-crash.log
-crash.*.log
