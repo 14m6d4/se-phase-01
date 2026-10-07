@@ -1,6 +1,6 @@
 # Terraform: the proxy, app and db VMs
 
-Terraform builds the three VMs the backend runs on (#34), inside the `cinema` project from `openstack.md`. Only `proxy` faces the tailnet. Why VMs and Compose for now: [ADR-0006](../adr/0006-phase-1-on-vms-and-compose.md).
+Terraform builds the three VMs the backend runs on (#33), inside the `cinema` project from `openstack.md`. Only `proxy` faces the tailnet. What runs on them: [`runbook.md`](runbook.md). Why VMs and Compose for now: [ADR-0006](../adr/0006-phase-1-on-vms-and-compose.md).
 
 | | |
 |---|---|
@@ -31,8 +31,9 @@ Terraform only reads what #32 created: `cinema-net`, `cinema-subnet`, `external-
 - Docker CE and the Compose plugin, from Docker's apt repo
 - Docker logs `json-file`, 10 MB × 3 per container; journald capped at 100 MB
 - SSH with keys only, no root login
-- `unattended-upgrades` for Debian security updates and Docker only, with no automatic reboot (reboot by hand, see the runbook in #34)
+- `unattended-upgrades` for Debian security updates and Docker only, with no automatic reboot (reboot by hand, [`runbook.md`](runbook.md#reboot-a-vm))
 - `/etc/hosts` lists `proxy`, `app` and `db`, so the VMs reach each other by name
+- on `proxy`: nginx, certbot and its Cloudflare plugin (#34); the runbook configures them
 - on `db`: `pgdata` is formatted (only if it has no filesystem yet) and mounted at `/srv/pgdata`
 
 ## Before the first apply
