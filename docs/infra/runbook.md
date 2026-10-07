@@ -114,10 +114,10 @@ It answers `{"status":"UP"}` with no certificate warning. Then run [`verify-depl
    ```
 
    Read the full sha from `git rev-parse <short sha>`. If it adds a migration (`src/main/resources/db/migration/`), check it against [the rule for migrations](#migrations-and-rolling-back).
-2. **Dump the database**, named after the sha running now. Keep the 5 newest:
+2. **Dump the database**, named after the sha running now, which is the one in app's `.env` on the VM (your local copy changes in step 3). Keep the 5 newest:
 
    ```sh
-   old=$(grep '^IMAGE_TAG=' deploy/app/.env | cut -d= -f2)
+   old=$(ssh cinema-app "grep '^IMAGE_TAG=' cinema/.env | cut -d= -f2")
    ssh cinema-db "cd cinema && docker compose exec -T db pg_dump -U cinema -Fc cinema \
      > /srv/pgdata/dumps/\$(date -u +%Y%m%dT%H%M%SZ)-$old.dump \
      && ls -1t /srv/pgdata/dumps/*.dump | tail -n +6 | xargs -r rm -- && ls -lh /srv/pgdata/dumps"
@@ -137,7 +137,11 @@ If `up --wait` fails, see why with `ssh cinema-app 'cd cinema && docker compose 
 
 ## Roll back
 
-Rolling back is deploying the previous sha: put the sha from the `# Previous:` line back into `IMAGE_TAG` (and the bad one into `# Previous:`), then run steps 2 and 4 of [Deploy](#deploy-a-new-sha). The dump in step 2 keeps the bad version's data too.
+Rolling back is deploying the previous sha, through the same steps of [Deploy](#deploy-a-new-sha):
+
+1. Step 2: dump the database. The dump is named after the bad sha and keeps its data.
+2. Step 3: put the sha from the `# Previous:` line back into `IMAGE_TAG`, and the bad one into `# Previous:`.
+3. Step 4: deploy.
 
 This works as long as the newer sha's migrations only added things. If one of them dropped or renamed something the older code uses, the older app fails its startup check (Hibernate `ddl-auto: validate`) or its queries. Then [restore the dump](#restore-a-dump) taken before that deploy instead.
 
