@@ -69,7 +69,7 @@ write_files:
       APT::Periodic::Unattended-Upgrade "1";
 
   # Security updates and Docker only. No automatic reboot: there is one app
-  # and one db, so a reboot is downtime. Reboot by hand (runbook, #34).
+  # and one db, so a reboot is downtime. Reboot by hand (docs/infra/runbook.md).
   - path: /etc/apt/apt.conf.d/52unattended-upgrades-cinema
     content: |
       #clear Unattended-Upgrade::Origins-Pattern;
