@@ -34,6 +34,7 @@ build/
 
 ### Local secrets ###
 .env
+deploy/proxy/cloudflare.ini
 
 ### Claude Code (personal settings) ###
 .claude/settings.local.json
