@@ -26,6 +26,12 @@ packages:
   - docker-compose-plugin
   - unattended-upgrades
   - netcat-openbsd
+%{ if hostname == "proxy" ~}
+  # TLS in front of app (#34): native, so security updates come with Debian's.
+  - nginx
+  - certbot
+  - python3-certbot-dns-cloudflare
+%{ endif ~}
 
 write_files:
   - path: /etc/hosts
