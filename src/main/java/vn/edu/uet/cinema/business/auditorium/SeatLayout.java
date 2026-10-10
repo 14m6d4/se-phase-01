@@ -22,7 +22,7 @@ public final class SeatLayout {
 			throw new InvalidSeatLayoutException("Seats per row must be positive");
 		}
 		if ((long) rows * seatsPerRow > MAX_SEATS) {
-			throw new InvalidSeatLayoutException("Seat layout cannot exceed " + MAX_SEATS + " seats");
+			throw new InvalidSeatLayoutException("Seat layout is not allowed");
 		}
 		validateRows(vipRows, rows, "VIP");
 		validateRows(coupleRows, rows, "Couple");

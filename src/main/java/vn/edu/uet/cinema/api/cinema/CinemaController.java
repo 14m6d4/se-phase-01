@@ -1,6 +1,7 @@
 package vn.edu.uet.cinema.api.cinema;
 
 import io.swagger.v3.oas.annotations.security.SecurityRequirement;
+import io.swagger.v3.oas.annotations.media.Schema;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Size;
@@ -58,7 +59,10 @@ class CinemaController {
 		cinemas.delete(id);
 	}
 
-	record CinemaRequest(@NotBlank @Size(max = 255) String name, @NotBlank String address) {
+	@Schema(name = "CinemaRequest")
+	record CinemaRequest(@NotBlank(message = "Name is required")
+		@Size(max = 255, message = "Name is not allowed") String name,
+		@NotBlank(message = "Address is required") String address) {
 	}
 
 	record CinemaResponse(UUID id, String name, String address) {

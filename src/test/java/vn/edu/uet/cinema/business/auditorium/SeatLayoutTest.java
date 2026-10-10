@@ -40,7 +40,10 @@ class SeatLayoutTest {
 
 	@Test
 	void rejectsLayoutsExceedingGeneratedSeatLimit() {
-		assertInvalid(() -> SeatLayout.generate(2, Integer.MAX_VALUE, List.of(), List.of()));
+		assertThatThrownBy(() -> SeatLayout.generate(2, Integer.MAX_VALUE, List.of(), List.of()))
+			.isInstanceOf(InvalidSeatLayoutException.class)
+			.hasMessage("Seat layout is not allowed")
+			.hasMessageNotContaining("10000");
 		assertInvalid(() -> SeatLayout.generate(26, 385, List.of(), List.of()));
 	}
 
