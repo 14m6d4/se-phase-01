@@ -1,7 +1,10 @@
 package vn.edu.uet.cinema.api.showtime;
 
-import io.swagger.v3.oas.annotations.security.SecurityRequirement;
 import io.swagger.v3.oas.annotations.media.Schema;
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.Parameter;
+import io.swagger.v3.oas.annotations.security.SecurityRequirement;
+import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Positive;
@@ -34,6 +37,7 @@ import vn.edu.uet.cinema.business.showtime.ShowtimeStatus;
 import vn.edu.uet.cinema.config.OpenApiConfig;
 
 @RestController
+@Tag(name = "Showtimes", description = "Scheduled screenings, cancellation, and public seat availability.")
 class ShowtimeController {
 
 	private static final ZoneId VIETNAM_ZONE = ZoneId.of("Asia/Ho_Chi_Minh");
@@ -49,6 +53,9 @@ class ShowtimeController {
 	}
 
 	@PostMapping("/api/showtimes")
+	@Operation(summary = "Create a showtime", description = "Schedules a movie in an auditorium. End time is fixed at creation "
+		+ "as movie duration plus 15 minutes for cleaning; screenings in the same auditorium cannot overlap. Base price is "
+		+ "a positive VND amount. Missing movie/auditorium returns 404 and an overlap returns 409. Requires ADMIN.")
 	@ResponseStatus(HttpStatus.CREATED)
 	@SecurityRequirement(name = OpenApiConfig.BEARER_AUTH)
 	ShowtimeResponse create(@Valid @RequestBody ShowtimeRequest request) {
@@ -57,7 +64,14 @@ class ShowtimeController {
 	}
 
 	@GetMapping("/api/showtimes")
-	List<ShowtimeResponse> list(@RequestParam LocalDate date, @RequestParam(required = false) UUID cinemaId,
+	@Operation(summary = "List showtimes for a date", description = "Returns non-cancelled showtimes starting on the given "
+		+ "Vietnam local calendar date. The date is required; cinemaId and movieId optionally filter the results. This read is public.")
+	List<ShowtimeResponse> list(
+		@Parameter(description = "Required Vietnam local date, interpreted from 00:00 to 24:00.", example = "2026-05-01")
+		@RequestParam LocalDate date,
+		@Parameter(description = "Optional cinema UUID filter.", example = "550e8400-e29b-41d4-a716-446655440001")
+		@RequestParam(required = false) UUID cinemaId,
+		@Parameter(description = "Optional movie UUID filter.", example = "550e8400-e29b-41d4-a716-446655440002")
 		@RequestParam(required = false) UUID movieId) {
 		Instant from = date.atStartOfDay(VIETNAM_ZONE).toInstant();
 		Instant to = date.plusDays(1).atStartOfDay(VIETNAM_ZONE).toInstant();
@@ -65,12 +79,18 @@ class ShowtimeController {
 	}
 
 	@GetMapping("/api/showtimes/{id}")
-	ShowtimeResponse get(@PathVariable UUID id) {
+	@Operation(summary = "Get a showtime", description = "Returns a showtime by UUID, including its cancellation status and "
+		+ "reason when cancelled. An unknown showtime returns 404. This read is public.")
+	ShowtimeResponse get(@Parameter(description = "Showtime UUID.", example = "550e8400-e29b-41d4-a716-446655440010")
+		@PathVariable UUID id) {
 		return ShowtimeResponse.from(showtimes.get(id));
 	}
 
 	@GetMapping("/api/showtimes/{id}/seats")
-	List<SeatMapResponse> seats(@PathVariable UUID id) {
+	@Operation(summary = "Get a showtime's seat map", description = "Returns every seat with its current availability and "
+		+ "calculated VND price. An unknown showtime returns 404; a cancelled showtime returns 409. This read is public.")
+	List<SeatMapResponse> seats(
+		@Parameter(description = "Showtime UUID.", example = "550e8400-e29b-41d4-a716-446655440010") @PathVariable UUID id) {
 		Showtime showtime = showtimes.getScheduled(id);
 		Map<UUID, SeatStatus> statuses = occupancy.statuses(id, Instant.now());
 		return auditoriums.get(showtime.auditoriumId()).seats().stream()
@@ -80,31 +100,56 @@ class ShowtimeController {
 	}
 
 	@PostMapping("/api/showtimes/{id}/cancellation")
+	@Operation(summary = "Cancel a showtime", description = "Cancels a showtime until its endsAt. A reason is required; OTHER "
+		+ "requires a nonblank note of at most 200 characters. Confirmed bookings are refunded and Pending bookings removed. "
+		+ "An unknown showtime returns 404; a cancelled or ended showtime returns 409. Requires ADMIN.")
 	@SecurityRequirement(name = OpenApiConfig.BEARER_AUTH)
-	ShowtimeResponse cancel(@PathVariable UUID id, @Valid @RequestBody CancellationRequest request) {
+	ShowtimeResponse cancel(
+		@Parameter(description = "Showtime UUID.", example = "550e8400-e29b-41d4-a716-446655440010") @PathVariable UUID id,
+		@Valid @RequestBody CancellationRequest request) {
 		return ShowtimeResponse.from(showtimes.cancel(id, request.reason(), request.note(), Instant.now()));
 	}
 
 	@DeleteMapping("/api/showtimes/{id}")
+	@Operation(summary = "Delete a showtime", description = "Hard-deletes a showtime only when it has no live Pending or "
+		+ "Confirmed/Refunded bookings; lapsed holds are removed with it. Unknown showtime returns 404, dependent booking 409. "
+		+ "Requires ADMIN.")
 	@ResponseStatus(HttpStatus.NO_CONTENT)
 	@SecurityRequirement(name = OpenApiConfig.BEARER_AUTH)
-	void delete(@PathVariable UUID id) {
+	void delete(@Parameter(description = "Showtime UUID.", example = "550e8400-e29b-41d4-a716-446655440010")
+		@PathVariable UUID id) {
 		showtimes.delete(id);
 	}
 
-	record ShowtimeRequest(@NotNull(message = "Movie is required") UUID movieId,
-		@NotNull(message = "Auditorium is required") UUID auditoriumId,
-		@NotNull(message = "Start time is required") OffsetDateTime startsAt,
-		@NotNull(message = "Base price is required") @Positive(message = "Base price must be positive") Long basePrice) {
+	record ShowtimeRequest(@NotNull(message = "Movie is required")
+		@Schema(description = "Movie to screen.", example = "550e8400-e29b-41d4-a716-446655440000") UUID movieId,
+		@NotNull(message = "Auditorium is required")
+		@Schema(description = "Auditorium for the screening.", example = "550e8400-e29b-41d4-a716-446655440001") UUID auditoriumId,
+		@NotNull(message = "Start time is required")
+		@Schema(description = "Start instant as ISO-8601 date-time with an offset.", example = "2026-05-01T19:30:00+07:00")
+		OffsetDateTime startsAt,
+		@NotNull(message = "Base price is required") @Positive(message = "Base price must be positive")
+		@Schema(description = "Positive integer VND base price.", minimum = "1", example = "100000") Long basePrice) {
 	}
 
-	record CancellationRequest(@NotNull(message = "Cancellation reason is required") CancellationReason reason,
-		@Schema(description = "Optional note, up to 200 characters.", maxLength = 200) String note) {
+	record CancellationRequest(@NotNull(message = "Cancellation reason is required")
+		@Schema(description = "Cancellation reason. OTHER requires a nonblank note.", example = "EQUIPMENT_FAILURE")
+		CancellationReason reason,
+		@Schema(description = "Optional note (0–200 characters); required when reason is OTHER.", minLength = 0,
+			maxLength = 200, example = "Projector failure") String note) {
 	}
 
 	/** {@code cancellation} is null unless the Showtime is Cancelled. */
-	record ShowtimeResponse(UUID id, UUID movieId, UUID auditoriumId, Instant startsAt, Instant endsAt, long basePrice,
-		ShowtimeStatus status, CancellationResponse cancellation) {
+	record ShowtimeResponse(
+		@Schema(description = "Showtime identifier.", example = "550e8400-e29b-41d4-a716-446655440010") UUID id,
+		@Schema(description = "Scheduled movie identifier.", example = "550e8400-e29b-41d4-a716-446655440000") UUID movieId,
+		@Schema(description = "Scheduled auditorium identifier.", example = "550e8400-e29b-41d4-a716-446655440001") UUID auditoriumId,
+		@Schema(description = "Start instant.", example = "2026-05-01T19:30:00Z") Instant startsAt,
+		@Schema(description = "Fixed end instant (movie duration plus 15 minutes).", example = "2026-05-01T21:45:00Z")
+		Instant endsAt,
+		@Schema(description = "Base price in integer VND.", example = "100000") long basePrice,
+		@Schema(description = "Current status.", example = "SCHEDULED") ShowtimeStatus status,
+		@Schema(description = "Cancellation details; null unless cancelled.") CancellationResponse cancellation) {
 
 		static ShowtimeResponse from(Showtime showtime) {
 			Cancellation cancellation = showtime.cancellation();
@@ -114,10 +159,19 @@ class ShowtimeController {
 		}
 	}
 
-	record CancellationResponse(CancellationReason reason, String note) {
+	record CancellationResponse(
+		@Schema(description = "Cancellation reason.", example = "EQUIPMENT_FAILURE") CancellationReason reason,
+		@Schema(description = "Cancellation note, if supplied.", example = "Projector failure") String note) {
 	}
 
-	record SeatMapResponse(UUID id, String row, int number, String label, String type, long price, SeatStatus status) {
+	record SeatMapResponse(
+		@Schema(description = "Seat identifier.", example = "550e8400-e29b-41d4-a716-446655440020") UUID id,
+		@Schema(description = "Lettered seat row.", example = "A") String row,
+		@Schema(description = "One-based seat position in the row.", example = "1") int number,
+		@Schema(description = "Seat label.", example = "A1") String label,
+		@Schema(description = "Seat type.", example = "STANDARD") String type,
+		@Schema(description = "Price for this seat in integer VND.", example = "100000") long price,
+		@Schema(description = "Availability status.", example = "AVAILABLE") SeatStatus status) {
 
 		static SeatMapResponse from(Seat seat, long price, SeatStatus status) {
 			return new SeatMapResponse(seat.id(), seat.row(), seat.number(), seat.label(), seat.type().name(), price, status);

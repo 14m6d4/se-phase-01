@@ -61,7 +61,7 @@ class RegistrationPasswordLimitTest {
 		assertThat(customizedPassword.getMinLength()).isEqualTo(8);
 		assertThat(customizedPassword.getMaxLength()).isNull();
 		Schema<?> problem = openApi.getComponents().getSchemas().get("ValidationProblem");
-		assertThat(problem.getRequired()).containsExactlyInAnyOrder("title", "status", "detail");
+		assertThat(problem.getRequired()).containsExactlyInAnyOrder("title", "status");
 		assertThat(((Schema<?>) problem.getProperties().get("type")).getDefault()).isEqualTo("about:blank");
 	}
 
