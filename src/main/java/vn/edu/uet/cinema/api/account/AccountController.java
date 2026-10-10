@@ -1,5 +1,9 @@
 package vn.edu.uet.cinema.api.account;
 
+import io.swagger.v3.oas.annotations.media.Content;
+import io.swagger.v3.oas.annotations.media.ExampleObject;
+import io.swagger.v3.oas.annotations.media.Schema;
+import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import io.swagger.v3.oas.annotations.security.SecurityRequirement;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.Email;
@@ -31,6 +35,13 @@ class AccountController {
 
 	@PostMapping("/api/auth/register")
 	@ResponseStatus(HttpStatus.CREATED)
+	@ApiResponse(responseCode = "400", description = "The request contains invalid fields.",
+		content = @Content(mediaType = "application/problem+json",
+			schema = @Schema(ref = "#/components/schemas/ValidationProblem"),
+			examples = @ExampleObject(name = "Invalid registration fields", value = "{\"type\":\"about:blank\","
+				+ "\"title\":\"Bad Request\",\"status\":400,\"detail\":\"Request validation failed.\","
+				+ "\"errors\":[{\"field\":\"password\","
+				+ "\"message\":\"Password must be at least 8 characters\"}]}")))
 	AccountResponse register(@Valid @RequestBody RegisterRequest request) {
 		return AccountResponse.from(accounts.registerCustomer(request.email(), request.password(), request.fullName()));
 	}
@@ -48,8 +59,13 @@ class AccountController {
 	}
 
 	// BCrypt only reads the first 72 bytes of a password.
-	record RegisterRequest(@NotBlank @Email @Size(max = 255) String email,
-		@NotBlank @Size(min = 8, max = 72) String password, @NotBlank @Size(max = 255) String fullName) {
+	@Schema(name = "RegisterRequest")
+	record RegisterRequest(@NotBlank(message = "Email is required") @Email(message = "Email must be valid")
+		@Size(max = 255, message = "Email is not allowed") String email,
+		@NotBlank(message = "Password is required")
+		@Size(min = 8, message = "Password must be at least 8 characters") @RegistrationPasswordLimit String password,
+		@NotBlank(message = "Full name is required") @Size(max = 255, message = "Full name is not allowed")
+		String fullName) {
 	}
 
 	record LoginRequest(@NotBlank String email, @NotBlank String password) {

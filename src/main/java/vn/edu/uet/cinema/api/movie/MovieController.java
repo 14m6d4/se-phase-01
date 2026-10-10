@@ -1,6 +1,7 @@
 package vn.edu.uet.cinema.api.movie;
 
 import io.swagger.v3.oas.annotations.security.SecurityRequirement;
+import io.swagger.v3.oas.annotations.media.Schema;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
@@ -64,9 +65,16 @@ class MovieController {
 		movies.delete(id);
 	}
 
-	record MovieRequest(@NotBlank @Size(max = 255) String title, @NotBlank String description,
-		@NotNull @Positive Integer durationMinutes, @NotBlank @Size(max = 255) String genre,
-		@NotNull AgeRating ageRating, @NotNull LocalDate releaseDate, @NotBlank String posterUrl) {
+	@Schema(name = "MovieRequest")
+	record MovieRequest(@NotBlank(message = "Title is required")
+		@Size(max = 255, message = "Title is not allowed") String title,
+		@NotBlank(message = "Description is required") String description,
+		@NotNull(message = "Duration is required") @Positive(message = "Duration must be positive")
+		Integer durationMinutes,
+		@NotBlank(message = "Genre is required") @Size(max = 255, message = "Genre is not allowed") String genre,
+		@NotNull(message = "Age rating is required") AgeRating ageRating,
+		@NotNull(message = "Release date is required") LocalDate releaseDate,
+		@NotBlank(message = "Poster URL is required") String posterUrl) {
 	}
 
 	record MovieResponse(UUID id, String title, String description, int durationMinutes, String genre,

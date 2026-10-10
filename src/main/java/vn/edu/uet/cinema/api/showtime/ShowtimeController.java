@@ -1,6 +1,7 @@
 package vn.edu.uet.cinema.api.showtime;
 
 import io.swagger.v3.oas.annotations.security.SecurityRequirement;
+import io.swagger.v3.oas.annotations.media.Schema;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Positive;
@@ -91,11 +92,14 @@ class ShowtimeController {
 		showtimes.delete(id);
 	}
 
-	record ShowtimeRequest(@NotNull UUID movieId, @NotNull UUID auditoriumId, @NotNull OffsetDateTime startsAt,
-		@NotNull @Positive Long basePrice) {
+	record ShowtimeRequest(@NotNull(message = "Movie is required") UUID movieId,
+		@NotNull(message = "Auditorium is required") UUID auditoriumId,
+		@NotNull(message = "Start time is required") OffsetDateTime startsAt,
+		@NotNull(message = "Base price is required") @Positive(message = "Base price must be positive") Long basePrice) {
 	}
 
-	record CancellationRequest(@NotNull CancellationReason reason, String note) {
+	record CancellationRequest(@NotNull(message = "Cancellation reason is required") CancellationReason reason,
+		@Schema(description = "Optional note, up to 200 characters.", maxLength = 200) String note) {
 	}
 
 	/** {@code cancellation} is null unless the Showtime is Cancelled. */

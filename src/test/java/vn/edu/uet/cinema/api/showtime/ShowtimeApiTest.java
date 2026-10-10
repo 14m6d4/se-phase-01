@@ -1,5 +1,6 @@
 package vn.edu.uet.cinema.api.showtime;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.hamcrest.Matchers.contains;
 import static org.hamcrest.Matchers.hasItem;
 import static org.hamcrest.Matchers.hasSize;
@@ -160,7 +161,18 @@ class ShowtimeApiTest {
 		UUID id = schedule(movieId(), auditoriumId(), Instant.now().plusSeconds(86_400));
 		String path = "/api/showtimes/" + id + "/cancellation";
 
-		for (String body : List.of("{}", "{\"reason\":\"BORED\"}", "{\"reason\":\"OTHER\"}",
+		String rejectedReason = "UNKNOWN_REASON_CANARY";
+		String problem = mvc.perform(post(path).header("Authorization", "Bearer " + admin)
+				.contentType(MediaType.APPLICATION_JSON).content("{\"reason\":\"" + rejectedReason + "\"}"))
+			.andExpect(status().isBadRequest())
+			.andExpect(content().contentType(MediaType.APPLICATION_PROBLEM_JSON))
+			.andExpect(jsonPath("$.errors[0].field").value("reason"))
+			.andReturn().getResponse().getContentAsString();
+		String message = JsonPath.read(problem, "$.errors[0].message");
+		assertThat(message).contains("EQUIPMENT_FAILURE", "POWER_OUTAGE", "EMERGENCY", "OTHER");
+		assertThat(problem).doesNotContain(rejectedReason);
+
+		for (String body : List.of("{}", "{\"reason\":\"OTHER\"}",
 			"{\"reason\":\"OTHER\",\"note\":\"  \"}")) {
 			mvc.perform(post(path).header("Authorization", "Bearer " + admin)
 					.contentType(MediaType.APPLICATION_JSON).content(body))

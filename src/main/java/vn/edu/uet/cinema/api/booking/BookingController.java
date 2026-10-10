@@ -1,6 +1,8 @@
 package vn.edu.uet.cinema.api.booking;
 
 import io.swagger.v3.oas.annotations.security.SecurityRequirement;
+import io.swagger.v3.oas.annotations.media.Schema;
+import io.swagger.v3.oas.annotations.media.ArraySchema;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotNull;
 import java.time.Instant;
@@ -70,7 +72,10 @@ class BookingController {
 		return UUID.fromString(jwt.getSubject());
 	}
 
-	record BookingRequest(@NotNull UUID showtimeId, @NotNull List<@NotNull UUID> seatIds) {
+	record BookingRequest(@NotNull(message = "Showtime is required") UUID showtimeId,
+		@NotNull(message = "Seats are required")
+		@ArraySchema(schema = @Schema(description = "Choose 1 to 8 Seats for this Showtime."), minItems = 1, maxItems = 8)
+		List<@NotNull(message = "Seat ID is required") UUID> seatIds) {
 	}
 
 	record BookingResponse(UUID id, UUID showtimeId, BookingStatus status, Instant createdAt, Instant expiresAt,

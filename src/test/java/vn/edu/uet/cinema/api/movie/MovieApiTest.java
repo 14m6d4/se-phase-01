@@ -10,6 +10,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import com.jayway.jsonpath.JsonPath;
+import java.util.List;
+import static org.assertj.core.api.Assertions.assertThat;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -60,15 +62,56 @@ class MovieApiTest {
 	@Test
 	void invalidMovieRequestsAreProblemDetails() throws Exception {
 		String admin = token();
-		mvc.perform(post("/api/movies").header("Authorization", "Bearer " + admin)
+		String invalidEnum = mvc.perform(post("/api/movies").header("Authorization", "Bearer " + admin)
 				.contentType(MediaType.APPLICATION_JSON).content(movieJson("Invalid age rating", "INVALID")))
 			.andExpect(status().isBadRequest())
-			.andExpect(content().contentType(MediaType.APPLICATION_PROBLEM_JSON));
+			.andExpect(content().contentType(MediaType.APPLICATION_PROBLEM_JSON))
+			.andReturn().getResponse().getContentAsString();
+		String enumField = JsonPath.read(invalidEnum, "$.errors[0].field");
+		assertThat(enumField).isEqualTo("ageRating");
+		assertThat(invalidEnum).contains("P", "K", "T13", "T16", "T18").doesNotContain("INVALID");
+
 		mvc.perform(post("/api/movies").header("Authorization", "Bearer " + admin)
 				.contentType(MediaType.APPLICATION_JSON)
 				.content(movieJson("Negative duration", "P").replace("\"durationMinutes\":120", "\"durationMinutes\":-1")))
 			.andExpect(status().isBadRequest())
 			.andExpect(content().contentType(MediaType.APPLICATION_PROBLEM_JSON));
+
+		String badDate = movieJson("Bad date", "P").replace("2026-01-15", "not-a-date");
+		String dateProblem = mvc.perform(post("/api/movies").header("Authorization", "Bearer " + admin)
+				.contentType(MediaType.APPLICATION_JSON).content(badDate))
+			.andExpect(status().isBadRequest())
+			.andExpect(content().contentType(MediaType.APPLICATION_PROBLEM_JSON))
+			.andReturn().getResponse().getContentAsString();
+		String dateField = JsonPath.read(dateProblem, "$.errors[0].field");
+		assertThat(dateField).isEqualTo("releaseDate");
+		assertThat(dateProblem).contains("ISO-8601 date").doesNotContain("not-a-date");
+
+		String title = "T".repeat(256);
+		String genre = "G".repeat(256);
+		String longFields = movieJson(title, "P").replace("\"genre\":\"Drama\"", "\"genre\":\"" + genre + "\"");
+		String longProblem = mvc.perform(post("/api/movies").header("Authorization", "Bearer " + admin)
+				.contentType(MediaType.APPLICATION_JSON).content(longFields))
+			.andExpect(status().isBadRequest())
+			.andExpect(content().contentType(MediaType.APPLICATION_PROBLEM_JSON))
+			.andReturn().getResponse().getContentAsString();
+		List<String> longFieldsReported = JsonPath.read(longProblem, "$.errors[*].field");
+		assertThat(longFieldsReported).containsExactlyInAnyOrder("title", "genre");
+		assertThat(longProblem).contains("Title is not allowed", "Genre is not allowed")
+			.doesNotContain(title, genre, "255");
+
+		String badPath = mvc.perform(get("/api/movies/not-a-uuid"))
+			.andExpect(status().isBadRequest())
+			.andExpect(content().contentType(MediaType.APPLICATION_PROBLEM_JSON))
+			.andReturn().getResponse().getContentAsString();
+		String pathField = JsonPath.read(badPath, "$.errors[0].field");
+		String pathMessage = JsonPath.read(badPath, "$.errors[0].message");
+		String detail = JsonPath.read(badPath, "$.detail");
+		String instance = JsonPath.read(badPath, "$.instance");
+		assertThat(pathField).isEqualTo("id");
+		assertThat(pathMessage).isEqualTo("Must be a valid UUID.");
+		assertThat(detail).isEqualTo("A request value has an invalid type.");
+		assertThat(instance).isEqualTo("/api/movies/not-a-uuid");
 	}
 
 	@Test

@@ -1,6 +1,7 @@
 package vn.edu.uet.cinema.api.auditorium;
 
 import com.fasterxml.jackson.annotation.JsonInclude;
+import io.swagger.v3.oas.annotations.media.Schema;
 import io.swagger.v3.oas.annotations.security.SecurityRequirement;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.Max;
@@ -58,9 +59,15 @@ class AuditoriumController {
 		auditoriums.delete(id);
 	}
 
-	record AuditoriumRequest(@NotBlank @Size(max = 255) String name,
-		@NotNull @Min(1) @Max(26) Integer rows, @NotNull @Positive Integer seatsPerRow,
-		@NotNull List<String> vipRows, @NotNull List<String> coupleRows) {
+	@Schema(name = "AuditoriumRequest")
+	record AuditoriumRequest(@NotBlank(message = "Name is required")
+		@Size(max = 255, message = "Name is not allowed") String name,
+		@NotNull(message = "Rows are required") @Min(value = 1, message = "Rows must be at least 1")
+		@Max(value = 26, message = "Rows must be at most 26") Integer rows,
+		@NotNull(message = "Seats per row are required") @Positive(message = "Seats per row must be positive")
+		Integer seatsPerRow,
+		@NotNull(message = "VIP rows are required") List<String> vipRows,
+		@NotNull(message = "Couple rows are required") List<String> coupleRows) {
 	}
 
 	@JsonInclude(JsonInclude.Include.NON_NULL)
