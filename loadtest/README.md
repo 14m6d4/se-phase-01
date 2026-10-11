@@ -1,6 +1,6 @@
 # Load test
 
-The baseline load test runs on a Kaggle CPU notebook, so that phase 2 can repeat it on the same hardware ([ADR 0003](../docs/adr/0003-load-test-on-kaggle-without-docker.md)). Kaggle has no Docker. The notebook therefore:
+The baseline load test runs on a Kaggle CPU notebook, so that phase 2 can repeat it on the same hardware. Kaggle has no Docker. The notebook therefore:
 
 1. installs PostgreSQL with `apt`;
 2. builds the service from this repository and runs it as a plain JAR;
@@ -25,7 +25,7 @@ The baseline load test runs on a Kaggle CPU notebook, so that phase 2 can repeat
 
 ## One-time setup (Kaggle, optional)
 
-1. **GitHub token (Git path only).** With `CODE_BUNDLE = None`, the private repository is cloned with a token.
+1. **GitHub token (Git path only).** With `CODE_BUNDLE = None`, the notebook clones the repository with a token.
    - Create a [fine-grained personal access token](https://github.com/settings/personal-access-tokens/new).
    - Resource owner: `14m6d4`. Repository access: only `se-phase-01`. Permissions: **Contents: Read-only**.
 2. **Kaggle account.** Only needed for the Kaggle path; if you do not have one (or prefer not to create it), use [Run a scenario locally](#run-a-scenario-locally) instead — same notebook steps work on any machine with Java, PostgreSQL and k6. For Kaggle, phone-verify the account (Settings → Phone verification): Kaggle does not allow internet in notebooks without it.
@@ -99,7 +99,7 @@ The environment cell stops with an explanation if internet is off or (on the Git
 
 The notebook seeds the database automatically after the service is healthy.
 
-The accepted Kaggle measurements are recorded in [`docs/loadtest-baseline.md`](../docs/loadtest-baseline.md). They cover the scenarios and SQL verifier in the uploaded run, not the expanded-directory input and CI regression changes added afterward; those local changes have not been rerun on Kaggle. The recorded kernel-v2 hash is of ZIP archive bytes; expanded-directory mode hashes a canonical file tree, so those hash values are not directly comparable.
+The accepted baseline numbers are in the [Performance section of the main README](../README.md#performance).
 
 ## Scenarios
 
