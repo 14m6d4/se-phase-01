@@ -3,7 +3,7 @@
 Backend service for a cinema chain, built for the Software Architecture course (phase 1). Admins manage cinemas, auditoriums, movies and showtimes; customers hold seats for a showtime and pay for them.
 
 - **Specification:** [`docs/spec.md`](docs/spec.md) (business rules, endpoints, load test plan)
-- **Domain glossary:** [`CONTEXT.md`](CONTEXT.md)
+- **Domain glossary:** [`GLOSSARY.md`](GLOSSARY.md)
 - **Architecture decisions:** [`docs/adr/`](docs/adr/)
 
 ## Tech stack
@@ -105,4 +105,4 @@ docs/                              spec, ADRs
 
 - One branch per GitHub issue, merged into `main` through a PR once CI is green.
 - Commits follow [Conventional Commits](https://www.conventionalcommits.org/).
-- Use the vocabulary from [`CONTEXT.md`](CONTEXT.md) in code, issues and docs.
+- Use the vocabulary from [`GLOSSARY.md`](GLOSSARY.md) in code, issues and docs.

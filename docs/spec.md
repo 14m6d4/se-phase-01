@@ -1,6 +1,6 @@
 # Phase 1 Specification
 
-Backend service for a cinema chain: admins manage the catalogue, customers hold and pay for seats. Terms in **bold** are defined in [`CONTEXT.md`](../CONTEXT.md); architectural decisions live in [`docs/adr/`](adr/).
+Backend service for a cinema chain: admins manage the catalogue, customers hold and pay for seats. Terms in **bold** are defined in [`GLOSSARY.md`](../GLOSSARY.md); architectural decisions live in [`docs/adr/`](adr/).
 
 ## Assignment requirements → where they are met
 

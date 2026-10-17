@@ -2,7 +2,7 @@
 
 ## Purpose and scope
 
-Admins manage physical Cinemas and their Auditoriums; visitors browse them and inspect immutable, generated Seat layouts. Deliver the endpoints and acceptance criteria of issue #2 and `docs/spec.md` without adding Showtime behavior (#3). Movie (#6) is already merged. Domain names follow `CONTEXT.md`.
+Admins manage physical Cinemas and their Auditoriums; visitors browse them and inspect immutable, generated Seat layouts. Deliver the endpoints and acceptance criteria of issue #2 and `docs/spec.md` without adding Showtime behavior (#3). Movie (#6) is already merged. Domain names follow `GLOSSARY.md`.
 
 ## API and authorization
 
