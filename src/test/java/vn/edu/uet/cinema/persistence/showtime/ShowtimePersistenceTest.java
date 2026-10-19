@@ -94,7 +94,7 @@ class ShowtimePersistenceTest {
 		assertThatThrownBy(() -> movies.delete(movieId)).isInstanceOf(ConflictException.class);
 		assertThatThrownBy(() -> auditoriums.delete(auditoriumId)).isInstanceOf(ConflictException.class);
 		assertThat(showtimes.get(showtime.id())).isEqualTo(showtime);
-		showtimes.delete(showtime.id());
+		showtimes.delete(showtime.id(), Instant.now());
 		movies.delete(movieId);
 		auditoriums.delete(auditoriumId);
 	}
@@ -213,7 +213,7 @@ class ShowtimePersistenceTest {
 		assertThat(showtimes.get(expected.id())).isEqualTo(expected);
 		assertThat(showtimes.list(start, start.plusSeconds(1), cinemaId, movieId)).containsExactly(expected);
 		assertThat(showtimes.list(start.plusSeconds(1), start.plusSeconds(10_800), cinemaId, movieId)).isEmpty();
-		showtimes.delete(expected.id());
+		showtimes.delete(expected.id(), Instant.now());
 		assertThat(showtimes.list(start, start.plusSeconds(1), cinemaId, movieId)).isEmpty();
 	}
 }

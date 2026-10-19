@@ -118,7 +118,7 @@ class ShowtimeController {
 	@SecurityRequirement(name = OpenApiConfig.BEARER_AUTH)
 	void delete(@Parameter(description = "Showtime UUID.", example = "550e8400-e29b-41d4-a716-446655440010")
 		@PathVariable UUID id) {
-		showtimes.delete(id);
+		showtimes.delete(id, Instant.now());
 	}
 
 	record ShowtimeRequest(@NotNull(message = "Movie is required")

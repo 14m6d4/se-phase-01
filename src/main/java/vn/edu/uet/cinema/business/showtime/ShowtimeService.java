@@ -68,8 +68,8 @@ public class ShowtimeService {
 		return get(id);
 	}
 
-	public void delete(UUID id) {
+	public void delete(UUID id, Instant now) {
 		get(id);
-		showtimes.deleteById(id);
+		showtimes.deleteById(id, now);
 	}
 }

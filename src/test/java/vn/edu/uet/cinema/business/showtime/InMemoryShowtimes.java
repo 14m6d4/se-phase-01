@@ -40,9 +40,7 @@ public class InMemoryShowtimes implements ShowtimeRepository {
 	}
 
 	@Override
-	public void deleteById(UUID id) {
-		// ponytail: wall clock, as the JPA adapter does today; take the caller's time once the interface does.
-		Instant now = Instant.now();
+	public void deleteById(UUID id, Instant now) {
 		bookingRows.values().removeIf(b -> b.showtimeId().equals(id) && b.statusAt(now) == BookingStatus.EXPIRED);
 		if (bookingRows.values().stream().anyMatch(b -> b.showtimeId().equals(id))) {
 			throw new ConflictException("Showtime has Bookings");

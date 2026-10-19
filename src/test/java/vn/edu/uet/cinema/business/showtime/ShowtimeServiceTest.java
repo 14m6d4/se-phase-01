@@ -136,6 +136,22 @@ class ShowtimeServiceTest {
 			.hasSize(200);
 	}
 
+	@Test
+	void deletingAtAFixedTimeRemovesLapsedHoldsButALiveHoldBlocks() {
+		Instant now = Instant.parse("2026-10-01T13:00:00Z");
+		Showtime lapsedOnly = scheduled();
+		Booking lapsed = booking(lapsedOnly, BookingStatus.PENDING, now.minusSeconds(1));
+		Showtime held = scheduled();
+		booking(held, BookingStatus.PENDING, now.plusSeconds(1));
+
+		service.delete(lapsedOnly.id(), now);
+
+		assertThatThrownBy(() -> service.get(lapsedOnly.id())).isInstanceOf(NotFoundException.class);
+		assertThat(repository.bookingRows).doesNotContainKey(lapsed.id());
+		assertThatThrownBy(() -> service.delete(held.id(), now)).isInstanceOf(ConflictException.class);
+		assertThat(service.get(held.id())).isEqualTo(held);
+	}
+
 	private UUID movie(int durationMinutes) {
 		return movieRows.save(new Movie(UUID.randomUUID(), "Film", "Synopsis", durationMinutes, "Drama", AgeRating.P,
 			LocalDate.parse("2026-09-01"), "poster")).id();

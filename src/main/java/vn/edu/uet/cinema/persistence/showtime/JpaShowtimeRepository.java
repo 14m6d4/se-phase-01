@@ -60,9 +60,9 @@ class JpaShowtimeRepository implements ShowtimeRepository {
 
 	@Override
 	@Transactional
-	public void deleteById(UUID id) {
+	public void deleteById(UUID id, Instant now) {
 		try {
-			jpa.deleteLapsedHolds(id, Instant.now());
+			jpa.deleteLapsedHolds(id, now);
 			jpa.deleteById(id);
 			jpa.flush();
 		} catch (DataIntegrityViolationException e) {
