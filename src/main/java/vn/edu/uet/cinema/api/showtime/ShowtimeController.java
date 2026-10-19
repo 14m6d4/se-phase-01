@@ -13,7 +13,6 @@ import java.time.LocalDate;
 import java.time.OffsetDateTime;
 import java.time.ZoneId;
 import java.util.List;
-import java.util.Map;
 import java.util.UUID;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.DeleteMapping;
@@ -24,12 +23,9 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
-import vn.edu.uet.cinema.business.auditorium.AuditoriumService;
 import vn.edu.uet.cinema.business.auditorium.Seat;
 import vn.edu.uet.cinema.business.showtime.Cancellation;
 import vn.edu.uet.cinema.business.showtime.CancellationReason;
-import vn.edu.uet.cinema.business.showtime.SeatOccupancyReader;
-import vn.edu.uet.cinema.business.showtime.SeatPricing;
 import vn.edu.uet.cinema.business.showtime.SeatStatus;
 import vn.edu.uet.cinema.business.showtime.Showtime;
 import vn.edu.uet.cinema.business.showtime.ShowtimeService;
@@ -43,13 +39,9 @@ class ShowtimeController {
 	private static final ZoneId VIETNAM_ZONE = ZoneId.of("Asia/Ho_Chi_Minh");
 
 	private final ShowtimeService showtimes;
-	private final AuditoriumService auditoriums;
-	private final SeatOccupancyReader occupancy;
 
-	ShowtimeController(ShowtimeService showtimes, AuditoriumService auditoriums, SeatOccupancyReader occupancy) {
+	ShowtimeController(ShowtimeService showtimes) {
 		this.showtimes = showtimes;
-		this.auditoriums = auditoriums;
-		this.occupancy = occupancy;
 	}
 
 	@PostMapping("/api/showtimes")
@@ -91,12 +83,8 @@ class ShowtimeController {
 		+ "calculated VND price. An unknown showtime returns 404; a cancelled showtime returns 409. This read is public.")
 	List<SeatMapResponse> seats(
 		@Parameter(description = "Showtime UUID.", example = "550e8400-e29b-41d4-a716-446655440010") @PathVariable UUID id) {
-		Showtime showtime = showtimes.getScheduled(id);
-		Map<UUID, SeatStatus> statuses = occupancy.statuses(id, Instant.now());
-		return auditoriums.get(showtime.auditoriumId()).seats().stream()
-			.map(seat -> SeatMapResponse.from(seat, SeatPricing.price(seat.type(), showtime.basePrice()),
-				statuses.getOrDefault(seat.id(), SeatStatus.AVAILABLE)))
-			.toList();
+		return showtimes.seatMap(id, Instant.now()).stream()
+			.map(entry -> SeatMapResponse.from(entry.seat(), entry.price(), entry.status())).toList();
 	}
 
 	@PostMapping("/api/showtimes/{id}/cancellation")

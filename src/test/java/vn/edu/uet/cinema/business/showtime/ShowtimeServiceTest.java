@@ -6,6 +6,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
 import vn.edu.uet.cinema.business.ConflictException;
@@ -13,9 +14,13 @@ import vn.edu.uet.cinema.business.NotFoundException;
 import vn.edu.uet.cinema.business.auditorium.Auditorium;
 import vn.edu.uet.cinema.business.auditorium.AuditoriumService;
 import vn.edu.uet.cinema.business.auditorium.InMemoryAuditoriums;
+import vn.edu.uet.cinema.business.auditorium.Seat;
+import vn.edu.uet.cinema.business.auditorium.SeatType;
 import vn.edu.uet.cinema.business.booking.BookedSeat;
 import vn.edu.uet.cinema.business.booking.Booking;
 import vn.edu.uet.cinema.business.booking.BookingStatus;
+import vn.edu.uet.cinema.business.booking.InMemoryBookings;
+import vn.edu.uet.cinema.business.booking.InMemorySeatOccupancy;
 import vn.edu.uet.cinema.business.cinema.CinemaService;
 import vn.edu.uet.cinema.business.cinema.InMemoryCinemas;
 import vn.edu.uet.cinema.business.movie.AgeRating;
@@ -33,7 +38,8 @@ class ShowtimeServiceTest {
 	private final MovieService movies = new MovieService(movieRows, repository);
 	private final AuditoriumService auditoriums = new AuditoriumService(
 		new CinemaService(new InMemoryCinemas(), auditoriumRows), auditoriumRows, repository);
-	private final ShowtimeService service = new ShowtimeService(movies, auditoriums, repository);
+	private final ShowtimeService service = new ShowtimeService(movies, auditoriums, repository,
+		new InMemorySeatOccupancy(new InMemoryBookings(repository)));
 
 	private final UUID auditoriumId = auditoriumRows.save(new Auditorium(UUID.randomUUID(), UUID.randomUUID(), "Hall",
 		1, 1, List.of())).id();
@@ -150,6 +156,56 @@ class ShowtimeServiceTest {
 		assertThat(repository.bookingRows).doesNotContainKey(lapsed.id());
 		assertThatThrownBy(() -> service.delete(held.id(), now)).isInstanceOf(ConflictException.class);
 		assertThat(service.get(held.id())).isEqualTo(held);
+	}
+
+	@Test
+	void pricedSeatsPriceEachSeatTypeFromTheBasePrice() {
+		Showtime showtime = withSeats();
+
+		assertThat(service.pricedSeats(showtime)).containsExactly(
+			Map.entry(standard.id(), new PricedSeat(standard, 100_000)), Map.entry(vip.id(), new PricedSeat(vip, 120_000)),
+			Map.entry(couple.id(), new PricedSeat(couple, 210_000)));
+	}
+
+	@Test
+	void seatMapShowsPriceAndStatusOfEverySeat() {
+		Showtime showtime = withSeats();
+		Instant now = Instant.parse("2026-10-01T13:00:00Z");
+		booking(showtime, BookingStatus.PENDING, now.plusSeconds(1), standard);
+		booking(showtime, BookingStatus.CONFIRMED, now.minusSeconds(1), vip);
+		booking(showtime, BookingStatus.PENDING, now, couple);
+
+		assertThat(service.seatMap(showtime.id(), now)).containsExactly(
+			new SeatMapEntry(standard, 100_000, SeatStatus.HELD), new SeatMapEntry(vip, 120_000, SeatStatus.SOLD),
+			new SeatMapEntry(couple, 210_000, SeatStatus.AVAILABLE));
+	}
+
+	@Test
+	void seatMapOfAnUnknownShowtimeIsNotFoundAndOfACancelledOneAConflict() {
+		Showtime cancelled = withSeats();
+		Instant now = Instant.parse("2026-10-01T13:00:00Z");
+		service.cancel(cancelled.id(), CancellationReason.EMERGENCY, null, now);
+
+		assertThatThrownBy(() -> service.seatMap(UUID.randomUUID(), now)).isInstanceOf(NotFoundException.class);
+		assertThatThrownBy(() -> service.seatMap(cancelled.id(), now)).isInstanceOf(ConflictException.class)
+			.hasMessage("Showtime is Cancelled");
+	}
+
+	private final Seat standard = new Seat(UUID.randomUUID(), "A", 1, SeatType.STANDARD);
+	private final Seat vip = new Seat(UUID.randomUUID(), "B", 1, SeatType.VIP);
+	private final Seat couple = new Seat(UUID.randomUUID(), "C", 1, SeatType.COUPLE);
+
+	private Showtime withSeats() {
+		Auditorium auditorium = auditoriumRows.save(new Auditorium(UUID.randomUUID(), UUID.randomUUID(), "Seated", 3, 1,
+			List.of(standard, vip, couple)));
+		return repository.save(new Showtime(UUID.randomUUID(), UUID.randomUUID(), auditorium.id(), STARTS_AT,
+			Instant.parse("2026-10-01T16:15:00Z"), 100_000L));
+	}
+
+	private void booking(Showtime showtime, BookingStatus status, Instant expiresAt, Seat seat) {
+		Booking booking = new Booking(UUID.randomUUID(), UUID.randomUUID(), showtime.id(), status,
+			expiresAt.minusSeconds(600), expiresAt, List.of(new BookedSeat(seat.id(), 100_000)));
+		repository.bookingRows.put(booking.id(), booking);
 	}
 
 	private UUID movie(int durationMinutes) {

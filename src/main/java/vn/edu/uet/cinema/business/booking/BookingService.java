@@ -6,16 +6,11 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
-import java.util.function.Function;
-import java.util.stream.Collectors;
 import vn.edu.uet.cinema.business.ConflictException;
 import vn.edu.uet.cinema.business.NotFoundException;
-import vn.edu.uet.cinema.business.auditorium.AuditoriumService;
-import vn.edu.uet.cinema.business.auditorium.Seat;
-import vn.edu.uet.cinema.business.showtime.SeatPricing;
+import vn.edu.uet.cinema.business.showtime.PricedSeat;
 import vn.edu.uet.cinema.business.showtime.Showtime;
 import vn.edu.uet.cinema.business.showtime.ShowtimeService;
-import vn.edu.uet.cinema.business.showtime.ShowtimeStatus;
 
 public class BookingService {
 
@@ -23,12 +18,10 @@ public class BookingService {
 	private static final int MAX_SEATS = 8;
 
 	private final ShowtimeService showtimes;
-	private final AuditoriumService auditoriums;
 	private final BookingRepository bookings;
 
-	public BookingService(ShowtimeService showtimes, AuditoriumService auditoriums, BookingRepository bookings) {
+	public BookingService(ShowtimeService showtimes, BookingRepository bookings) {
 		this.showtimes = showtimes;
-		this.auditoriums = auditoriums;
 		this.bookings = bookings;
 	}
 
@@ -39,21 +32,17 @@ public class BookingService {
 		if (Set.copyOf(seatIds).size() != seatIds.size()) {
 			throw new InvalidBookingException("Duplicate seatIds");
 		}
-		Showtime showtime = showtimes.get(showtimeId);
-		if (showtime.status() == ShowtimeStatus.CANCELLED) {
-			throw new ConflictException("Showtime is Cancelled");
-		}
+		Showtime showtime = showtimes.getScheduled(showtimeId);
 		if (!now.isBefore(showtime.startsAt())) {
 			throw new ConflictException("Showtime has already started");
 		}
-		Map<UUID, Seat> seats = auditoriums.get(showtime.auditoriumId()).seats().stream()
-			.collect(Collectors.toMap(Seat::id, Function.identity()));
+		Map<UUID, PricedSeat> seats = showtimes.pricedSeats(showtime);
 		List<BookedSeat> booked = seatIds.stream().map(id -> {
-			Seat seat = seats.get(id);
+			PricedSeat seat = seats.get(id);
 			if (seat == null) {
 				throw new InvalidBookingException("Seat " + id + " is not in the Showtime's Auditorium");
 			}
-			return new BookedSeat(id, SeatPricing.price(seat.type(), showtime.basePrice()));
+			return new BookedSeat(id, seat.price());
 		}).toList();
 		bookings.findLivePending(customerId, now).ifPresent(pending -> {
 			throw new ConflictException("Customer already has a Pending Booking " + pending.id());

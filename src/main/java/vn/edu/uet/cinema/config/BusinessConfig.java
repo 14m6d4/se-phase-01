@@ -15,6 +15,7 @@ import vn.edu.uet.cinema.business.cinema.CinemaRepository;
 import vn.edu.uet.cinema.business.cinema.CinemaService;
 import vn.edu.uet.cinema.business.movie.MovieRepository;
 import vn.edu.uet.cinema.business.movie.MovieService;
+import vn.edu.uet.cinema.business.showtime.SeatOccupancyReader;
 import vn.edu.uet.cinema.business.showtime.ShowtimeRepository;
 import vn.edu.uet.cinema.business.showtime.ShowtimeService;
 
@@ -44,13 +45,14 @@ class BusinessConfig {
 	}
 
 	@Bean
-	ShowtimeService showtimeService(MovieService movies, AuditoriumService auditoriums, ShowtimeRepository showtimes) {
-		return new ShowtimeService(movies, auditoriums, showtimes);
+	ShowtimeService showtimeService(MovieService movies, AuditoriumService auditoriums, ShowtimeRepository showtimes,
+		SeatOccupancyReader occupancy) {
+		return new ShowtimeService(movies, auditoriums, showtimes, occupancy);
 	}
 
 	@Bean
-	BookingService bookingService(ShowtimeService showtimes, AuditoriumService auditoriums, BookingRepository bookings) {
-		return new BookingService(showtimes, auditoriums, bookings);
+	BookingService bookingService(ShowtimeService showtimes, BookingRepository bookings) {
+		return new BookingService(showtimes, bookings);
 	}
 
 	/** Admins are never self-registered: the one Admin comes from ADMIN_EMAIL / ADMIN_PASSWORD. */

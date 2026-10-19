@@ -32,12 +32,12 @@ class BookingServiceTest {
 
 	private final InMemoryAuditoriums auditoriumRows = new InMemoryAuditoriums();
 	private final InMemoryShowtimes showtimeRows = new InMemoryShowtimes(auditoriumRows);
+	private final InMemoryBookings repository = new InMemoryBookings(showtimeRows);
 	private final AuditoriumService auditoriums = new AuditoriumService(
 		new CinemaService(new InMemoryCinemas(), auditoriumRows), auditoriumRows, showtimeRows);
 	private final ShowtimeService showtimes = new ShowtimeService(new MovieService(new InMemoryMovies(), showtimeRows),
-		auditoriums, showtimeRows);
-	private final InMemoryBookings repository = new InMemoryBookings(showtimeRows);
-	private final BookingService service = new BookingService(showtimes, auditoriums, repository);
+		auditoriums, showtimeRows, new InMemorySeatOccupancy(repository));
+	private final BookingService service = new BookingService(showtimes, repository);
 
 	private final UUID customerId = UUID.randomUUID();
 	private final Seat standard = new Seat(UUID.randomUUID(), "A", 1, SeatType.STANDARD);
@@ -86,6 +86,25 @@ class BookingServiceTest {
 		assertThatThrownBy(() -> service.book(customerId, showtime.id(), List.of(standard.id()), NOW))
 			.isInstanceOf(ConflictException.class).hasMessageContaining("Cancelled");
 		assertThat(service.list(customerId)).isEmpty();
+	}
+
+	@Test
+	void eachRequestGetsTheErrorOfTheFirstRuleItBreaks() {
+		UUID outside = UUID.randomUUID();
+		Showtime cancelledAndStarted = showtime(NOW);
+		showtimes.cancel(cancelledAndStarted.id(), CancellationReason.EMERGENCY, null, NOW.minusSeconds(1));
+		Showtime started = showtime(NOW);
+
+		assertThatThrownBy(() -> service.book(customerId, UUID.randomUUID(), List.of(outside, outside), NOW))
+			.isInstanceOf(InvalidBookingException.class).hasMessage("Duplicate seatIds");
+		assertThatThrownBy(() -> service.book(customerId, UUID.randomUUID(), List.of(outside), NOW))
+			.isInstanceOf(NotFoundException.class);
+		assertThatThrownBy(() -> service.book(customerId, cancelledAndStarted.id(), List.of(outside), NOW))
+			.isInstanceOf(ConflictException.class).hasMessage("Showtime is Cancelled");
+		assertThatThrownBy(() -> service.book(customerId, started.id(), List.of(outside), NOW))
+			.isInstanceOf(ConflictException.class).hasMessage("Showtime has already started");
+		assertThatThrownBy(() -> service.book(customerId, showtime.id(), List.of(outside), NOW))
+			.isInstanceOf(InvalidBookingException.class).hasMessageContaining("not in the Showtime's Auditorium");
 	}
 
 	@Test
@@ -196,7 +215,7 @@ class BookingServiceTest {
 				return super.confirm(id, pending.expiresAt());
 			}
 		};
-		BookingService racing = new BookingService(showtimes, auditoriums, lapsing);
+		BookingService racing = new BookingService(showtimes, lapsing);
 
 		assertThatThrownBy(() -> racing.pay(customerId, pending.id(), pending.expiresAt().minusSeconds(1)))
 			.isInstanceOf(ConflictException.class);
@@ -221,7 +240,7 @@ class BookingServiceTest {
 			}
 		};
 
-		assertThat(new BookingService(showtimes, auditoriums, racing).pay(customerId, pending.id(), NOW))
+		assertThat(new BookingService(showtimes, racing).pay(customerId, pending.id(), NOW))
 			.isEqualTo(pending.confirmed());
 	}
 
@@ -258,7 +277,7 @@ class BookingServiceTest {
 			}
 		};
 
-		assertThatThrownBy(() -> new BookingService(showtimes, auditoriums, racing).abandon(customerId, pending.id()))
+		assertThatThrownBy(() -> new BookingService(showtimes, racing).abandon(customerId, pending.id()))
 			.isInstanceOf(NotFoundException.class);
 	}
 
