@@ -1,7 +1,9 @@
 package vn.edu.uet.cinema.business.showtime;
 
 import java.time.Instant;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 import vn.edu.uet.cinema.business.ConflictException;
 import vn.edu.uet.cinema.business.NotFoundException;
@@ -15,11 +17,14 @@ public class ShowtimeService {
 	private final MovieService movies;
 	private final AuditoriumService auditoriums;
 	private final ShowtimeRepository showtimes;
+	private final SeatOccupancyReader occupancy;
 
-	public ShowtimeService(MovieService movies, AuditoriumService auditoriums, ShowtimeRepository showtimes) {
+	public ShowtimeService(MovieService movies, AuditoriumService auditoriums, ShowtimeRepository showtimes,
+		SeatOccupancyReader occupancy) {
 		this.movies = movies;
 		this.auditoriums = auditoriums;
 		this.showtimes = showtimes;
+		this.occupancy = occupancy;
 	}
 
 	public Showtime create(UUID movieId, UUID auditoriumId, Instant startsAt, long basePrice) {
@@ -48,6 +53,22 @@ public class ShowtimeService {
 		return showtime;
 	}
 
+	/** The Seats of the Showtime's Auditorium in layout order, each priced from its Seat Type, keyed by Seat id. */
+	public Map<UUID, PricedSeat> pricedSeats(Showtime showtime) {
+		Map<UUID, PricedSeat> priced = new LinkedHashMap<>();
+		auditoriums.get(showtime.auditoriumId()).seats().forEach(seat -> priced.put(seat.id(),
+			new PricedSeat(seat, SeatPricing.price(seat.type(), showtime.basePrice()))));
+		return priced;
+	}
+
+	/** Every Seat of a Scheduled Showtime with its price and status at {@code now}. */
+	public List<SeatMapEntry> seatMap(UUID id, Instant now) {
+		Showtime showtime = getScheduled(id);
+		Map<UUID, SeatStatus> statuses = occupancy.statuses(id, now);
+		return pricedSeats(showtime).values().stream().map(p -> new SeatMapEntry(p,
+			statuses.getOrDefault(p.seat().id(), SeatStatus.AVAILABLE))).toList();
+	}
+
 	public List<Showtime> list(Instant fromInclusive, Instant toExclusive, UUID cinemaId, UUID movieId) {
 		return showtimes.findByStartsAtBetween(fromInclusive, toExclusive, cinemaId, movieId);
 	}
@@ -68,8 +89,8 @@ public class ShowtimeService {
 		return get(id);
 	}
 
-	public void delete(UUID id) {
+	public void delete(UUID id, Instant now) {
 		get(id);
-		showtimes.deleteById(id);
+		showtimes.deleteById(id, now);
 	}
 }

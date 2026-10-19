@@ -1,11 +1,13 @@
 package vn.edu.uet.cinema.persistence.cinema;
 
+import static vn.edu.uet.cinema.persistence.ConstraintViolations.hasConstraint;
+
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
-import org.hibernate.exception.ConstraintViolationException;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Repository;
+import org.springframework.transaction.annotation.Transactional;
 import vn.edu.uet.cinema.business.ConflictException;
 import vn.edu.uet.cinema.business.cinema.Cinema;
 import vn.edu.uet.cinema.business.cinema.CinemaRepository;
@@ -35,6 +37,7 @@ class JpaCinemaRepository implements CinemaRepository {
 	}
 
 	@Override
+	@Transactional
 	public void deleteById(UUID id) {
 		try {
 			jpa.deleteById(id);
@@ -45,14 +48,5 @@ class JpaCinemaRepository implements CinemaRepository {
 			}
 			throw e;
 		}
-	}
-
-	private static boolean hasConstraint(Throwable error, String expected) {
-		for (Throwable cause = error; cause != null; cause = cause.getCause()) {
-			if (cause instanceof ConstraintViolationException violation && expected.equals(violation.getConstraintName())) {
-				return true;
-			}
-		}
-		return false;
 	}
 }

@@ -149,12 +149,12 @@ class BookingPersistenceTest {
 		bookings.book(customer(), showtimeId, List.of(hall.seats().get(0).id()), now.minus(11, ChronoUnit.MINUTES));
 		bookings.book(customer(), showtimeId, List.of(hall.seats().get(1).id()), now);
 
-		assertThatThrownBy(() -> showtimes.delete(showtimeId)).isInstanceOf(ConflictException.class);
+		assertThatThrownBy(() -> showtimes.delete(showtimeId, now)).isInstanceOf(ConflictException.class);
 
 		Auditorium otherHall = auditorium();
 		UUID lapsedOnlyId = showtime(otherHall);
 		bookings.book(customer(), lapsedOnlyId, List.of(otherHall.seats().get(0).id()), now.minus(11, ChronoUnit.MINUTES));
-		showtimes.delete(lapsedOnlyId);
+		showtimes.delete(lapsedOnlyId, now);
 		assertThatThrownBy(() -> showtimes.get(lapsedOnlyId)).isInstanceOf(NotFoundException.class);
 	}
 

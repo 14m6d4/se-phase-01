@@ -3,17 +3,13 @@ package vn.edu.uet.cinema.business.account;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
-import java.util.HashMap;
-import java.util.Map;
-import java.util.Optional;
-import java.util.UUID;
 import org.junit.jupiter.api.Test;
 import vn.edu.uet.cinema.business.ConflictException;
 
 class AccountServiceTest {
 
-	private final Map<UUID, Account> store = new HashMap<>();
-	private final AccountService service = new AccountService(new InMemoryAccounts(), new PrefixHasher());
+	private final InMemoryAccounts accounts = new InMemoryAccounts();
+	private final AccountService service = new AccountService(accounts, new PrefixHasher());
 
 	@Test
 	void registersCustomerWithNormalizedEmailAndHashedPassword() {
@@ -49,7 +45,7 @@ class AccountServiceTest {
 		service.ensureAdmin("Admin@Cinema.local", "admin-pass");
 		service.ensureAdmin("admin@cinema.local", "rotated-pass");
 
-		assertThat(store).hasSize(1);
+		assertThat(accounts.size()).isEqualTo(1);
 		assertThat(service.authenticate("admin@cinema.local", "rotated-pass").role()).isEqualTo(Role.ADMIN);
 		assertThatThrownBy(() -> service.authenticate("admin@cinema.local", "admin-pass"))
 			.isInstanceOf(InvalidCredentialsException.class);
@@ -71,26 +67,6 @@ class AccountServiceTest {
 		assertThatThrownBy(() -> counted.authenticate("nobody@example.com", "secret123"))
 			.isInstanceOf(InvalidCredentialsException.class);
 		assertThat(hasher.matchCalls).isEqualTo(1);
-	}
-
-	private class InMemoryAccounts implements AccountRepository {
-
-		public Optional<Account> findById(UUID id) {
-			return Optional.ofNullable(store.get(id));
-		}
-
-		public Optional<Account> findByEmail(String email) {
-			return store.values().stream().filter(a -> a.email().equals(email)).findFirst();
-		}
-
-		public boolean existsByEmail(String email) {
-			return findByEmail(email).isPresent();
-		}
-
-		public Account save(Account account) {
-			store.put(account.id(), account);
-			return account;
-		}
 	}
 
 	private static class PrefixHasher implements PasswordHasher {
