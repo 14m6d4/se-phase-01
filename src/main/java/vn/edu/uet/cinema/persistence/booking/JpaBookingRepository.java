@@ -1,12 +1,13 @@
 package vn.edu.uet.cinema.persistence.booking;
 
+import static vn.edu.uet.cinema.persistence.ConstraintViolations.hasConstraint;
+
 import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 import java.util.stream.Collectors;
-import org.hibernate.exception.ConstraintViolationException;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.dao.PessimisticLockingFailureException;
 import org.springframework.stereotype.Repository;
@@ -101,14 +102,5 @@ class JpaBookingRepository implements BookingRepository {
 	@Transactional
 	public boolean deletePending(UUID id) {
 		return jpa.deletePending(id) == 1;
-	}
-
-	private static boolean hasConstraint(Throwable error, String expected) {
-		for (Throwable cause = error; cause != null; cause = cause.getCause()) {
-			if (cause instanceof ConstraintViolationException violation && expected.equals(violation.getConstraintName())) {
-				return true;
-			}
-		}
-		return false;
 	}
 }

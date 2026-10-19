@@ -1,11 +1,12 @@
 package vn.edu.uet.cinema.persistence.showtime;
 
+import static vn.edu.uet.cinema.persistence.ConstraintViolations.hasConstraint;
+import static vn.edu.uet.cinema.persistence.ConstraintViolations.hasSqlState;
+
 import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
-import java.sql.SQLException;
-import org.hibernate.exception.ConstraintViolationException;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Repository;
 import org.springframework.transaction.annotation.Transactional;
@@ -35,22 +36,11 @@ class JpaShowtimeRepository implements ShowtimeRepository {
 			if (hasConstraint(e, "fk_showtime_auditorium")) {
 				throw new ConflictException("Auditorium no longer exists");
 			}
-			for (Throwable cause = e; cause != null; cause = cause.getCause()) {
-				if (cause instanceof SQLException sql && "23P01".equals(sql.getSQLState())) {
-					throw new ConflictException("Auditorium has an overlapping Showtime");
-				}
+			if (hasSqlState(e, "23P01")) {
+				throw new ConflictException("Auditorium has an overlapping Showtime");
 			}
 			throw e;
 		}
-	}
-
-	private static boolean hasConstraint(Throwable error, String expected) {
-		for (Throwable cause = error; cause != null; cause = cause.getCause()) {
-			if (cause instanceof ConstraintViolationException violation && expected.equals(violation.getConstraintName())) {
-				return true;
-			}
-		}
-		return false;
 	}
 
 	@Override
