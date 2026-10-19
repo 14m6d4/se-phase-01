@@ -164,7 +164,7 @@ class ShowtimeServiceTest {
 
 		assertThat(service.pricedSeats(showtime)).containsExactly(
 			Map.entry(standard.id(), new PricedSeat(standard, 100_000)), Map.entry(vip.id(), new PricedSeat(vip, 120_000)),
-			Map.entry(couple.id(), new PricedSeat(couple, 210_000)));
+			Map.entry(couple.id(), new PricedSeat(couple, 210_000)), Map.entry(lapsed.id(), new PricedSeat(lapsed, 100_000)));
 	}
 
 	@Test
@@ -174,10 +174,13 @@ class ShowtimeServiceTest {
 		booking(showtime, BookingStatus.PENDING, now.plusSeconds(1), standard);
 		booking(showtime, BookingStatus.CONFIRMED, now.minusSeconds(1), vip);
 		booking(showtime, BookingStatus.PENDING, now, couple);
+		booking(showtime, BookingStatus.PENDING, now.minusSeconds(1), lapsed);
 
 		assertThat(service.seatMap(showtime.id(), now)).containsExactly(
-			new SeatMapEntry(standard, 100_000, SeatStatus.HELD), new SeatMapEntry(vip, 120_000, SeatStatus.SOLD),
-			new SeatMapEntry(couple, 210_000, SeatStatus.AVAILABLE));
+			new SeatMapEntry(new PricedSeat(standard, 100_000), SeatStatus.HELD),
+			new SeatMapEntry(new PricedSeat(vip, 120_000), SeatStatus.SOLD),
+			new SeatMapEntry(new PricedSeat(couple, 210_000), SeatStatus.AVAILABLE),
+			new SeatMapEntry(new PricedSeat(lapsed, 100_000), SeatStatus.AVAILABLE));
 	}
 
 	@Test
@@ -194,10 +197,11 @@ class ShowtimeServiceTest {
 	private final Seat standard = new Seat(UUID.randomUUID(), "A", 1, SeatType.STANDARD);
 	private final Seat vip = new Seat(UUID.randomUUID(), "B", 1, SeatType.VIP);
 	private final Seat couple = new Seat(UUID.randomUUID(), "C", 1, SeatType.COUPLE);
+	private final Seat lapsed = new Seat(UUID.randomUUID(), "D", 1, SeatType.STANDARD);
 
 	private Showtime withSeats() {
-		Auditorium auditorium = auditoriumRows.save(new Auditorium(UUID.randomUUID(), UUID.randomUUID(), "Seated", 3, 1,
-			List.of(standard, vip, couple)));
+		Auditorium auditorium = auditoriumRows.save(new Auditorium(UUID.randomUUID(), UUID.randomUUID(), "Seated", 4, 1,
+			List.of(standard, vip, couple, lapsed)));
 		return repository.save(new Showtime(UUID.randomUUID(), UUID.randomUUID(), auditorium.id(), STARTS_AT,
 			Instant.parse("2026-10-01T16:15:00Z"), 100_000L));
 	}

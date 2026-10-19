@@ -84,7 +84,7 @@ class ShowtimeController {
 	List<SeatMapResponse> seats(
 		@Parameter(description = "Showtime UUID.", example = "550e8400-e29b-41d4-a716-446655440010") @PathVariable UUID id) {
 		return showtimes.seatMap(id, Instant.now()).stream()
-			.map(entry -> SeatMapResponse.from(entry.seat(), entry.price(), entry.status())).toList();
+			.map(entry -> SeatMapResponse.from(entry.seat().seat(), entry.seat().price(), entry.status())).toList();
 	}
 
 	@PostMapping("/api/showtimes/{id}/cancellation")

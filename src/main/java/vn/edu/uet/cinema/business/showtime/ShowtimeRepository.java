@@ -12,7 +12,7 @@ public interface ShowtimeRepository {
 	Optional<Showtime> findById(UUID id);
 
 	/**
-	 * Lapsed Holds are deleted along with the Showtime.
+	 * Holds that have lapsed at {@code now} are deleted along with the Showtime.
 	 *
 	 * @throws vn.edu.uet.cinema.business.ConflictException if it has a Confirmed, Refunded or live Pending Booking
 	 */

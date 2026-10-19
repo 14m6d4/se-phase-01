@@ -65,7 +65,7 @@ public class ShowtimeService {
 	public List<SeatMapEntry> seatMap(UUID id, Instant now) {
 		Showtime showtime = getScheduled(id);
 		Map<UUID, SeatStatus> statuses = occupancy.statuses(id, now);
-		return pricedSeats(showtime).values().stream().map(p -> new SeatMapEntry(p.seat(), p.price(),
+		return pricedSeats(showtime).values().stream().map(p -> new SeatMapEntry(p,
 			statuses.getOrDefault(p.seat().id(), SeatStatus.AVAILABLE))).toList();
 	}
 
