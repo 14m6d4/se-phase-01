@@ -1,12 +1,13 @@
 package vn.edu.uet.cinema.persistence.auditorium;
 
+import static vn.edu.uet.cinema.persistence.ConstraintViolations.hasConstraint;
+
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Repository;
 import org.springframework.transaction.annotation.Transactional;
-import org.hibernate.exception.ConstraintViolationException;
 import vn.edu.uet.cinema.business.ConflictException;
 import vn.edu.uet.cinema.business.auditorium.Auditorium;
 import vn.edu.uet.cinema.business.auditorium.AuditoriumNameTakenException;
@@ -68,14 +69,5 @@ class JpaAuditoriumRepository implements AuditoriumRepository {
 			}
 			throw e;
 		}
-	}
-
-	private static boolean hasConstraint(Throwable error, String expected) {
-		for (Throwable cause = error; cause != null; cause = cause.getCause()) {
-			if (cause instanceof ConstraintViolationException violation && expected.equals(violation.getConstraintName())) {
-				return true;
-			}
-		}
-		return false;
 	}
 }
