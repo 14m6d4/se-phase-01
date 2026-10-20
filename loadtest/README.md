@@ -35,7 +35,7 @@ The baseline load test runs on a Kaggle CPU notebook, so that phase 2 can repeat
    - **Internet:** On.
    - **Add-ons → Secrets:** attach `GITHUB_TOKEN` only when using the Git path. A full-source bundle needs no GitHub credential.
 
-Re-import the notebook whenever `kaggle.ipynb` changes. By default, `CODE_BUNDLE = None` preserves the token-authenticated clone of `GIT_REF` into `/tmp/se-phase-01`. For unpublished changes, attach a **private Kaggle Dataset** containing a full source snapshot and set `CODE_BUNDLE` to either the ZIP path (for example `/kaggle/input/<dataset>/source.zip`) or the expanded source-root directory (for example `/kaggle/input/<dataset>/source`). The selected directory must directly contain `loadtest-bundle.json` alongside repository-root files such as `pom.xml`, `mvnw`, `.mvn/`, `src/`, and `loadtest/`.
+Re-import the notebook whenever `kaggle.ipynb` changes. A previously imported copy keeps its old cells, so re-import it after the `HOLD` → `DURATION` rename instead of only re-running it. By default, `CODE_BUNDLE = None` preserves the token-authenticated clone of `GIT_REF` into `/tmp/se-phase-01`. For unpublished changes, attach a **private Kaggle Dataset** containing a full source snapshot and set `CODE_BUNDLE` to either the ZIP path (for example `/kaggle/input/<dataset>/source.zip`) or the expanded source-root directory (for example `/kaggle/input/<dataset>/source`). The selected directory must directly contain `loadtest-bundle.json` alongside repository-root files such as `pom.xml`, `mvnw`, `.mvn/`, `src/`, and `loadtest/`.
 
 ```json
 {"snapshotMode":"working-tree","sourceCommit":"<40-character git rev-parse HEAD>"}
@@ -79,7 +79,7 @@ Attach the ZIP to a **private Kaggle Dataset**. Kaggle may expand it into a dire
    - `GIT_REF`: branch, tag or commit to test (default `main`; ignored with `CODE_BUNDLE`).
    - `SCENARIO`: `all` runs browse, book and contention in order; or select `smoke`, `browse`, `book` or `contention`.
    - `RATE`: target iterations per second (actual HTTP RPS is in the report; scenarios may issue multiple requests per iteration).
-   - `HOLD`: how long that rate is held.
+   - `DURATION`: how long that rate is held.
 2. Click **Save Version → Save & Run All (Commit)**. It runs unattended; the interactive editor stops after 20 minutes idle.
 3. Open the saved version. The last cell prints the headline numbers. The **Output** tab has `results/`:
    - `<scenario>/summary.json`: full k6 summary per run; `summary.json` is also copied from the last scenario for compatibility.
@@ -103,7 +103,7 @@ The accepted Kaggle measurements are recorded in [`docs/loadtest-baseline.md`](.
 
 ## Scenarios
 
-**`smoke`**: `setup()` logs in the first `maxVUs` pre-seeded Customers once with `http.batch`; each VU calls `GET /api/me` with its own token under `ramping-arrival-rate`: 30 s ramp to `RATE`, hold for `HOLD`, 10 s ramp down. Like the booking tests, it needs `seed.sql`.
+**`smoke`**: `setup()` logs in the first `maxVUs` pre-seeded Customers once with `http.batch`; each VU calls `GET /api/me` with its own token under `ramping-arrival-rate`: 30 s ramp to `RATE`, hold for `DURATION`, 10 s ramp down. Like the booking tests, it needs `seed.sql`.
 
 **`browse`**: no login — the measured endpoints are public. Every iteration calls `GET /api/showtimes?date=<today in Vietnam>` and then `GET /api/showtimes/{id}/seats` for one of the returned showtimes (120 seats per map). Requires `seed.sql` to have been run, so there is something to browse; otherwise setup fails the run before any VU starts (k6 exit code 107, `no showtimes seeded for today or tomorrow`). Same `ramping-arrival-rate` shape as `smoke`.
 
@@ -116,7 +116,7 @@ To add a scenario, add `k6/<name>.js` and set `SCENARIO = "<name>"`. The script 
 - spread `summaryOptions` into its `options`;
 - re-export `handleSummary` from `k6/lib/summary.js` (wrap it only to add scenario-specific output);
 - pass `LOAD` in the params of every request that should be measured;
-- read `BASE_URL`, `RATE` and `HOLD` from `__ENV`, like `smoke.js` does.
+- read `BASE_URL`, `RATE` and `DURATION` from `__ENV`, like `smoke.js` does.
 - for authenticated load, use `lib/customers.js` so each VU gets one of the seeded Customers.
 
 ## Run a scenario locally
@@ -130,7 +130,7 @@ Useful for debugging a script without a Kaggle round trip (and the way to run wi
 psql "<your postgres url for the cinema database>" -f loadtest/seed.sql
 
 mkdir -p loadtest/results            # k6 does not create it
-k6 run -e RATE=20 -e HOLD=10s loadtest/k6/browse.js
+k6 run -e RATE=20 -e DURATION=10s loadtest/k6/browse.js
 python3 loadtest/report.py           # reads loadtest/results/summary.json
 ```
 

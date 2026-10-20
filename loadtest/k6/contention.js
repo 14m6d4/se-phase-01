@@ -10,7 +10,7 @@ const BASE_URL = __ENV.BASE_URL || 'http://localhost:8080';
 const RESULTS_DIR = __ENV.RESULTS_DIR || 'loadtest/results';
 const EXPECTED_STATUSES = http.expectedStatuses(201, 409);
 const RATE = Number(__ENV.RATE || 50);
-const HOLD = __ENV.HOLD || '60s';
+const DURATION = __ENV.DURATION || '60s';
 const bookingsCreated = new Counter('bookings_created');
 const bookingConflicts = new Counter('booking_conflicts');
 const seatConflicts = new Counter('seat_conflicts');
@@ -36,7 +36,7 @@ export const options = {
 			maxVUs: MAX_VUS,
 			stages: [
 				{ duration: '30s', target: RATE },
-				{ duration: HOLD, target: RATE },
+				{ duration: DURATION, target: RATE },
 				{ duration: '10s', target: 0 },
 			],
 		},

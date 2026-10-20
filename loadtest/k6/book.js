@@ -11,7 +11,7 @@ export { handleSummary };
 const BASE_URL = __ENV.BASE_URL || 'http://localhost:8080';
 const JSON_HEADERS = { 'Content-Type': 'application/json' };
 const RATE = Number(__ENV.RATE || 50);
-const HOLD = __ENV.HOLD || '60s';
+const DURATION = __ENV.DURATION || '60s';
 
 export const options = {
 	...summaryOptions,
@@ -30,7 +30,7 @@ export const options = {
 			maxVUs: BOOK_MAX_VUS,
 			stages: [
 				{ duration: '30s', target: RATE },
-				{ duration: HOLD, target: RATE },
+				{ duration: DURATION, target: RATE },
 				{ duration: '10s', target: 0 },
 			],
 		},
