@@ -100,8 +100,6 @@ Key design decisions:
 
 ### Quick start with Docker Compose
 
-The repository is private: ask a maintainer to add your GitHub account, then clone with `gh repo clone` or an HTTPS personal access token.
-
 ```bash
 git clone https://github.com/14m6d4/se-phase-01.git
 cd se-phase-01
@@ -119,10 +117,9 @@ The service is ready when the log shows `Started CinemaApplication`. The [bookin
 
 An admin account is created on startup from `ADMIN_EMAIL` / `ADMIN_PASSWORD`. Compose refuses to start if a required variable is missing, and both services bind to `127.0.0.1` only.
 
-To run the image CI published from `main` instead of building locally, log in to GitHub Container Registry first. The image is private like the repository, so use a personal access token with the `read:packages` scope:
+To run the image CI published from `main` instead of building locally:
 
 ```bash
-echo "$GITHUB_TOKEN" | docker login ghcr.io -u <your-github-username> --password-stdin
 docker compose pull app
 docker compose up --no-build
 ```
