@@ -17,6 +17,7 @@ A REST backend for a cinema chain: admins run the catalogue (cinemas, auditorium
 - [Configuration](#configuration)
 - [API overview](#api-overview)
 - [Booking lifecycle](#booking-lifecycle)
+- [Booking walkthrough](#booking-walkthrough)
 - [Testing](#testing)
 - [Performance](#performance)
 - [CI/CD](#cicd)
@@ -106,6 +107,8 @@ cp .env.example .env          # set your own secrets in .env
 docker compose up --build
 ```
 
+The service is ready when the log shows `Started CinemaApplication`. The [booking walkthrough](#booking-walkthrough) exercises it end to end.
+
 | URL | Purpose |
 |---|---|
 | http://localhost:8080/swagger-ui.html | Interactive API docs |
@@ -114,10 +117,11 @@ docker compose up --build
 
 An admin account is created on startup from `ADMIN_EMAIL` / `ADMIN_PASSWORD`. Compose refuses to start if a required variable is missing, and both services bind to `127.0.0.1` only.
 
-To use the prebuilt image instead of building locally:
+To run the image CI published from `main` instead of building locally:
 
 ```bash
-docker pull ghcr.io/14m6d4/se-phase-01:latest
+docker compose pull app
+docker compose up --no-build
 ```
 
 ### Running locally
@@ -222,6 +226,55 @@ Pricing is copied into the booking when it is created, so later price changes do
 | Couple | 2 × base price + 10,000 VND |
 
 Other rules: a customer can have only one live pending booking at a time, a showtime can't be booked once it has started, and paying an already confirmed booking is idempotent.
+
+## Booking walkthrough
+
+With the service running (see [Quick start](#quick-start-with-docker-compose)), paste this into a bash shell from the repository root. It needs `curl` and `jq`. An admin builds the catalogue, then a customer holds two seats, pays, and sees them sold.
+
+```bash
+set -a; source .env; set +a                  # ADMIN_EMAIL and ADMIN_PASSWORD
+API=localhost:8080/api
+JSON='Content-Type: application/json'
+
+# 1. Admin logs in
+ADMIN=$(jq -n --arg email "$ADMIN_EMAIL" --arg password "$ADMIN_PASSWORD" '{email: $email, password: $password}' |
+  curl -s -X POST $API/auth/login -H "$JSON" -d @- | jq -r .accessToken)
+
+# 2. Admin creates a cinema, an auditorium (5 rows x 8 seats), a movie and a showtime
+CINEMA=$(curl -s -X POST $API/cinemas -H "$JSON" -H "Authorization: Bearer $ADMIN" \
+  -d '{"name":"Central Cinema","address":"1 Example Street"}' | jq -r .id)
+
+AUDITORIUM=$(curl -s -X POST $API/cinemas/$CINEMA/auditoriums -H "$JSON" -H "Authorization: Bearer $ADMIN" \
+  -d '{"name":"Screen 1","rows":5,"seatsPerRow":8,"vipRows":["D"],"coupleRows":["E"]}' | jq -r .id)
+
+MOVIE=$(curl -s -X POST $API/movies -H "$JSON" -H "Authorization: Bearer $ADMIN" \
+  -d '{"title":"The Example","description":"A story about cinema.","durationMinutes":120,"genre":"Drama",
+       "ageRating":"T13","releaseDate":"2026-05-01","posterUrl":"https://example.com/poster.jpg"}' | jq -r .id)
+
+# startsAt must be in the future
+SHOWTIME=$(curl -s -X POST $API/showtimes -H "$JSON" -H "Authorization: Bearer $ADMIN" \
+  -d "{\"movieId\":\"$MOVIE\",\"auditoriumId\":\"$AUDITORIUM\",\"startsAt\":\"2030-01-01T19:30:00+07:00\",\"basePrice\":100000}" |
+  jq -r .id)
+
+# 3. A customer registers and logs in (on a second run, registering returns 409 and the rest still works)
+curl -s -X POST $API/auth/register -H "$JSON" \
+  -d '{"email":"bob@example.com","password":"password123","fullName":"Bob"}' | jq -c .
+CUSTOMER=$(curl -s -X POST $API/auth/login -H "$JSON" \
+  -d '{"email":"bob@example.com","password":"password123"}' | jq -r .accessToken)
+
+# 4. The customer picks two available seats and holds them for 10 minutes
+SEATS=$(curl -s $API/showtimes/$SHOWTIME/seats | jq -c '[.[] | select(.status == "AVAILABLE") | .id][:2]')
+BOOKING=$(curl -s -X POST $API/bookings -H "$JSON" -H "Authorization: Bearer $CUSTOMER" \
+  -d "{\"showtimeId\":\"$SHOWTIME\",\"seatIds\":$SEATS}" | jq -r .id)
+
+# 5. The customer pays; the booking becomes CONFIRMED
+curl -s -X POST $API/bookings/$BOOKING/payment -H "Authorization: Bearer $CUSTOMER" | jq '{status, totalPrice}'
+
+# 6. The seat map now shows both seats as SOLD
+curl -s $API/showtimes/$SHOWTIME/seats | jq -c '.[] | select(.status != "AVAILABLE") | {label, status}'
+```
+
+Step 5 prints `"status": "CONFIRMED"` and a `totalPrice` of `200000`; step 6 prints `A1` and `A2` as `SOLD`. If a variable comes back `null`, rerun that `curl` without `| jq` to see the `problem+json` error.
 
 ## Testing
 
