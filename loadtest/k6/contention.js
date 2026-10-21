@@ -22,8 +22,6 @@ export const options = {
 	setupTimeout: '300s',
 	thresholds: {
 		...summaryOptions.thresholds,
-		checks: ['rate==1'],
-		'http_req_failed{phase:load}': ['rate==0'],
 		bookings_created: ['count>=1'],
 		booking_conflicts: ['count>=1'],
 		seat_conflicts: ['count>=1'],

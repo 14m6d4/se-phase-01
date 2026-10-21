@@ -16,11 +16,6 @@ const DURATION = __ENV.DURATION || '60s';
 export const options = {
 	...summaryOptions,
 	setupTimeout: '300s',
-	thresholds: {
-		...summaryOptions.thresholds,
-		checks: ['rate==1'],
-		'http_req_failed{phase:load}': ['rate==0'],
-	},
 	scenarios: {
 		book: {
 			executor: 'ramping-arrival-rate',

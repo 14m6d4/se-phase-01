@@ -21,6 +21,44 @@ def node(source):
     subprocess.run(["node", "--input-type=module", "-e", source], cwd=ROOT, check=True)
 
 
+def test_acceptance_thresholds():
+    # Dropping a shared threshold or replacing a scenario's thresholds must not
+    # let failed requests/checks or missed arrivals pass acceptance.
+    shared = (ROOT / "loadtest/k6/lib/summary.js").read_text()
+    shared = re.sub(r"^import .*$", "", shared, flags=re.MULTILINE)
+    for scenario in ("smoke", "browse", "book", "contention"):
+        source = (ROOT / f"loadtest/k6/{scenario}.js").read_text()
+        source = re.sub(r"^import .*$", "", source, flags=re.MULTILINE)
+        source = re.sub(r"^export \{.*\};$", "", source, flags=re.MULTILINE)
+        source = source.replace("export default function", "function iteration")
+        source = source.replace("export const ", "const ").replace("export function ", "function ")
+        node("""
+import assert from 'node:assert/strict';
+const __ENV = {};
+const summaryOptions = (() => {
+""" + shared.replace("export ", "") + """
+return summaryOptions;
+})();
+const LOAD = {};
+const http = { expectedStatuses: () => ({}) };
+const MAX_VUS = 200, BOOK_MAX_VUS = 12;
+class Counter {}
+""" + source + f"""
+function accepts(metric, values) {{
+    return (options.thresholds[metric] || []).every((expression) =>
+        new Function('rate', 'count', `return (${{expression}})`)(values.rate, values.count));
+}}
+for (const [metric, passing, failing] of [
+    ['checks', {{ rate: 1 }}, {{ rate: 0.99 }}],
+    ['http_req_failed{{phase:load}}', {{ rate: 0 }}, {{ rate: 0.01 }}],
+    ['dropped_iterations', {{ count: 0 }}, {{ count: 1 }}],
+]) {{
+    assert.equal(accepts(metric, passing), true, '{scenario}: healthy ' + metric);
+    assert.equal(accepts(metric, failing), false, '{scenario}: must reject ' + metric);
+}}
+""")
+
+
 def test_seat_slices():
     source = (ROOT / "loadtest/k6/lib/seat-allocation.js").read_text()
     node(source + """
@@ -558,6 +596,7 @@ def test_source_bundle_inputs():
 
 
 if __name__ == "__main__":
+    test_acceptance_thresholds()
     test_seat_slices()
     test_conflicts()
     test_browse_setup()
@@ -567,5 +606,5 @@ if __name__ == "__main__":
     test_contention_verifier()
     test_source_bundle_paths()
     test_source_bundle_inputs()
-    print("PASS  allocation; conflicts; browse; showtimes; notebook; SQL verifier; "
+    print("PASS  acceptance thresholds; allocation; conflicts; browse; showtimes; notebook; SQL verifier; "
           "Git fallback; bundle.py ZIP/directory round trips, deterministic hash, and path/symlink rejection")
