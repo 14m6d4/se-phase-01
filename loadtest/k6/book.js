@@ -54,7 +54,7 @@ export function setup() {
 	const seatSlices = partitionSlots(slots, BOOK_MAX_VUS);
 	const minSeats = Math.min(...seatSlices.map((slice) => slice.length));
 	if (minSeats < BOOK_MIN_SEATS_PER_VU) {
-		fail(`need ${BOOK_MIN_SEATS_PER_VU} unique Seats per VU for the default 4,000 iterations; found ${minSeats}`);
+		fail(`need ${BOOK_MIN_SEATS_PER_VU} unique Seats per VU; found ${minSeats}`);
 	}
 	return { tokens, seatSlices };
 }

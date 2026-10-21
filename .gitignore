@@ -40,3 +40,4 @@ build/
 
 ### Load test output ###
 loadtest/results/
+/source.zip

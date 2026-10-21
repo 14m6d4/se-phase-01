@@ -1,5 +1,6 @@
-"""Small assert checks for k6 allocation, Kaggle SQL, and source bundles."""
+"""Small assert checks for k6 allocation, contracts, Kaggle SQL, and source bundles."""
 import ast
+import glob
 import hashlib
 import json
 import os
@@ -7,6 +8,7 @@ import re
 import shutil
 import stat
 import subprocess
+import sys
 import tempfile
 import zipfile
 from pathlib import Path, PurePosixPath
@@ -15,9 +17,13 @@ from types import SimpleNamespace
 ROOT = Path(__file__).resolve().parents[1]
 
 
+def node(source):
+    subprocess.run(["node", "--input-type=module", "-e", source], cwd=ROOT, check=True)
+
+
 def test_seat_slices():
     source = (ROOT / "loadtest/k6/lib/seat-allocation.js").read_text()
-    check = source + """
+    node(source + """
 import assert from 'node:assert/strict';
 const all = Array.from({ length: 50_280 }, (_, i) => i);
 const slices = partitionSlots(all, BOOK_MAX_VUS);
@@ -25,8 +31,162 @@ assert.equal(slices.length, 12);
 assert.deepEqual(slices.map((slice) => slice.length), Array(12).fill(4_190));
 assert.deepEqual(slices.flat(), all);
 assert.ok(slices.every((slice) => slice.length >= BOOK_MIN_SEATS_PER_VU));
-"""
-    subprocess.run(["node", "--input-type=module", "-e", check], cwd=ROOT, check=True)
+""")
+
+
+def test_conflicts():
+    source = (ROOT / "loadtest/k6/lib/conflicts.js").read_text()
+    node(source + """
+import assert from 'node:assert/strict';
+const seat = '550e8400-e29b-41d4-a716-446655440000';
+const other = '11111111-1111-4111-8111-111111111111';
+const seatTaken = {
+	type: 'about:blank', title: 'Conflict', status: 409,
+	detail: 'Seat already taken: [550e8400-e29b-41d4-a716-446655440000]',
+	seatIds: ['550e8400-e29b-41d4-a716-446655440000'],
+};
+const pendingBooking = {
+	type: 'about:blank', title: 'Conflict', status: 409,
+	detail: 'Customer already has a Pending Booking 550e8400-e29b-41d4-a716-446655440000',
+};
+assert.equal(conflictReason(409, 'application/problem+json', seatTaken, seat), 'seat');
+assert.equal(conflictReason(409, 'APPLICATION/PROBLEM+JSON; charset=UTF-8', seatTaken, seat), 'seat');
+assert.equal(conflictReason(409, 'application/problem+json', pendingBooking, seat), 'pending_customer');
+assert.equal(conflictReason(409, 'application/problem+json', { ...seatTaken, seatIds: [other] }, seat), null);
+assert.equal(conflictReason(409, 'application/problem+json', { ...seatTaken, seatIds: [seat] }, other), null);
+assert.equal(conflictReason(409, 'application/problem+json', { ...pendingBooking, seatIds: [other] }, seat), null);
+assert.equal(conflictReason(409, 'application/problem+json', { status: 409, detail: 'Seat already taken' }, seat), null);
+assert.equal(conflictReason(409, 'application/problem+json', { status: 409, detail: 'unexpected' }, seat), null);
+assert.equal(conflictReason(409, 'application/problem+json', { status: 400, detail: 'Seat already taken' }, seat), null);
+assert.equal(conflictReason(200, 'application/problem+json', seatTaken, seat), null);
+assert.equal(conflictReason(409, undefined, seatTaken, seat), null);
+assert.equal(conflictReason(409, 'text/plain', seatTaken, seat), null);
+assert.equal(conflictReason(409, 'application/problem+jsonx', seatTaken, seat), null);
+assert.equal(conflictReason(409, 'application/problem', seatTaken, seat), null);
+assert.equal(conflictReason(409, 'application/problem+json;', seatTaken, seat), 'seat');
+assert.equal(conflictReason(409, 'application/problem+json; charset=', seatTaken, seat), 'seat');
+assert.equal(conflictReason(409, 'application/problem+json; profile="https://example.invalid/a;b"', seatTaken, seat), 'seat');
+assert.equal(conflictReason(409, 'Application/Problem+Json ; charset=UTF-8; profile="a;b"; x=y', seatTaken, seat), 'seat');
+assert.equal(conflictReason(409, 'application/problem+json', null, seat), null);
+assert.equal(conflictReason(409, 'application/problem+json', { status: 409, seatIds: seat }, seat), null);
+""")
+
+
+def test_browse_setup():
+    source = (ROOT / "loadtest/k6/browse.js").read_text()
+    source = re.sub(r"^import .*$", "", source, flags=re.MULTILINE)
+    source = source.replace("export { handleSummary };", "")
+    source = source.replace("export default function ({ date }) {", "function browseIteration({ date }) {")
+    source = source.replace("export const ", "const ").replace("export function ", "function ")
+    node("""
+import assert from 'node:assert/strict';
+const __ENV = {};
+const LOAD = { tags: { phase: 'load' } };
+const summaryOptions = { thresholds: {} };
+function handleSummary() { return {}; }
+function fail(message) { throw new Error(message); }
+function check(value, assertions) {
+	return Object.values(assertions).every((assertion) => assertion(value));
+}
+const start = Date.UTC(2026, 9, 20, 10, 0, 0);
+const expectedToday = new Date(start + 7 * 3600 * 1000).toISOString().slice(0, 10);
+const expectedTomorrow = new Date(start + (7 + 24) * 3600 * 1000).toISOString().slice(0, 10);
+const requests = [];
+const http = {
+	get(url, params) {
+		requests.push({ url, params });
+		if (url.includes('/seats')) {
+			return { status: 200, body: '', json: () => Array.from({ length: 120 }, () => ({})) };
+		}
+		const date = new URL(url).searchParams.get('date');
+		return { status: 200, body: '', json: () => (date === expectedTomorrow ? [{ id: 'showtime-1' }] : []) };
+	},
+};
+globalThis.__VU = 1;
+globalThis.__ITER = 0;
+""" + source + """
+Date.now = () => start;
+const setupData = setup();
+assert.deepEqual(setupData, { date: expectedTomorrow });
+assert.equal(requests.length, 2);
+assert.ok(requests.every((request) => request.params === undefined));
+const beforeIteration = requests.length;
+Date.now = () => start + 24 * 3600 * 1000;  // midnight may pass after setup
+browseIteration(setupData);
+const measured = requests.slice(beforeIteration);
+assert.equal(measured.length, 2);
+assert.equal(measured[0].params, LOAD);
+assert.equal(measured[1].params, LOAD);
+assert.ok(measured[0].url.endsWith(`date=${expectedTomorrow}`));
+assert.ok(measured[1].url.endsWith('/api/showtimes/showtime-1/seats'));
+assert.notEqual(expectedToday, expectedTomorrow);
+""")
+
+
+def test_showtimes_scan():
+    source = (ROOT / "loadtest/k6/lib/showtimes.js").read_text()
+    source = re.sub(r"^import .*$", "", source, flags=re.MULTILINE)
+    source = source.replace("export function ", "function ")
+    node("""
+import assert from 'node:assert/strict';
+const __ENV = {};
+let clock = Date.UTC(2026, 9, 20, 16, 59, 59);  // 23:59:59 on a VN-local date
+const start = clock;
+Date.now = () => clock;
+function fail(message) { throw new Error(message); }
+const urls = [];
+const http = {
+	get(url) {
+		urls.push(url);
+		clock += 1000;  // make a per-request Date.now() cross VN midnight
+		return { status: 200, body: '', json: () => [{ id: url }] };
+	},
+};
+""" + source + """
+const showtimes = seededShowtimes();
+const dates = urls.map((url) => new URL(url).searchParams.get('date'));
+const expected = Array.from({ length: 9 }, (_, day) =>
+	new Date(start + (7 + day * 24) * 3600 * 1000).toISOString().slice(0, 10));
+assert.deepEqual(dates, expected);
+assert.equal(new Set(dates).size, 9);
+assert.equal(showtimes.length, 9);
+""")
+
+
+def test_notebook_cells():
+    notebook = json.loads((ROOT / "loadtest/kaggle.ipynb").read_text())
+    ids = [cell.get("id") for cell in notebook["cells"]]
+    assert all(isinstance(cell_id, str) and re.fullmatch(r"[A-Za-z0-9_-]{1,64}", cell_id)
+               for cell_id in ids)
+    assert len(ids) == len(set(ids))
+    assert {"c04", "c06", "c08", "c10a", "c12"} <= set(ids)
+    seed = next(cell for cell in notebook["cells"] if cell.get("id") == "c10a")
+    assert any("loadtest/seed.sql" in line for line in seed["source"])
+    for cell in notebook["cells"]:
+        if cell["cell_type"] == "code":
+            ast.parse("".join(cell["source"]))
+
+
+def test_notebook_build_tail():
+    notebook = json.loads((ROOT / "loadtest/kaggle.ipynb").read_text())
+    cell = next(cell for cell in notebook["cells"] if cell.get("id") == "c08")
+    tree = ast.parse("".join(cell["source"]))
+    branch_index = next(i for i, node in enumerate(tree.body) if isinstance(node, ast.If)
+                        and isinstance(node.test, ast.Name) and node.test.id == "CODE_BUNDLE")
+    tail = ast.Module(body=tree.body[branch_index + 1:], type_ignores=[])
+    assert tail.body, "c08 lost the shared Maven build/JAR statements"
+    commands = []
+    times = iter([100.0, 107.0])
+    namespace = {
+        "SRC": Path("/tmp/source"),
+        "COMMIT": "0123456789abcdef" * 2 + "01234567",
+        "time": SimpleNamespace(time=lambda: next(times)),
+        "glob": SimpleNamespace(glob=lambda pattern: [pattern.replace("*", "0.0.1-SNAPSHOT")]),
+        "run": lambda command, **kwargs: commands.append((command, kwargs)) or "",
+    }
+    exec(compile(tail, "kaggle-c08-build", "exec"), namespace)
+    assert namespace["JAR"].endswith("cinema-0.0.1-SNAPSHOT.jar")
+    assert commands == [("./mvnw -B -q -Dmaven.test.skip=true package", {"cwd": Path("/tmp/source")})]
 
 
 def test_contention_verifier():
@@ -129,7 +289,7 @@ def test_source_bundle_inputs():
                   and isinstance(node.test, ast.Name) and node.test.id == "CODE_BUNDLE")
     setup = ast.Module(body=[*tree.body[:3], branch], type_ignores=[])
 
-    def load(bundle, destination):
+    def load(bundle, destination, input_root=None):
         zip_reads = []
         commands = []
 
@@ -142,12 +302,14 @@ def test_source_bundle_inputs():
             return "0123456789abcdef" * 2 + "01234567" if command == "git rev-parse HEAD" else ""
 
         namespace = {
-            "CODE_BUNDLE": str(bundle) if bundle is not None else None, "SRC": destination,
+            "CODE_BUNDLE": bundle, "SRC": destination,
             "hashlib": hashlib, "json": json, "os": os, "Path": Path,
             "PurePosixPath": PurePosixPath, "re": re, "shutil": shutil,
             "stat": stat, "zipfile": SimpleNamespace(ZipFile=open_zip),
             "zip_reads": zip_reads, "commands": commands, "run": run,
             "GITHUB_TOKEN": "test-token", "REPO": "owner/repo", "GIT_REF": "main",
+            "glob": SimpleNamespace(glob=lambda pattern, **kwargs: glob.glob(
+                pattern.replace("/kaggle/input", str(input_root)), **kwargs)),
         }
         exec(compile(setup, "notebook-c08-bundle-loader", "exec"), namespace)
         return namespace
@@ -172,17 +334,48 @@ def test_source_bundle_inputs():
                 path.chmod(0o755)
         return files
 
-    def make_zip(root, archive, extra=None):
-        with zipfile.ZipFile(archive, "w", zipfile.ZIP_DEFLATED) as output:
-            for path in sorted(root.rglob("*")):
-                if path.is_file() and not path.is_symlink():
-                    output.write(path, path.relative_to(root).as_posix())
-            if extra:
-                output.writestr(*extra)
+    def make_git_fixture(root, extra_tracked=()):
+        files = make_source(root)
+        (root / ".gitignore").write_text("ignored.txt\n")
+        (root / "ignored.txt").write_text("ignored\n")
+        (root / "src/New.java").write_text("class New {}\n")
+        (root / "loadtest/executable.sh").write_text("#!/bin/sh\n")
+        (root / "loadtest/executable.sh").chmod(0o755)
+        (root / "target/classes").mkdir(parents=True)
+        (root / "target/classes/App.class").write_bytes(b"class App {}\n")
+        (root / "secrets").mkdir()
+        (root / "secrets/token").write_text("secret\n")
+        (root / ".env").write_text("SECRET=1\n")
+        (root / "link").symlink_to(root / "pom.xml")
+        tracked = [".gitignore", ".mvn", "loadtest/seed.sql", "loadtest/report.py",
+                   "mvnw", "pom.xml", "src/Main.java"]
+        for name in extra_tracked:
+            path = root / name
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text("tracked placeholder\n")
+            tracked.append(name)
+        subprocess.run(["git", "init", "-q"], cwd=root, check=True)
+        subprocess.run(["git", "add", *tracked], cwd=root, check=True)
+        subprocess.run(["git", "-c", "user.name=Test", "-c", "user.email=test@example.invalid",
+                        "commit", "-qm", "fixture"], cwd=root, check=True)
+        commit = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=root, text=True).strip()
+        return files, commit
 
-    def expect_rejected(bundle, destination, message):
+    def append_to_copy(archive, destination, name, content, symlink=False):
+        shutil.copyfile(archive, destination)
+        with zipfile.ZipFile(destination, "a") as bundle:
+            if symlink:
+                info = zipfile.ZipInfo(name)
+                info.create_system = 3
+                info.external_attr = (stat.S_IFLNK | 0o777) << 16
+                bundle.writestr(info, content)
+            else:
+                bundle.writestr(name, content)
+        return destination
+
+    def expect_rejected(bundle, destination, message, input_root=None):
         try:
-            load(bundle, destination)
+            load(bundle, destination, input_root)
         except RuntimeError as error:
             assert message in str(error), str(error)
         else:
@@ -190,30 +383,78 @@ def test_source_bundle_inputs():
 
     with tempfile.TemporaryDirectory() as directory:
         temp = Path(directory)
-        expanded = temp / "dataset" / "source"
-        files = make_source(expanded)
-        from_directory = load(expanded, temp / "directory-checkout")
-        assert from_directory["COMMIT"] == "0123456789abcdef" * 2 + "01234567"
-        assert from_directory["SOURCE_PROVENANCE"] == f"full source snapshot based on {from_directory['COMMIT']}"
-        assert from_directory["CODE_BUNDLE_HASH_KIND"].startswith("expanded tree:")
-        assert from_directory["files"] == set(files)
-        assert (from_directory["SRC"] / "mvnw").stat().st_mode & 0o111
-        assert all((from_directory["SRC"] / name).read_bytes() == content for name, content in files.items())
-        assert from_directory["zip_reads"] == []
-        repeated = load(expanded, temp / "directory-checkout-repeat")
-        assert from_directory["CODE_BUNDLE_SHA256"] == repeated["CODE_BUNDLE_SHA256"]
+        fixture = temp / "fixture"
+        fixture.mkdir()
+        files, commit = make_git_fixture(fixture)
+        archive = fixture / "source.zip"
+        built = subprocess.run([sys.executable, str(ROOT / "loadtest/bundle.py"), "-o", str(archive)],
+                               cwd=fixture, check=True, text=True, capture_output=True)
+        assert "Wrote" in built.stdout
 
-        archive = temp / "source.zip"
-        make_zip(expanded, archive)
-        from_zip = load(archive, temp / "zip-checkout")
-        assert from_zip["COMMIT"] == from_directory["COMMIT"]
-        assert from_zip["SOURCE_PROVENANCE"] == from_directory["SOURCE_PROVENANCE"]
-        assert from_zip["files"] == from_directory["files"]
+        expected = set(files) | {".gitignore", "src/New.java", "loadtest/executable.sh"}
+        with zipfile.ZipFile(archive) as bundle:
+            names = bundle.namelist()
+            assert set(names) == expected
+            assert names.count("loadtest-bundle.json") == 1
+            manifest = json.loads(bundle.read("loadtest-bundle.json"))
+            assert manifest["sourceCommit"] == commit
+            assert manifest["snapshotMode"] == "working-tree"
+            assert "source.zip" not in names
+            assert not any(name.startswith(("target/", "secrets/")) or name == ".env"
+                           or name == "ignored.txt" or name == "link" for name in names)
+            assert (bundle.getinfo("mvnw").external_attr >> 16) & 0o111
+            assert (bundle.getinfo("loadtest/executable.sh").external_attr >> 16) & 0o111
+            assert not (bundle.getinfo("src/New.java").external_attr >> 16) & 0o111
+
+        notes = fixture / "notes.txt"
+        notes.write_bytes(b"untracked notes\n")
+        notes_bytes = notes.read_bytes()
+        for target in (fixture / "pom.xml", notes, archive):
+            before = target.read_bytes()
+            refused = subprocess.run([sys.executable, str(ROOT / "loadtest/bundle.py"),
+                                      "-o", str(target)], cwd=fixture, text=True, capture_output=True)
+            assert refused.returncode != 0
+            assert "already exists" in refused.stderr
+            assert target.read_bytes() == before
+
+        output_link = fixture / "output-link"
+        output_link.symlink_to(notes)
+        refused = subprocess.run([sys.executable, str(ROOT / "loadtest/bundle.py"),
+                                  "-o", str(output_link)], cwd=fixture, text=True, capture_output=True)
+        assert refused.returncode != 0 and "symlink" in refused.stderr
+        assert output_link.is_symlink() and notes.read_bytes() == notes_bytes
+
+        dangling_link = fixture / "dangling-link"
+        dangling_target = fixture / "dangling-target"
+        dangling_link.symlink_to(dangling_target)
+        refused = subprocess.run([sys.executable, str(ROOT / "loadtest/bundle.py"),
+                                  "-o", str(dangling_link)], cwd=fixture, text=True, capture_output=True)
+        assert refused.returncode != 0 and "symlink" in refused.stderr
+        assert dangling_link.is_symlink() and not dangling_target.exists()
+
+        from_zip = load(archive, temp / "bundle-zip-checkout")
+        assert from_zip["COMMIT"] == commit
+        assert from_zip["SOURCE_PROVENANCE"] == f"full source snapshot based on {commit}"
         assert from_zip["CODE_BUNDLE_HASH_KIND"] == "exact ZIP file bytes"
         assert from_zip["CODE_BUNDLE_SHA256"] == hashlib.sha256(archive.read_bytes()).hexdigest()
-        assert all((from_zip["SRC"] / name).read_bytes() == content for name, content in files.items())
+        assert from_zip["files"] == set(names)
         assert (from_zip["SRC"] / "mvnw").stat().st_mode & 0o111
-        assert from_zip["zip_reads"] == [archive]
+        assert (from_zip["SRC"] / "src/New.java").read_text() == "class New {}\n"
+
+        expanded = temp / "bundle-expanded"
+        with zipfile.ZipFile(archive) as bundle:
+            for info in bundle.infolist():
+                destination = expanded / info.filename
+                destination.parent.mkdir(parents=True, exist_ok=True)
+                destination.write_bytes(bundle.read(info))
+                destination.chmod(0o755 if (info.external_attr >> 16) & 0o111 else 0o644)
+        from_directory = load(expanded, temp / "bundle-directory-checkout")
+        assert from_directory["COMMIT"] == commit
+        assert from_directory["CODE_BUNDLE_HASH_KIND"].startswith("expanded tree:")
+        assert from_directory["files"] == set(names)
+        assert (from_directory["SRC"] / "loadtest/executable.sh").stat().st_mode & 0o111
+        repeated = load(expanded, temp / "bundle-directory-repeat")
+        assert from_directory["CODE_BUNDLE_SHA256"] == repeated["CODE_BUNDLE_SHA256"]
 
         git_path = load(None, temp / "git-checkout")
         assert git_path["SOURCE_PROVENANCE"] == f"Git ref main at {git_path['COMMIT']}"
@@ -228,6 +469,7 @@ def test_source_bundle_inputs():
         ]
 
         wrong_root = temp / "dataset"
+        wrong_root.mkdir()
         expect_rejected(wrong_root, temp / "wrong-root-checkout", "expanded source root")
 
         symlink_tree = temp / "symlink-source"
@@ -237,21 +479,93 @@ def test_source_bundle_inputs():
 
         for name, message in (("../escape", "Unsafe path"), (".env.local", "omit build output and secrets"),
                               ("secrets/token", "omit build output and secrets")):
-            bad_zip = temp / "unsafe.zip"
-            make_zip(expanded, bad_zip, (name, b"secret"))
+            bad_zip = append_to_copy(archive, temp / "unsafe.zip", name, b"secret")
             expect_rejected(bad_zip, temp / "unsafe-checkout", message)
 
-        symlink_zip = temp / "symlink.zip"
-        link = zipfile.ZipInfo("link")
-        link.create_system = 3
-        link.external_attr = (stat.S_IFLNK | 0o777) << 16
-        make_zip(expanded, symlink_zip, (link, b"../outside"))
+        symlink_zip = append_to_copy(archive, temp / "symlink.zip", "link", b"../outside", symlink=True)
         expect_rejected(symlink_zip, temp / "symlink-zip-checkout", "symlink or special file")
+
+        # A tracked path is still exported when its parent is replaced by a symlink;
+        # resolve() normally hides that from the final-component nofollow check.
+        leak_fixture = temp / "symlink-parent-fixture"
+        leak_fixture.mkdir()
+        make_git_fixture(leak_fixture, ("src/Legacy.java", "nested/inner/app.yml",
+                                        "nested/deep/settings.yml"))
+        for name in ("Main.java", "Legacy.java", "app.yml"):
+            (leak_fixture / "secrets" / name).write_text("INTERNAL_SECRET_CANARY\n")
+        external = temp / "external-secret-dir"
+        external.mkdir()
+        (external / "settings.yml").write_text("EXTERNAL_SECRET_CANARY\n")
+        shutil.rmtree(leak_fixture / "src")
+        (leak_fixture / "src").symlink_to(leak_fixture / "secrets")
+        shutil.rmtree(leak_fixture / "nested/inner")
+        (leak_fixture / "nested/inner").symlink_to(leak_fixture / "secrets")
+        shutil.rmtree(leak_fixture / "nested/deep")
+        (leak_fixture / "nested/deep").symlink_to(external)
+        replaced_archive = leak_fixture / "replaced.zip"
+        subprocess.run([sys.executable, str(ROOT / "loadtest/bundle.py"), "-o", str(replaced_archive)],
+                       cwd=leak_fixture, check=True, text=True, capture_output=True)
+        with zipfile.ZipFile(replaced_archive) as bundle:
+            replaced_names = bundle.namelist()
+            for alias in ("src/Main.java", "src/Legacy.java", "nested/inner/app.yml",
+                          "nested/deep/settings.yml"):
+                assert alias not in replaced_names
+            assert all(b"SECRET_CANARY" not in bundle.read(name) for name in replaced_names)
+            assert bundle.read("pom.xml") == b"<project/>"
+            assert (bundle.getinfo("mvnw").external_attr >> 16) & 0o111
+            assert (bundle.getinfo("loadtest/executable.sh").external_attr >> 16) & 0o111
+
+        auto_commit = "0123456789abcdef" * 2 + "01234567"
+        flat_mount = temp / "kaggle-input-flat"
+        flat_root = flat_mount / "dataset"
+        make_source(flat_root)
+        (flat_mount / "alias").symlink_to(flat_root, target_is_directory=True)
+        auto_flat = load("auto", temp / "auto-flat-checkout", flat_mount)
+        assert auto_flat["CODE_BUNDLE"] == "auto" and auto_flat["COMMIT"] == auto_commit
+        assert (auto_flat["SRC"] / "pom.xml").read_text() == "<project/>"
+
+        nested_mount = temp / "kaggle-input-nested"
+        make_source(nested_mount / "dataset" / "source")
+        auto_nested = load("auto", temp / "auto-nested-checkout", nested_mount)
+        assert auto_nested["COMMIT"] == auto_commit
+        assert (auto_nested["SRC"] / "loadtest/seed.sql").read_text() == "SELECT 1;\n"
+
+        empty_mount = temp / "kaggle-input-empty"
+        empty_mount.mkdir()
+        empty_destination = temp / "auto-empty-checkout"
+        expect_rejected("auto", empty_destination, "found 0", empty_mount)
+        assert not empty_destination.exists()
+
+        many_mount = temp / "kaggle-input-many"
+        make_source(many_mount / "one")
+        make_source(many_mount / "two" / "source")
+        many_destination = temp / "auto-many-checkout"
+        expect_rejected("auto", many_destination, "found 2", many_mount)
+        assert not many_destination.exists()
+
+        bad_mount = temp / "kaggle-input-bad"
+        make_source(bad_mount / "bad")
+        (bad_mount / "bad" / "loadtest-bundle.json").write_text(json.dumps({
+            "snapshotMode": "other", "sourceCommit": "0" * 40}))
+        expect_rejected("auto", temp / "auto-bad-checkout", "snapshotMode=working-tree", bad_mount)
+
+        unsafe_mount = temp / "kaggle-input-unsafe"
+        make_source(unsafe_mount / "unsafe")
+        (unsafe_mount / "unsafe" / "secrets").mkdir()
+        (unsafe_mount / "unsafe" / "secrets/token").write_text("secret\n")
+        expect_rejected("auto", temp / "auto-unsafe-checkout", "omit build output and secrets",
+                        unsafe_mount)
 
 
 if __name__ == "__main__":
     test_seat_slices()
+    test_conflicts()
+    test_browse_setup()
+    test_showtimes_scan()
+    test_notebook_cells()
+    test_notebook_build_tail()
     test_contention_verifier()
     test_source_bundle_paths()
     test_source_bundle_inputs()
-    print("PASS  allocation; SQL verifier; Git fallback; ZIP/directory bundles, deterministic hash, and path/symlink rejection")
+    print("PASS  allocation; conflicts; browse; showtimes; notebook; SQL verifier; "
+          "Git fallback; bundle.py ZIP/directory round trips, deterministic hash, and path/symlink rejection")

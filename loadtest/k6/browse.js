@@ -1,4 +1,4 @@
-// Browse scenario: anonymous Visitors browse the public catalogue and seat map.
+// Browse scenario: anonymous users browse the public catalogue and seat map.
 // No login: both endpoints are public, so no BCrypt is paid anywhere in the run.
 import http from 'k6/http';
 import { check, fail } from 'k6';
@@ -7,7 +7,7 @@ import { LOAD, handleSummary, summaryOptions } from './lib/summary.js';
 export { handleSummary };
 
 const BASE_URL = __ENV.BASE_URL || 'http://localhost:8080';
-// Target requests per second and how long to hold it; the notebook passes them with -e.
+// Target iterations per second and how long to hold it; the notebook passes them with -e.
 const RATE = Number(__ENV.RATE || 50);
 const DURATION = __ENV.DURATION || '60s';
 
@@ -44,9 +44,10 @@ function tomorrow() {
 // A `fail()` inside an iteration only logs a GoError but still exits 0, so the
 // empty-seed check must happen in setup(), where a thrown error exits 107.
 // This request is untagged (no LOAD), so it stays out of the measured numbers.
+// The selected date goes to the VUs, which never re-check the clock or fall back
+// to another date in the measured path.
 export function setup() {
-	preflightShowtimes();
-	return {};
+	return { date: preflightShowtimes() };
 }
 
 function preflightShowtimes() {
@@ -54,28 +55,20 @@ function preflightShowtimes() {
 	for (const date of [d, tomorrow()]) {
 		const r = http.get(`${BASE_URL}/api/showtimes?date=${date}`);
 		if (r.status !== 200) throw new Error(`GET /api/showtimes: HTTP ${r.status} ${r.body}`);
-		if (r.json().length > 0) return;
+		if (r.json().length > 0) return date;
 	}
 	throw new Error('no showtimes seeded for today or tomorrow');
 }
 
-export default function () {
-	// Seed data starts on tomorrow's VN date (it must be strictly future at seed
-	// time), so fall back to tomorrow when today has no showtimes.
-	let date = today();
-	let list = http.get(`${BASE_URL}/api/showtimes?date=${date}`, LOAD);
+export default function ({ date }) {
+	// Exactly two measured requests per iteration: one list, one seat map.
+	const list = http.get(`${BASE_URL}/api/showtimes?date=${date}`, LOAD);
 	const okList = check(list, { 'showtimes status is 200': (r) => r.status === 200 });
 	if (!okList) fail(`GET /api/showtimes: HTTP ${list.status} ${list.body}`);
-	if (list.json().length === 0) {
-		date = tomorrow();
-		list = http.get(`${BASE_URL}/api/showtimes?date=${date}`, LOAD);
-		check(list, { 'showtimes (tomorrow) status is 200': (r) => r.status === 200 });
-		if (list.status !== 200) fail(`GET /api/showtimes: HTTP ${list.status} ${list.body}`);
-	}
-	if (list.json().length === 0) fail('no showtimes seeded for today or tomorrow');
+	const showtimes = list.json();
+	if (showtimes.length === 0) fail(`no showtimes seeded for ${date}`);
 
 	// Each iteration opens one (deterministically spread) showtime's seat map.
-	const showtimes = list.json();
 	const showtime = showtimes[(__VU + __ITER) % showtimes.length];
 	const seats = http.get(`${BASE_URL}/api/showtimes/${showtime.id}/seats`, LOAD);
 	check(seats, {

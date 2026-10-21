@@ -3,6 +3,7 @@ import http from 'k6/http';
 import { check, fail } from 'k6';
 import { Counter } from 'k6/metrics';
 import { LOAD, handleSummary as sharedHandleSummary, summaryOptions } from './lib/summary.js';
+import { conflictReason } from './lib/conflicts.js';
 import { loginCustomers, MAX_VUS } from './lib/customers.js';
 import { seededShowtimes } from './lib/showtimes.js';
 
@@ -74,17 +75,14 @@ function validBooking(res, showtimeId, seatId) {
 	}
 }
 
-function conflictReason(res) {
-	if (res.status !== 409) return null;
+function classifyConflict(res, seatId) {
+	let problem = null;
 	try {
-		if (!res.headers['Content-Type'].includes('application/problem+json') || res.json('status') !== 409) return null;
-		const detail = res.json('detail');
-		if (detail === 'Seat already taken') return 'seat';
-		if (typeof detail === 'string' && detail.startsWith('Customer already has a Pending Booking')) return 'pending_customer';
+		problem = res.json();
 	} catch (_) {
-		return null;
+		// A 409 without a problem body is unexpected and fails the check below.
 	}
-	return null;
+	return conflictReason(res.status, res.headers['Content-Type'], problem, seatId);
 }
 
 export default function ({ tokens, showtimeId, seatIds }) {
@@ -102,7 +100,7 @@ export default function ({ tokens, showtimeId, seatIds }) {
 			validBooking(response, showtimeId, seatId) });
 		if (!ok) fail(`invalid 201 response for Showtime ${showtimeId}, Seat ${seatId}: ${res.body}`);
 	} else if (res.status === 409) {
-		const reason = conflictReason(res);
+		const reason = classifyConflict(res, seatId);
 		const ok = check(res, { '409 is a seat or pending-Customer conflict': () => reason !== null });
 		if (!ok) fail(`unexpected 409 reason: ${res.body}`);
 		bookingConflicts.add(1);

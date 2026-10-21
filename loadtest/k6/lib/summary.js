@@ -6,7 +6,7 @@ import { textSummary } from 'https://jslib.k6.io/k6-summary/0.1.0/index.js';
 // k6 does not create this directory; whoever runs k6 must.
 const RESULTS_DIR = __ENV.RESULTS_DIR || 'loadtest/results';
 
-// Tags the measured requests, so setup's logins (BCrypt, 409 on re-runs) stay out of the numbers.
+// Tags the measured requests, so setup's logins (BCrypt) stay out of the numbers.
 export const LOAD = { tags: { phase: 'load' } };
 
 export const summaryOptions = {
