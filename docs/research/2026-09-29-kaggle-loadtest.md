@@ -5,7 +5,7 @@ Primary sources only; anything not confirmed by one is marked **UNVERIFIED**. Th
 
 ## First Kaggle run (2026-09-29)
 
-Smoke scenario at `feat/7-kaggle-loadtest-harness` (`69ba0fc`), `RATE` 50, `HOLD` 60s, run with **Save & Run All**. The notebook ran top to bottom without manual steps and produced `app.log`, `env.txt` and `summary.json`.
+Smoke scenario at `feat/7-kaggle-loadtest-harness` (`69ba0fc`), `RATE` 50, hold duration 60s (`HOLD` at the time; the parameter is now `DURATION`), run with **Save & Run All**. The notebook ran top to bottom without manual steps and produced `app.log`, `env.txt` and `summary.json`.
 
 - **The session runs Ubuntu 22.04 (jammy), not 24.04.** The JDK build is `21.0.12.1+1-1-22.04.4-Ubuntu` and PostgreSQL is `14.24-0ubuntu0.22.04.1`. The registry image read in section 1 is not what Kaggle serves (or no longer is). apt gives **PostgreSQL 14**, not 16. `btree_gist` has been trusted since PostgreSQL 13, so migration V5 still succeeded as the `cinema` role, and the notebook needed no change.
 - **Hardware:** 4 vCPUs, Intel Xeon @ 2.20GHz (family 6, model 79, i.e. Broadwell) under KVM, 2 cores × 2 threads; 31 GiB RAM, no swap.
