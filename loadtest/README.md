@@ -13,7 +13,7 @@ An iteration is one workflow. A virtual user (VU) is a k6 worker.
 | `book` | Hold one Seat, pay | 2 |
 | `contention` | Try to hold one of the same 10 Seats | 1 |
 
-`SCENARIO="all"` runs browse, book and contention in order. Setup requests, including login, are excluded from measured requests.
+`SCENARIO="all"` runs smoke, browse, book and contention in order. Setup requests, including login, are excluded from measured requests.
 
 ## Run locally
 
@@ -22,7 +22,7 @@ Start the service and PostgreSQL using the main README. Install the k6 version p
 **Use a fresh test database.** Run the seed once, after the service is healthy and Flyway has applied the migrations:
 
 ```bash
-psql "<your postgres url for the cinema database>" -f loadtest/seed.sql
+psql -v ON_ERROR_STOP=1 "<your postgres url for the cinema database>" -f loadtest/seed.sql
 mkdir -p loadtest/results
 k6 run -e RATE=20 -e DURATION=10s loadtest/k6/browse.js
 python3 loadtest/report.py
@@ -56,15 +56,15 @@ Every scenario ramps up for 30s, holds `RATE` iterations/s for `DURATION`, then 
 
 Latency measures individual requests; a booking workflow takes two. RPS averages the requests over this run and does not measure maximum capacity. Check hardware and runtime settings in `env.txt` when comparing runs.
 
-A run passes when all response checks pass, no measured HTTP request fails unexpectedly and no iterations are dropped. Contention also needs a successful booking, a seat conflict and a passing SQL check. The notebook reports threshold failures after all selected scenarios finish. The latency and error limits printed by `report.py` are advisory.
+k6 passes when all response checks pass, no measured HTTP request fails unexpectedly and no iterations are dropped. Contention also needs a successful booking and a seat conflict. The notebook runs SQL verification automatically; a local k6 run checks HTTP responses only. The notebook reports threshold failures after all selected scenarios finish. The latency and error limits printed by `report.py` are advisory.
 
 | Output | Contents |
 |---|---|
-| `<scenario>/summary.json` | Metrics and threshold results |
-| `contention/contention.json` | Tested Showtime |
-| `contention-verification.txt` | HTTP counts versus SQL rows, duplicate check |
-| `env.txt` | Source identity, hardware, JVM, PostgreSQL and pool settings |
-| `app.log` | Service log |
+| `<scenario>/summary.json` | Metrics and threshold results; local k6 writes `summary.json` directly unless `RESULTS_DIR` is set |
+| `contention/contention.json` | Tested Showtime; local k6 writes `contention.json` directly unless `RESULTS_DIR` is set |
+| `contention-verification.txt` | Notebook only: HTTP counts versus SQL rows, duplicate check |
+| `env.txt` | Notebook only: source identity, hardware, JVM, PostgreSQL and pool settings |
+| `app.log` | Service log saved by the notebook |
 
 Kaggle saves these under `results/`; local scripts default to `loadtest/results/`. `summary.json` at the output root copies the last scenario only. **Keep reports and raw outputs local; do not commit them.**
 
@@ -74,7 +74,7 @@ Kaggle saves these under `results/`; local scripts default to `loadtest/results/
 
 - Browse chooses today or tomorrow, whichever first has Showtimes. Setup fails if both are empty; seat maps must contain 120 Seats.
 - Book uses 12 Customers and separate Seat allocations to avoid conflicts. One Showtime is reserved for contention; the remaining 50,280 Showtime/Seat pairs give each VU 4,190 choices. Longer or higher-rate runs can exhaust them. The 12-VU cap is an allocation limit.
-- Contention logs in 200 Customers and selects 10 available Seats. It counts seat conflicts separately from rejections because a Customer already has a Pending Booking. SQL must match successful bookings to stored Seats with no duplicates. It does not require all 10 Seats to be booked or synchronise a simultaneous race.
+- Contention logs in 200 Customers and selects 10 available Seats. It counts seat conflicts separately from rejections because a Customer already has a Pending Booking. The notebook's SQL check must match successful bookings to stored Seats with no duplicates. It does not require all 10 Seats to be booked or synchronise a simultaneous race.
 
 ## Source bundle
 

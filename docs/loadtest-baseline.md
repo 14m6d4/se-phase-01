@@ -1,61 +1,48 @@
 # Kaggle load-test baseline
 
-Kaggle CPU run, 2026-10-21: 50 iterations/s held for 60s. No unexpected HTTP failures or dropped iterations. Contention created 10 bookings; SQL found 10 booked-seat rows and no duplicates.
+The 2026-10-22 run completed all four scenarios with 100% passing checks, no unexpected HTTP failures and no dropped iterations. SQL confirmed 10 bookings for 10 distinct Seats.
 
 Run instructions: [load-test guide](../loadtest/README.md).
 
-## Run configuration
+## Configuration
 
 | Setting | Value |
 |---|---|
-| Run time | 2026-10-21 01:37:01 UTC |
-| Scenarios | browse, book, contention, run sequentially |
-| Target rate | 50 workflow iterations/s during the hold stage |
-| Duration | 30s ramp-up, 60s hold, 10s ramp-down per scenario |
-| Load generator | k6 v2.3.0 |
-| Platform | Kaggle CPU notebook; service, PostgreSQL and k6 share the machine |
+| Code commit | `6d07b393e5b0b482cb0e832b54befeda0652946f` |
+| Report timestamp | 2026-10-22 04:09:58 UTC |
+| Scenarios | smoke, browse, book, contention, in order |
+| Target rate | 50 iterations/s |
+| Duration per scenario | 30s ramp-up, 60s hold, 10s ramp-down |
+| CPU | 4 vCPUs, Intel Xeon @ 2.20 GHz |
+| RAM | 31 GiB |
+| Java | OpenJDK 21.0.12, G1 GC, no JVM flags |
+| PostgreSQL | 16.15; max connections: 100 |
+| Hikari pool | Maximum 10 connections |
+| k6 | v2.3.0 |
 
-The exact source snapshot and raw outputs for this run are not included in the repository. To take a new measurement, follow the load-test guide and save the generated `env.txt` alongside the results.
+The service, PostgreSQL and k6 shared the Kaggle CPU notebook. The run tested the working-tree changes later committed as `6d07b39`, on top of `54b5b06`. Only documentation differs from that code commit. Raw outputs are not committed.
 
 ## Results
 
 | Scenario | Measured requests | Iterations | Run-average RPS | p50 (ms) | p95 (ms) | p99 (ms) | Unexpected HTTP errors | Dropped iterations |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|
-| browse | 7,998 | 3,999 | 79.86 | 3.68 | 7.27 | 12.61 | 0.00% | 0 |
-| book | 7,998 | 3,999 | 78.23 | 7.88 | 11.31 | 14.85 | 0.00% | 0 |
-| contention | 3,999 | 3,999 | 37.06 | 7.83 | 9.35 | 10.84 | 0.00% | 0 |
+| smoke | 3,999 | 3,999 | 36.58 | 3.03 | 5.40 | 7.01 | 0.00% | 0 |
+| browse | 7,998 | 3,999 | 79.90 | 3.51 | 5.75 | 9.09 | 0.00% | 0 |
+| book | 7,998 | 3,999 | 78.34 | 7.98 | 11.47 | 15.75 | 0.00% | 0 |
+| contention | 3,999 | 3,999 | 37.00 | 9.09 | 11.54 | 12.99 | 0.00% | 0 |
 
-All recorded thresholds passed.
+All scenarios exited 0 and passed the enforced thresholds: all response checks passed, no measured HTTP request failed unexpectedly and no iterations were dropped. The latency limits printed by `report.py` remain advisory.
 
-### How to interpret the numbers
+RPS includes setup and both ramps in elapsed time. Browse and book each make two measured requests per iteration; smoke and contention make one. Latency is per HTTP request, so book's p95 of 11.47 ms does not measure the combined hold-and-pay workflow. These results cover the configured load, not maximum capacity.
 
-- An iteration runs one workflow. Browse lists Showtimes and opens a seat map; book holds a Seat and pays. Each makes two requests, while contention makes one booking attempt.
-- RPS is the measured request count divided by elapsed time, including setup and ramps. It differs from the rate during the hold stage.
-- p95 means 95% of individual HTTP requests completed within this duration. Book's 11.31 ms applies to each request, not the combined hold-and-pay workflow.
-- Error rate counts unexpected HTTP outcomes. Contention expects valid `409` responses, so it can record zero errors even when booking attempts are rejected.
+## Contention
 
-In raw summaries, read `http_req_failed{phase:load}.values.rate`. Its `fails` count records false samples, meaning requests that did not fail.
+Of 3,999 booking attempts:
 
-## Contention outcome
+- 10 returned HTTP 201.
+- 3,244 returned a seat conflict.
+- 745 returned a conflict because the Customer already had a Pending Booking.
 
-Of 3,999 attempts:
+SQL found 10 booked-seat rows for 10 distinct Seats, matching the successful responses. Expected HTTP 409 responses passed the body checks and did not count as HTTP failures.
 
-- 10 returned HTTP 201, each creating a one-Seat Pending Booking.
-- 3,244 returned a seat conflict because the requested Seat was already taken.
-- 745 returned a pending-Customer conflict because that Customer already had a live Pending Booking.
-
-SQL matched 10 successful responses to 10 `booked_seat` rows with no duplicates. The verifier does not require 10 successes or simultaneous attempts on every Seat.
-
-## What PASS meant in this run
-
-This run used the thresholds below, before PR #54. All scenarios exited 0, with `ok: true` in the saved `metrics.<metric>.thresholds` entries.
-
-| Scenario | Enforced conditions in this historical run |
-|---|---|
-| browse | Generic metric-export thresholds only; they did not reject failed requests or checks |
-| book | All response checks passed; zero unexpected measured HTTP failures |
-| contention | Same response-check and HTTP-failure rules as book; at least one booking, booking conflict and seat conflict |
-
-Zero drops was measured but not enforced. Current scripts require all checks to pass, zero unexpected HTTP failures and zero drops.
-
-`report.py` latency checks are advisory. Kaggle skipped Maven tests; a separate local `./mvnw verify` recorded 127 tests with no failures, errors or skips.
+The verifier requires at least one booking and one seat conflict, not exactly 10 successes. This scenario does not synchronise requests into a simultaneous race.
