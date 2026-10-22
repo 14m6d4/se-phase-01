@@ -1,50 +1,61 @@
 # Kaggle load-test baseline
 
-**Status: accepted.**
+Kaggle CPU run, 2026-10-21: 50 iterations/s held for 60s. No unexpected HTTP failures or dropped iterations. Contention created 10 bookings; SQL found 10 booked-seat rows and no duplicates.
 
-**Scope:** this run used a working-tree snapshot based on `01a71f748a18a4bd552cb44429c1b41820d8e79d`, not a clean checkout of that commit, and the notebook's native `CODE_BUNDLE="auto"` selected the attached source snapshot.
+Run instructions: [load-test guide](../loadtest/README.md).
 
-## Run record
+## Run configuration
 
-- Run: 2026-10-21 01:37:01 UTC; [Kaggle kernel version 5](https://www.kaggle.com/code/tunichdi/se-phase-01-issue19-baseline/versions/5), using private source [dataset version 5](https://www.kaggle.com/datasets/tunichdi/se-phase-01-issue19-source/versions/5). These private artifacts require access. Reproducing this run requires the versioned source snapshot below, not a checkout of its base Git commit.
-- Configuration: `SCENARIO=all`, `RATE=50` iterations/s, `DURATION=60s`, 30s ramp-up and 10s ramp-down; k6 v2.3.0.
-- Source: **working-tree snapshot based on `01a71f748a18a4bd552cb44429c1b41820d8e79d`, including the Issue #46 fixes that were uncommitted at run time; not a clean checkout of that commit.** Manifest: `{"snapshotMode":"working-tree","sourceCommit":"01a71f748a18a4bd552cb44429c1b41820d8e79d"}`.
-- Source artifact: ZIP byte SHA-256 `32db0cd0fea7a368eba20d3d53e5275cf2bbe1190c4cdf525dc119e278896ace`; full source-content fingerprint `a4ea57b28497febfd3126a6cd44cadcde22f98db8d03f405c56cc32cf401fcc1` over all 161 files (160 source files plus the manifest). The fingerprint hashes sorted relative names as UTF-8 + NUL, followed by each file's 8-byte big-endian length and content, ignoring executable flags.
-- The staged Parameters cell used `CODE_BUNDLE="auto"` to select the single attached source root below `/kaggle/input`; the notebook build cell (`c08`) then used its normal strict loader. The repository notebook still defaults to `CODE_BUNDLE = None`.
-- Build-cell expanded-tree hashes: `43c4012905d87e5e37dc4a6d9664189aacf73b0c88df654b16d8a392e7ea6ca9` as actually mounted; `ead55032698317236dcc133d4bc733966401c2dce13515abb1d3ce61b22bd37f` using ZIP entry modes. The mount lost the `mvnw` executable bit, so only the actual value is in `results/env.txt`; the build cell restores that bit after hashing. Tree hashes cover sorted relative paths, executable flags, lengths and bytes, and are not ZIP archive hashes.
-- Runtime environment (CPU, OS packages, Java, PostgreSQL, pool) is recorded in `results/env.txt`; it is not copied into this document. The Kaggle JAR build used `-Dmaven.test.skip=true`, so this is not a full Maven test result. A separate local `./mvnw verify` run passed 127 tests with 0 failures/errors/skips.
+| Setting | Value |
+|---|---|
+| Run time | 2026-10-21 01:37:01 UTC |
+| Scenarios | browse, book, contention, run sequentially |
+| Target rate | 50 workflow iterations/s during the hold stage |
+| Duration | 30s ramp-up, 60s hold, 10s ramp-down per scenario |
+| Load generator | k6 v2.3.0 |
+| Platform | Kaggle CPU notebook; service, PostgreSQL and k6 share the machine |
 
-| Scenario | Measured requests | Iterations | RPS | p50 (ms) | p95 (ms) | p99 (ms) | Error rate | Dropped iterations | k6 thresholds |
-|---|---:|---:|---:|---:|---:|---:|---:|---:|---|
-| browse | 7,998 | 3,999 | 79.86 | 3.68 | 7.27 | 12.61 | 0.00% | 0 | PASS |
-| book | 7,998 | 3,999 | 78.23 | 7.88 | 11.31 | 14.85 | 0.00% | 0 | PASS |
-| contention | 3,999 | 3,999 | 37.06 | 7.83 | 9.35 | 10.84 | 0.00% | 0 | PASS |
+The exact source snapshot and raw outputs for this run are not included in the repository. To take a new measurement, follow the load-test guide and save the generated `env.txt` alongside the results.
 
-Measurements are from the actual Kaggle summaries, not local runs. Error rate is `http_req_failed{phase:load}.values.rate`; zero is good. k6's `Rate` metric counts false samples in `fails`, so `fails` equaling the request count does **not** mean those HTTP requests failed. Browse made exactly 2 measured requests per iteration; book also made 2; contention made 1. Every selected scenario ran 3,999 iterations.
+## Results
 
-## Contention verification
+| Scenario | Measured requests | Iterations | Run-average RPS | p50 (ms) | p95 (ms) | p99 (ms) | Unexpected HTTP errors | Dropped iterations |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| browse | 7,998 | 3,999 | 79.86 | 3.68 | 7.27 | 12.61 | 0.00% | 0 |
+| book | 7,998 | 3,999 | 78.23 | 7.88 | 11.31 | 14.85 | 0.00% | 0 |
+| contention | 3,999 | 3,999 | 37.06 | 7.83 | 9.35 | 10.84 | 0.00% | 0 |
 
-- 10 bookings returned HTTP 201; 3,989 expected HTTP 409 conflicts: 3,244 seat conflicts and 745 pending-booking conflicts. These are separate causes; the latter is the per-Customer pending-booking rule.
-- SQL verifier: **PASS**; the 10 bookings matched 10 `booked_seat` rows and duplicate-seat rows were 0.
+All recorded thresholds passed.
 
-## Thresholds
+### How to interpret the numbers
 
-Each selected scenario exited 0 and saved its threshold results in `summary.json` under `metrics.<metric>.thresholds`; every recorded threshold has `ok: true`. Browse records only the phase-filtered generic thresholds `http_reqs{phase:load} count>=0`, `http_req_failed{phase:load} rate>=0`, and `http_req_duration{phase:load} max>=0`; these are not latency SLAs. Book enforces `checks rate==1` and `http_req_failed{phase:load} rate==0`. Contention enforces the same checks and zero-failure requirement, plus non-zero `bookings_created`, `booking_conflicts`, and `seat_conflicts`. The `report.py` lines such as `p95 < 500 ms` are advisory output, not k6 thresholds.
+- An iteration runs one workflow. Browse lists Showtimes and opens a seat map; book holds a Seat and pays. Each makes two requests, while contention makes one booking attempt.
+- RPS is the measured request count divided by elapsed time, including setup and ramps. It differs from the rate during the hold stage.
+- p95 means 95% of individual HTTP requests completed within this duration. Book's 11.31 ms applies to each request, not the combined hold-and-pay workflow.
+- Error rate counts unexpected HTTP outcomes. Contention expects valid `409` responses, so it can record zero errors even when booking attempts are rejected.
 
-## Evidence
+In raw summaries, read `http_req_failed{phase:load}.values.rate`. Its `fails` count records false samples, meaning requests that did not fail.
 
-Artifacts are referenced relative to the kernel version's output:
+## Contention outcome
 
-- `results/browse/summary.json`
-- `results/book/summary.json`
-- `results/contention/summary.json`
-- `results/contention/contention.json`
-- `results/contention-verification.txt`
-- `results/env.txt`
-- `results/app.log`
+Of 3,999 attempts:
 
-The recorded outputs were downloaded immediately after this run with the Kaggle CLI 2.2.4 base kernel reference. `kernels output` selects only the latest version: once another version exists, use the pinned version page's Output tab rather than treating latest output as this run. The versioned dataset and kernel pages above are the durable private references.
+- 10 returned HTTP 201, each creating a one-Seat Pending Booking.
+- 3,244 returned a seat conflict because the requested Seat was already taken.
+- 745 returned a pending-Customer conflict because that Customer already had a live Pending Booking.
 
-## Historical note
+SQL matched 10 successful responses to 10 `booked_seat` rows with no duplicates. The verifier does not require 10 successes or simultaneous attempts on every Seat.
 
-Kernel version 4 with dataset version 4 (2026-10-20) was the previous accepted baseline. It used a custom staged source locator rather than native `auto`; its measurements are not mixed into this table. Kernel v2 (2026-09-30, source `b763b4b`) is also not comparable: it predates the current `seatIds` contention wire and its browse scenario made 3 requests per iteration. Those old measurements are historical only.
+## What PASS meant in this run
+
+This run used the thresholds below, before PR #54. All scenarios exited 0, with `ok: true` in the saved `metrics.<metric>.thresholds` entries.
+
+| Scenario | Enforced conditions in this historical run |
+|---|---|
+| browse | Generic metric-export thresholds only; they did not reject failed requests or checks |
+| book | All response checks passed; zero unexpected measured HTTP failures |
+| contention | Same response-check and HTTP-failure rules as book; at least one booking, booking conflict and seat conflict |
+
+Zero drops was measured but not enforced. Current scripts require all checks to pass, zero unexpected HTTP failures and zero drops.
+
+`report.py` latency checks are advisory. Kaggle skipped Maven tests; a separate local `./mvnw verify` recorded 127 tests with no failures, errors or skips.
