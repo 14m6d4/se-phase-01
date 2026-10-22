@@ -205,6 +205,22 @@ def test_notebook_cells():
             ast.parse("".join(cell["source"]))
 
 
+def test_notebook_scenarios():
+    notebook = json.loads((ROOT / "loadtest/kaggle.ipynb").read_text())
+    source = "".join(next(cell for cell in notebook["cells"] if cell.get("id") == "c02")["source"])
+    expected = ["smoke", "browse", "book", "contention"]
+    assert set(expected) == {path.stem for path in (ROOT / "loadtest/k6").glob("*.js")}
+    for selected in ("all", *expected, "unknown"):
+        parameters = re.sub(r'^SCENARIO = .*$', f'SCENARIO = {selected!r}', source, flags=re.MULTILINE)
+        result = subprocess.run([sys.executable, "-c", parameters + "\nprint(RUN_SCENARIOS)"],
+                                text=True, capture_output=True)
+        if selected == "unknown":
+            assert result.returncode != 0 and "Unknown SCENARIO" in result.stderr
+        else:
+            assert result.returncode == 0, result.stderr
+            assert ast.literal_eval(result.stdout.strip()) == (expected if selected == "all" else [selected])
+
+
 def test_notebook_build_tail():
     notebook = json.loads((ROOT / "loadtest/kaggle.ipynb").read_text())
     cell = next(cell for cell in notebook["cells"] if cell.get("id") == "c08")
@@ -602,6 +618,7 @@ if __name__ == "__main__":
     test_browse_setup()
     test_showtimes_scan()
     test_notebook_cells()
+    test_notebook_scenarios()
     test_notebook_build_tail()
     test_contention_verifier()
     test_source_bundle_paths()
