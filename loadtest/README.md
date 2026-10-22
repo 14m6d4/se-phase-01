@@ -151,9 +151,9 @@ The environment cell stops with an explanation if internet is off or (on the Git
 
 - Only requests tagged `phase:load` are reported. Setup's seeded-Customer logins (BCrypt) are excluded.
 - **RPS** is measured HTTP requests per second averaged over the whole run, ramps and setup included; it differs from the configured iteration rate when a scenario makes multiple requests per iteration.
-- **Dropped iterations > 0** means k6 ran out of VUs (`maxVUs`) and did not reach the target rate.
+- **Dropped iterations > 0** means k6 could not start every scheduled iteration within the VU limit. Every scenario fails acceptance when any iterations are dropped; lowering the rate is a different test, not a passing result for the original rate.
 - The service and k6 share the run's CPUs. Compare runs against the `results/env.txt` artifact from the same environment; do not assume two runs had identical hardware.
-- Scenario threshold failures are reported after all selected scenarios have run. Book requires zero failed measured requests and valid hold/payment responses. Contention treats only `201` and `409` as expected and fails on malformed responses or unexpected HTTP statuses.
+- Scenario threshold failures are reported after all selected scenarios have run. Every scenario requires all checks to pass, zero unexpected measured HTTP failures and zero dropped iterations. Book checks the hold/payment responses. Contention treats only `201` and `409` as expected and fails on malformed responses or unexpected HTTP statuses. The latency limits printed by `report.py` remain advisory.
 
 The notebook seeds the database automatically after the service is healthy.
 
