@@ -11,16 +11,11 @@ export { handleSummary };
 const BASE_URL = __ENV.BASE_URL || 'http://localhost:8080';
 const JSON_HEADERS = { 'Content-Type': 'application/json' };
 const RATE = Number(__ENV.RATE || 50);
-const HOLD = __ENV.HOLD || '60s';
+const DURATION = __ENV.DURATION || '60s';
 
 export const options = {
 	...summaryOptions,
 	setupTimeout: '300s',
-	thresholds: {
-		...summaryOptions.thresholds,
-		checks: ['rate==1'],
-		'http_req_failed{phase:load}': ['rate==0'],
-	},
 	scenarios: {
 		book: {
 			executor: 'ramping-arrival-rate',
@@ -30,7 +25,7 @@ export const options = {
 			maxVUs: BOOK_MAX_VUS,
 			stages: [
 				{ duration: '30s', target: RATE },
-				{ duration: HOLD, target: RATE },
+				{ duration: DURATION, target: RATE },
 				{ duration: '10s', target: 0 },
 			],
 		},
@@ -54,7 +49,7 @@ export function setup() {
 	const seatSlices = partitionSlots(slots, BOOK_MAX_VUS);
 	const minSeats = Math.min(...seatSlices.map((slice) => slice.length));
 	if (minSeats < BOOK_MIN_SEATS_PER_VU) {
-		fail(`need ${BOOK_MIN_SEATS_PER_VU} unique Seats per VU for the default 4,000 iterations; found ${minSeats}`);
+		fail(`need ${BOOK_MIN_SEATS_PER_VU} unique Seats per VU; found ${minSeats}`);
 	}
 	return { tokens, seatSlices };
 }

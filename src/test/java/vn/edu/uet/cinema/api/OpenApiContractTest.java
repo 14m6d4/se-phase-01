@@ -104,6 +104,11 @@ class OpenApiContractTest {
 	BookingService bookings;
 
 	@Test
+	void yamlSpecificationIsPublic() throws Exception {
+		mvc.perform(get("/v3/api-docs.yaml")).andExpect(status().isOk());
+	}
+
+	@Test
 	void generatedOpenApiCoversAllOperationsErrorsSecurityAndBounds() throws Exception {
 		String json = mvc.perform(get("/v3/api-docs")).andExpect(status().isOk())
 			.andReturn().getResponse().getContentAsString();

@@ -2,7 +2,7 @@
 -- 20 movies, 7 future days of showtimes and 2,000 CUSTOMER accounts that all
 -- share one prehashed bcrypt password.
 --
--- Run AFTER the service has started (Flyway must have applied V1..V5) and only
+-- Run AFTER the service has started (Flyway must have applied all migrations) and only
 -- against a fresh database: the inserts are not idempotent.
 --
 -- Shared credentials: loadtest-{1..2000}@loadtest.local / loadtest-password
