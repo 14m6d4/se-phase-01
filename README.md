@@ -1,91 +1,131 @@
-# Cinema Booking API
+<div align="center">
+
+# 🎬 Cinema Booking API
+
+[![Tech stack](https://skillicons.dev/icons?i=java,spring,hibernate,postgres,maven,docker,githubactions)](#-tech-stack)
 
 [![CI](https://github.com/14m6d4/se-phase-01/actions/workflows/ci.yml/badge.svg)](https://github.com/14m6d4/se-phase-01/actions/workflows/ci.yml)
-![Java 21](https://img.shields.io/badge/Java-21-007396?logo=openjdk&logoColor=white)
-![Spring Boot 4.1](https://img.shields.io/badge/Spring%20Boot-4.1-6DB33F?logo=springboot&logoColor=white)
-![PostgreSQL 17](https://img.shields.io/badge/PostgreSQL-17-4169E1?logo=postgresql&logoColor=white)
+[![OpenAPI 3.1](https://img.shields.io/badge/OpenAPI-3.1-6BA539?logo=openapiinitiative&logoColor=white)](docs/openapi.json)
+[![Docker image on GHCR](https://img.shields.io/badge/image-ghcr.io-2496ED?logo=docker&logoColor=white)](https://github.com/14m6d4/se-phase-01/pkgs/container/se-phase-01)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-A REST backend for a cinema chain: admins run the catalogue (cinemas, auditoriums, movies, showtimes), customers hold seats and pay for them. Built as the phase 1 project of the Software Architecture course at VNU University of Engineering and Technology (UET).
+![Java 21](https://img.shields.io/badge/Java-21-007396?logo=openjdk&logoColor=white)
+![Spring Boot 4.1](https://img.shields.io/badge/Spring%20Boot-4.1-6DB33F?logo=springboot&logoColor=white)
+![Spring Security 7.1](https://img.shields.io/badge/Spring%20Security-7.1-6DB33F?logo=springsecurity&logoColor=white)
+![Hibernate 7.4](https://img.shields.io/badge/Hibernate-7.4-59666C?logo=hibernate&logoColor=white)
+![PostgreSQL 17](https://img.shields.io/badge/PostgreSQL-17-4169E1?logo=postgresql&logoColor=white)
+![Flyway 12](https://img.shields.io/badge/Flyway-12-CC0200?logo=flyway&logoColor=white)
+![JUnit 6](https://img.shields.io/badge/JUnit-6-25A162?logo=junit5&logoColor=white)
+![Testcontainers 2](https://img.shields.io/badge/Testcontainers-2-291A3F)
+![k6](https://img.shields.io/badge/k6-load%20test-7D64FF?logo=k6&logoColor=white)
 
-## Table of contents
+</div>
 
-- [Assignment requirements](#assignment-requirements)
-- [Documentation](#documentation)
-- [Features](#features)
-- [Tech stack](#tech-stack)
-- [Architecture](#architecture)
-- [Getting started](#getting-started)
-- [Configuration](#configuration)
-- [API overview](#api-overview)
-- [Booking lifecycle](#booking-lifecycle)
-- [Testing](#testing)
-- [Performance](#performance)
-- [CI/CD](#cicd)
-- [Project structure](#project-structure)
-- [Known issues](#known-issues)
-- [License](#license)
+A REST backend for a cinema chain. Admins run the catalogue of cinemas, auditoriums, movies and showtimes; customers hold seats and pay for them. It is the phase 1 project of the Software Architecture course at VNU University of Engineering and Technology (UET).
 
-## Assignment requirements
+## 📑 Table of contents
 
-| Requirement | Where it is met |
-|---|---|
-| REST + JSON with POST, GET and DELETE | [API overview](#api-overview) |
-| OpenAPI / Swagger specification | springdoc, Swagger UI at `/swagger-ui.html`, exported as [`docs/openapi.json`](docs/openapi.json) |
-| Layered architecture, business layer free of web and DB imports | `api` → `business` → `persistence`, enforced by an ArchUnit test ([ADR 0001](docs/adr/0001-framework-free-business-layer.md)) |
-| Repository / data access layer with an ORM | Spring Data JPA (Hibernate) adapters implementing business-layer repository interfaces |
-| Login, at least one authenticated GET and POST | JWT login; `GET /api/bookings`, `POST /api/bookings` and more |
-| Authentication through framework middleware | Spring Security filter chain, access rules declared once in `SecurityConfig` |
-| Docker | Multi-stage [`Dockerfile`](Dockerfile), [`docker-compose.yml`](docker-compose.yml), image published to GHCR |
-| Load test on a Kaggle CPU notebook | [`loadtest/`](loadtest/README.md) with k6 ([ADR 0003](docs/adr/0003-load-test-on-kaggle-without-docker.md)), results in [`docs/loadtest-baseline.md`](docs/loadtest-baseline.md) |
+- [Features](#-features)
+- [Domain model](#-domain-model)
+- [Booking lifecycle](#-booking-lifecycle)
+- [Architecture](#-architecture)
+- [Assignment requirements](#-assignment-requirements)
+- [Tech stack](#-tech-stack)
+- [Getting started](#-getting-started)
+- [API overview](#-api-overview)
+- [Testing](#-testing)
+- [Performance](#-performance)
+- [CI/CD](#-cicd)
+- [Known issues](#-known-issues)
+- [Documentation](#-documentation)
+- [License](#-license)
 
-## Documentation
+## ✨ Features
 
-| Document | What it covers |
-|---|---|
-| [`GLOSSARY.md`](GLOSSARY.md) | Domain terms: Cinema, Showtime, Booking, Hold, Refunded and the rest |
-| [`docs/openapi.json`](docs/openapi.json) | OpenAPI 3.1 specification of every endpoint, request, response and error |
-| [Swagger UI (static)](https://tretrauit.me/se-phase-01/swagger.html) | The same specification, browsable online. It documents the API but cannot send requests |
-| [`docs/booking-walkthrough.md`](docs/booking-walkthrough.md) | Step-by-step booking demo in Swagger UI or with `curl` |
-| [`docs/adr/`](docs/adr/) | Architecture decisions and why they were made |
-| [`docs/loadtest-baseline.md`](docs/loadtest-baseline.md) | Accepted Kaggle load-test results |
+**Catalogue management (Admin)**
+- Cinemas and auditoriums. An auditorium's seat layout is generated from its size (up to 26 rows), and each row is Standard, VIP or Couple.
+- Movies and showtimes. A showtime ends after the movie's length plus 15 minutes of cleaning, and two showtimes in the same auditorium can't overlap.
+- Showtime cancellation with a reason (equipment failure, power outage, emergency, other). One transaction refunds the paid bookings and releases the unpaid ones.
 
-## Features
-
-**Catalogue management (admin)**
-- Cinemas and auditoriums. Each auditorium gets a seat layout generated from its size (up to 26 rows), with rows marked as standard, VIP or couple seats.
-- Movies and showtimes. The end of a showtime is computed from the movie's length plus 15 minutes of cleaning, and showtimes in the same auditorium can't overlap.
-- Showtime cancellation with a reason (equipment failure, power outage, emergency, other). Paid bookings are refunded and unpaid ones are released, all in one transaction.
-
-**Booking (customer)**
+**Booking (Customer)**
 - Self-registration and JWT login.
-- Browse showtimes by date, cinema and movie, and view a live seat map with availability and prices.
-- Book 1 to 8 seats per booking. Seats are held for 10 minutes until payment (simulated).
-- Concurrency-safe: a database unique constraint guarantees a seat is never sold twice, even under heavy contention.
+- Showtimes filtered by date, cinema and movie, and a live seat map with availability and prices.
+- 1 to 8 seats per booking, held for 10 minutes until payment (simulated).
+- A database unique constraint stops a seat from being sold twice, including when many customers race for it.
 
 **Platform**
-- OpenAPI 3 documentation with Swagger UI.
-- Consistent error responses in [RFC 9457](https://www.rfc-editor.org/rfc/rfc9457) Problem Details format.
+- OpenAPI 3.1 documentation with Swagger UI.
+- Every error in [RFC 9457](https://www.rfc-editor.org/rfc/rfc9457) Problem Details format.
 - Versioned schema migrations with Flyway.
-- Health and metrics endpoints via Spring Boot Actuator.
-- Containerised with Docker; the image is published to GitHub Container Registry.
+- Health and metrics endpoints through Spring Boot Actuator.
+- A Docker image, published to GitHub Container Registry.
 
-## Tech stack
+## 🎬 Domain model
 
-| Area | Technology |
+```mermaid
+erDiagram
+    CINEMA ||--o{ AUDITORIUM : has
+    AUDITORIUM ||--|{ SEAT : "laid out as"
+    AUDITORIUM ||--o{ SHOWTIME : hosts
+    MOVIE ||--o{ SHOWTIME : "screened as"
+    ACCOUNT ||--o{ BOOKING : places
+    SHOWTIME ||--o{ BOOKING : "booked for"
+    BOOKING ||--|{ BOOKED_SEAT : "holds 1 to 8"
+    SEAT ||--o{ BOOKED_SEAT : "taken by"
+
+    SEAT {
+        string row_letter
+        int seat_number
+        string type
+    }
+    SHOWTIME {
+        timestamptz starts_at
+        timestamptz ends_at
+        bigint base_price
+        string status
+    }
+    BOOKING {
+        string status
+        timestamptz expires_at
+    }
+    BOOKED_SEAT {
+        bigint price
+    }
+```
+
+The database enforces three rules on its own:
+
+- `booked_seat` has `UNIQUE(showtime_id, seat_id)`, so a seat is booked at most once per showtime.
+- A partial unique index allows one `PENDING` booking per customer.
+- An exclusion constraint rejects overlapping showtimes in the same auditorium, ignoring cancelled ones.
+
+[`GLOSSARY.md`](GLOSSARY.md) defines each term (Hold, Pending, Refunded and the rest).
+
+## 🎫 Booking lifecycle
+
+```mermaid
+stateDiagram-v2
+    [*] --> Pending: POST /bookings (seats held 10 min)
+    Pending --> Confirmed: payment within hold
+    Pending --> Expired: hold lapses
+    Pending --> [*]: customer abandons (DELETE) or admin cancels the showtime
+    Expired --> [*]: deleted when its seats are booked or its customer books again
+    Confirmed --> Refunded: admin cancels the showtime
+```
+
+Each booked seat keeps the price it had when the booking was made, so later price changes don't affect it:
+
+| Seat type | Price |
 |---|---|
-| Language & runtime | Java 21 |
-| Framework | Spring Boot 4.1 (Web MVC, Validation, Actuator) |
-| Security | Spring Security, OAuth2 Resource Server (HS256 JWT), BCrypt |
-| Persistence | Spring Data JPA / Hibernate, PostgreSQL 17, Flyway |
-| API documentation | springdoc-openapi, Swagger UI |
-| Testing | JUnit 5, Testcontainers, ArchUnit |
-| Build & delivery | Maven Wrapper, Docker, GitHub Actions, GHCR |
-| Load testing | k6 |
+| Standard | base price |
+| VIP | base price + 20,000 VND |
+| Couple | 2 × base price + 10,000 VND |
 
-## Architecture
+A customer can have only one live pending booking at a time, a showtime can't be booked once it has started, and paying a confirmed booking again returns it unchanged. The [booking walkthrough](docs/booking-walkthrough.md) runs the whole lifecycle on a live service.
 
-The service is a single deployable organised as a **layered architecture**, one package per layer under `vn.edu.uet.cinema`.
+## 🧱 Architecture
+
+The service is one deployable with a layered architecture, one package per layer under `vn.edu.uet.cinema`.
 
 ```mermaid
 flowchart LR
@@ -109,21 +149,42 @@ flowchart LR
 | `persistence` | Implements the business repository interfaces with JPA | `business`, JPA |
 | `config` | Security rules, bean wiring, OpenAPI | everything |
 
-Key design decisions:
+The design decisions behind this:
 
-- **Framework-free business layer.** The domain has no Spring, JPA or web imports. It owns the repository interfaces, and the persistence layer implements them (dependency inversion). This keeps business rules easy to read and to unit test.
-- **Enforced boundaries.** `ArchitectureTest` (ArchUnit) fails the build when a layer rule is broken, so the architecture can't drift silently.
-- **Authentication as middleware.** JWTs are validated by Spring Security's filter chain. All access rules live in `config/SecurityConfig.java`; controllers contain no auth logic.
-- **Seat contention handled by the database.** Booked seats carry a `UNIQUE(showtime_id, seat_id)` constraint. Concurrent requests race on the insert and the loser gets a `409`, with no application-level locks. Expired holds are cleaned up lazily the next time someone books one of their seats.
+- The business layer imports no Spring, JPA or web code. It owns the repository interfaces and the persistence layer implements them, so business rules can be read and unit tested on their own ([ADR 0001](docs/adr/0001-framework-free-business-layer.md)).
+- `ArchitectureTest` (ArchUnit) fails the build when a layer imports a package it is not allowed to.
+- Spring Security's filter chain validates the JWT before any controller runs. Every access rule is in `config/SecurityConfig.java`, and controllers have no auth code.
+- The database settles seat contention. Concurrent bookings race on the `booked_seat` insert, the loser gets a `409`, and there are no application locks. A lapsed hold is deleted the next time someone books one of its seats ([ADR 0004](docs/adr/0004-seat-contention-via-unique-constraint-and-lazy-holds.md)).
 
-## Getting started
+## ✅ Assignment requirements
 
-### Prerequisites
+| Requirement | Where it is met |
+|---|---|
+| REST + JSON with POST, GET and DELETE | [API overview](#-api-overview) |
+| OpenAPI / Swagger specification | springdoc, Swagger UI at `/swagger-ui.html`, exported as [`docs/openapi.json`](docs/openapi.json) |
+| Layered architecture, business layer free of web and DB imports | `api` → `business` → `persistence`, enforced by an ArchUnit test ([ADR 0001](docs/adr/0001-framework-free-business-layer.md)) |
+| Repository / data access layer with an ORM | Spring Data JPA (Hibernate) adapters implementing business-layer repository interfaces |
+| Login, at least one authenticated GET and POST | JWT login; `GET /api/bookings`, `POST /api/bookings` and more |
+| Authentication through framework middleware | Spring Security filter chain, access rules declared once in `SecurityConfig` |
+| Docker | Multi-stage [`Dockerfile`](Dockerfile), [`docker-compose.yml`](docker-compose.yml), image published to GHCR |
+| Load test on a Kaggle CPU notebook | [`loadtest/`](loadtest/README.md) with k6 ([ADR 0003](docs/adr/0003-load-test-on-kaggle-without-docker.md)), results in [`docs/loadtest-baseline.md`](docs/loadtest-baseline.md) |
 
-- Docker with Docker Compose, or
-- JDK 21 and PostgreSQL 17 to run the app outside a container.
+## 🧰 Tech stack
 
-### Quick start with Docker Compose
+| Area | Technology |
+|---|---|
+| Language & runtime | Java 21 |
+| Framework | Spring Boot 4.1 (Web MVC, Validation, Actuator) |
+| Security | Spring Security 7, OAuth2 Resource Server (HS256 JWT), BCrypt |
+| Persistence | Spring Data JPA / Hibernate 7, PostgreSQL 17, Flyway |
+| API documentation | springdoc-openapi, Swagger UI |
+| Testing | JUnit 6, Testcontainers, ArchUnit |
+| Build & delivery | Maven Wrapper, Docker, GitHub Actions, GHCR |
+| Load testing | k6 |
+
+## 🚀 Getting started
+
+You need Docker with Docker Compose.
 
 ```bash
 git clone https://github.com/14m6d4/se-phase-01.git
@@ -132,7 +193,7 @@ cp .env.example .env          # set your own secrets in .env
 docker compose up --build
 ```
 
-The service is ready when the log shows `Started CinemaApplication`. The [booking walkthrough](docs/booking-walkthrough.md) exercises it end to end.
+The service is ready when the log shows `Started CinemaApplication`.
 
 | URL | Purpose |
 |---|---|
@@ -140,43 +201,13 @@ The service is ready when the log shows `Started CinemaApplication`. The [bookin
 | http://localhost:8080/v3/api-docs | OpenAPI specification (JSON; `/v3/api-docs.yaml` for YAML) |
 | http://localhost:8080/actuator/health | Health check |
 
-An admin account is created on startup from `ADMIN_EMAIL` / `ADMIN_PASSWORD`. Compose refuses to start if a required variable is missing, and both services bind to `127.0.0.1` only.
+The Admin account comes from `ADMIN_EMAIL` and `ADMIN_PASSWORD` at startup. Compose refuses to start if a required variable is missing, and both containers listen on `127.0.0.1` only.
 
-To run the image CI published from `main` instead of building locally:
+The [development guide](docs/development.md) covers running without Compose, every environment variable, a `curl` login example and the project layout.
 
-```bash
-docker compose pull app
-docker compose up --no-build
-```
+## 📡 API overview
 
-### Running locally
-
-Start only the database in Docker, then run the app with Maven:
-
-```bash
-docker compose up -d db
-set -a; source .env; set +a   # export the variables from .env
-./mvnw spring-boot:run
-```
-
-From an IDE, run `TestCinemaApplication` in `src/test`. It starts PostgreSQL in a container automatically. Set `JWT_SECRET` and `ADMIN_PASSWORD` in the run configuration.
-
-## Configuration
-
-All configuration is read from environment variables. Secrets have no defaults and must be provided.
-
-| Variable | Required | Default | Description |
-|---|:---:|---|---|
-| `DB_URL` | | `jdbc:postgresql://localhost:5432/cinema` | JDBC URL |
-| `DB_USERNAME` | | `cinema` | Database user |
-| `DB_PASSWORD` | ✓ | | Database password |
-| `JWT_SECRET` | ✓ | | HS256 signing key, at least 32 bytes (`openssl rand -base64 32`) |
-| `ADMIN_EMAIL` | | `admin@cinema.local` | Admin account, created or updated at startup |
-| `ADMIN_PASSWORD` | ✓ | | Admin password; change it and restart to rotate |
-
-## API overview
-
-Base path: `/api`. Full request and response schemas are in Swagger UI.
+Base path: `/api`. Swagger UI and [`docs/openapi.json`](docs/openapi.json) have the full request and response schemas.
 
 | Resource | Endpoint | Access |
 |---|---|---|
@@ -197,25 +228,7 @@ Base path: `/api`. Full request and response schemas are in Swagger UI.
 | | `POST /bookings`, `DELETE /bookings/{id}` | Customer |
 | | `POST /bookings/{id}/payment` | Customer |
 
-### Authentication
-
-Log in to get a bearer token (valid for one hour), then send it in the `Authorization` header:
-
-```bash
-curl -X POST localhost:8080/api/auth/register -H 'Content-Type: application/json' \
-  -d '{"email":"alice@example.com","password":"password123","fullName":"Alice"}'
-
-TOKEN=$(curl -s -X POST localhost:8080/api/auth/login -H 'Content-Type: application/json' \
-  -d '{"email":"alice@example.com","password":"password123"}' | jq -r .accessToken)
-
-curl localhost:8080/api/me -H "Authorization: Bearer $TOKEN"
-```
-
-In Swagger UI, call `POST /api/auth/login`, click **Authorize** and paste the `accessToken`.
-
-### Errors
-
-Every error is returned as `application/problem+json`:
+A login returns a bearer token valid for one hour; send it as `Authorization: Bearer <token>`. Every error is `application/problem+json`:
 
 | Status | Meaning |
 |---|---|
@@ -225,51 +238,24 @@ Every error is returned as `application/problem+json`:
 | `404` | Resource not found (including another customer's booking) |
 | `409` | Business rule violation, e.g. seat already taken, overlapping showtime, hold expired |
 
-### Conventions
+Money is an integer amount in VND. Timestamps are ISO-8601 with an offset. The service runs on `Asia/Ho_Chi_Minh`, and `?date=` covers that calendar day in Vietnam time.
 
-- Money is an integer amount in VND.
-- Timestamps are ISO-8601 with offset. The service runs on `Asia/Ho_Chi_Minh`, and `?date=` covers that calendar day in Vietnam time.
-
-## Booking lifecycle
-
-```mermaid
-stateDiagram-v2
-    [*] --> Pending: POST /bookings (seats held 10 min)
-    Pending --> Confirmed: payment within hold
-    Pending --> Expired: hold lapses
-    Pending --> [*]: customer abandons (DELETE)
-    Expired --> [*]: removed when its seats are booked again
-    Confirmed --> Refunded: admin cancels the showtime
-```
-
-Pricing is copied into the booking when it is created, so later price changes don't affect it:
-
-| Seat type | Price |
-|---|---|
-| Standard | base price |
-| VIP | base price + 20,000 VND |
-| Couple | 2 × base price + 10,000 VND |
-
-Other rules: a customer can have only one live pending booking at a time, a showtime can't be booked once it has started, and paying an already confirmed booking is idempotent.
-
-To see the whole lifecycle on a running service, follow the [booking walkthrough](docs/booking-walkthrough.md).
-
-## Testing
+## 🧪 Testing
 
 ```bash
 ./mvnw verify
 ```
 
-Docker must be running: integration tests start a real PostgreSQL through Testcontainers. The suite covers:
+Docker must be running, because the integration tests start a real PostgreSQL through Testcontainers. The suite has four kinds of test:
 
-- **Unit tests** for the business layer, which needs no Spring context.
-- **Integration tests** for controllers and repositories against PostgreSQL.
-- **Architecture tests** (ArchUnit) for the layer rules.
-- **Contract tests** checking that the generated OpenAPI specification lists every operation, error response and security requirement.
+- Unit tests for the business layer, which need no Spring context.
+- Integration tests for controllers and repositories against PostgreSQL.
+- Architecture tests (ArchUnit) for the layer rules.
+- Contract tests checking that the generated OpenAPI specification lists every operation, error response and security requirement.
 
-## Performance
+## 📈 Performance
 
-Accepted Kaggle baseline (kernel version 5) with [k6](https://k6.io/) on a Kaggle CPU notebook, with the service, PostgreSQL and k6 sharing the machine. The run used the source snapshot identified in [`docs/loadtest-baseline.md`](docs/loadtest-baseline.md), the notebook's native `CODE_BUNDLE="auto"`, `RATE=50`, `DURATION=60s` and k6 v2.3.0; runtime details are in the run's `results/env.txt`.
+The accepted baseline ran [k6](https://k6.io/) v2.3.0 on a Kaggle CPU notebook (kernel version 5), with the service, PostgreSQL and k6 on the same machine, at `RATE=50` for `DURATION=60s`. [`docs/loadtest-baseline.md`](docs/loadtest-baseline.md) records the source snapshot, and the run's `results/env.txt` has the runtime details.
 
 | Scenario | Workflow | Throughput | p50 | p95 | p99 | Error rate |
 |---|---|---:|---:|---:|---:|---:|
@@ -277,44 +263,24 @@ Accepted Kaggle baseline (kernel version 5) with [k6](https://k6.io/) on a Kaggl
 | book | hold seats → pay | 78.3 req/s | 7.98 ms | 11.47 ms | 15.75 ms | 0% |
 | contention | many customers race for the same 10 seats | 37.0 req/s | 9.09 ms | 11.54 ms | 12.99 ms | 0% |
 
-Under contention, exactly 10 bookings succeeded and 3,989 attempts received the expected `409` conflicts; a SQL check after the run confirmed no seat was sold twice. Compare another run only against its recorded `results/env.txt`.
+Under contention, exactly 10 bookings succeeded and 3,989 attempts got the expected `409`. A SQL check after the run found no seat sold twice. To compare another run, check its `results/env.txt` first, since numbers from a different machine or rate don't compare.
 
-Scenarios, seed data and instructions for reproducing the run are in [`loadtest/`](loadtest/README.md).
+[`loadtest/`](loadtest/README.md) has the scenarios, seed data and steps to reproduce the run.
 
-## CI/CD
+## 🔄 CI/CD
 
-GitHub Actions ([`ci.yml`](.github/workflows/ci.yml)) runs on every pull request and every push to `main`:
+GitHub Actions ([`ci.yml`](.github/workflows/ci.yml)) runs on pull requests and on pushes to `main`. A change that touches only `docs/`, Markdown files or `LICENSE` skips it.
 
-1. Runs the load-test helper checks and `./mvnw verify` (unit, integration and architecture tests).
-2. On `main`, builds the Docker image and publishes it to `ghcr.io/14m6d4/se-phase-01:latest`.
+1. The `verify` job runs the load-test helper checks and `./mvnw verify`.
+2. On a push to `main`, the `image` job builds the Docker image and pushes it to `ghcr.io/14m6d4/se-phase-01`, tagged `latest` and with the commit SHA.
 
-## Project structure
+## 🐛 Known issues
 
-```
-.
-├── src/
-│   ├── main/
-│   │   ├── java/vn/edu/uet/cinema/
-│   │   │   ├── api/            # REST controllers, DTOs, exception → ProblemDetail
-│   │   │   ├── business/       # domain models, services, repository interfaces
-│   │   │   ├── persistence/    # JPA entities, Spring Data repositories, adapters
-│   │   │   └── config/         # security, bean wiring, OpenAPI
-│   │   └── resources/
-│   │       └── db/migration/   # Flyway migrations
-│   └── test/                   # unit, integration and architecture tests
-├── loadtest/                   # k6 scenarios, seed data, Kaggle notebook
-├── .github/workflows/          # CI pipeline
-├── Dockerfile                  # multi-stage build
-└── docker-compose.yml          # app + PostgreSQL
-```
-
-## Known issues
-
-Problems in the current phase 1 system, left for phase 2 to improve.
+Phase 1 leaves these problems for phase 2.
 
 **Booking and concurrency**
 - **Seat hoarding.** A Hold claims its Seats whether or not it is ever paid. Registration is open, with no email verification and no rate limit, so many accounts can keep a Showtime's Seats held without buying ([ADR 0004](docs/adr/0004-seat-contention-via-unique-constraint-and-lazy-holds.md)).
-- **Lapsed Holds linger.** Expiry is lazy: a lapsed Hold stays in the database until someone books one of its Seats. Nothing cleans up the rest.
+- **Lapsed Holds linger.** Expiry is lazy: a lapsed Hold stays in the database until someone books one of its Seats or its Customer books again. Nothing cleans up the rest.
 - **No booking history.** Abandoned and Expired Bookings are deleted, so they cannot be analysed later.
 - **One concurrency strategy measured.** Only the unique-constraint approach was load tested; pessimistic locking, optimistic locking and queue-based booking were not compared.
 - **Cancellation side effects.** Cancelling a Showtime briefly blocks new bookings of it, and a Cancelled Showtime with Refunded Bookings can never be deleted ([ADR 0005](docs/adr/0005-showtime-cancellation-in-one-adapter-transaction.md)).
@@ -322,7 +288,7 @@ Problems in the current phase 1 system, left for phase 2 to improve.
 **Security**
 - **Tokens cannot be revoked.** JWTs are signed with one shared HS256 secret and stay valid for their full hour; there is no refresh token and no logout.
 - **No rate limiting** on login, registration or booking, so passwords can be brute-forced and endpoints flooded.
-- **One Admin.** The only Admin comes from environment variables; there is no way to add Admins, audit their actions, or rotate the password without a restart.
+- **One Admin.** The only Admin comes from environment variables. Nobody can add Admins or audit their actions, and rotating the password needs a restart.
 - **No CORS configuration.** A browser frontend on another origin cannot call the API.
 
 **API**
@@ -331,8 +297,8 @@ Problems in the current phase 1 system, left for phase 2 to improve.
 - **API docs always public.** Swagger UI and `/v3/api-docs` are exposed in every environment.
 
 **Operations and performance**
-- **Single instance, manual hosting.** CI publishes an image but nothing deploys it, and the static Swagger UI cannot send requests.
-- **Capacity unknown.** The baseline only covers 50 iterations/s, with the service, PostgreSQL and k6 sharing one Kaggle machine. The maximum throughput and the bottleneck were not measured, and the contention scenario does not synchronise requests into one simultaneous race ([baseline](docs/loadtest-baseline.md)).
+- **Single instance, manual hosting.** CI publishes an image but nothing deploys it.
+- **Capacity unknown.** The baseline only covers 50 iterations/s, with the service, PostgreSQL and k6 sharing one Kaggle machine. Nobody measured the maximum throughput or the bottleneck, and the contention scenario does not synchronise requests into one simultaneous race ([baseline](docs/loadtest-baseline.md)).
 - **Untuned defaults.** The connection pool keeps Hikari's default of 10 connections, and the JVM runs without flags.
 - **Thin observability.** Actuator exposes health and metrics only; there is no tracing, structured logging or alerting.
 
@@ -340,6 +306,17 @@ Problems in the current phase 1 system, left for phase 2 to improve.
 - **Two model sets.** Business models and JPA entities are separate, joined by hand-written mappers ([ADR 0001](docs/adr/0001-framework-free-business-layer.md)).
 - **Rules kept in two places.** Delete guards and the Showtime overlap rule live in both the business layer and the database, and must be changed together ([ADR 0006](docs/adr/0006-delete-guards-in-business-and-database.md)).
 
-## License
+## 📚 Documentation
+
+| Document | What it covers |
+|---|---|
+| [`GLOSSARY.md`](GLOSSARY.md) | Domain terms: Cinema, Showtime, Booking, Hold, Refunded and the rest |
+| [`docs/openapi.json`](docs/openapi.json) | OpenAPI 3.1 specification of every endpoint, request, response and error |
+| [`docs/booking-walkthrough.md`](docs/booking-walkthrough.md) | Step-by-step booking demo in Swagger UI or with `curl` |
+| [`docs/development.md`](docs/development.md) | Running without Compose, configuration, project layout |
+| [`docs/adr/`](docs/adr/) | Architecture decisions and why they were made |
+| [`docs/loadtest-baseline.md`](docs/loadtest-baseline.md) | Accepted Kaggle load-test results |
+
+## 📄 License
 
 Released under the [MIT License](LICENSE).
