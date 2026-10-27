@@ -1,6 +1,6 @@
 # Load test
 
-Run k6 against the service and PostgreSQL, locally or in a Kaggle CPU notebook. See [loadtest-baseline.md](../docs/loadtest-baseline.md) for results.
+Run k6 against the service and PostgreSQL, locally or in a Kaggle CPU notebook. See [loadtest-baseline.md](../docs/loadtest-baseline.md) for the latest results and the public [Kaggle notebook (version 6)](https://www.kaggle.com/code/tunichdi/se-phase-01-issue19-baseline/versions/6) for the run and outputs.
 
 ## Scenarios
 
