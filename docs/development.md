@@ -1,6 +1,6 @@
 # Development guide
 
-How to run the service outside Docker Compose, what it reads from the environment, and where the code lives. The quick start with Docker Compose is in the [README](../README.md#-getting-started).
+For the Docker Compose quick start, see the [README](../README.md#-getting-started).
 
 ## Running locally
 

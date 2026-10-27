@@ -148,7 +148,7 @@ flowchart LR
 | `persistence` | Implements the business repository interfaces with JPA | `business`, JPA |
 | `config` | Security rules, bean wiring, OpenAPI | everything |
 
-The design decisions behind this:
+Design decisions:
 
 - The business layer imports no Spring, JPA or web code. It owns the repository interfaces and the persistence layer implements them, so business rules can be read and unit tested on their own ([ADR 0001](docs/adr/0001-framework-free-business-layer.md)).
 - `ArchitectureTest` (ArchUnit) fails the build when a layer imports a package it is not allowed to.
@@ -262,7 +262,7 @@ The accepted baseline ran [k6](https://k6.io/) v2.3.0 on a Kaggle CPU notebook (
 | book | hold seats → pay | 78.3 req/s | 7.98 ms | 11.47 ms | 15.75 ms | 0% |
 | contention | many customers race for the same 10 seats | 37.0 req/s | 9.09 ms | 11.54 ms | 12.99 ms | 0% |
 
-Under contention, exactly 10 bookings succeeded and 3,989 attempts got the expected `409`. A SQL check after the run found no seat sold twice. To compare another run, check its `results/env.txt` first, since numbers from a different machine or rate don't compare.
+Under contention, exactly 10 bookings succeeded and 3,989 attempts got the expected `409`. A SQL check after the run found no seat sold twice. Compare another run only against its own `results/env.txt`.
 
 [`loadtest/`](loadtest/README.md) has the scenarios, seed data and steps to reproduce the run.
 
