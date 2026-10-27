@@ -19,7 +19,7 @@ A fixed position in an Auditorium, identified by row letter and number (e.g. `C7
 _Avoid_: Chair, place
 
 **Seat Type**:
-The class of a Seat — Standard, VIP or Couple — which affects its price. A Couple seat is one sellable unit for two people.
+The class of a Seat (Standard, VIP or Couple), which affects its price. A Couple seat is one sellable unit for two people.
 _Avoid_: Seat class, category
 
 **Movie**:
