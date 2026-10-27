@@ -23,7 +23,7 @@ A REST backend for a cinema chain: admins run the catalogue (cinemas, auditorium
 - [Performance](#performance)
 - [CI/CD](#cicd)
 - [Project structure](#project-structure)
-- [Scope and roadmap](#scope-and-roadmap)
+- [Known issues](#known-issues)
 - [License](#license)
 
 ## Assignment requirements
@@ -308,9 +308,37 @@ GitHub Actions ([`ci.yml`](.github/workflows/ci.yml)) runs on every pull request
 └── docker-compose.yml          # app + PostgreSQL
 ```
 
-## Scope and roadmap
+## Known issues
 
-Phase 1 deliberately leaves out real payment processing, promotions, tickets and check-in, customer-initiated refunds, pagination, refresh tokens and email verification. These are candidates for later phases.
+Problems in the current phase 1 system, left for phase 2 to improve.
+
+**Booking and concurrency**
+- **Seat hoarding.** A Hold claims its Seats whether or not it is ever paid. Registration is open, with no email verification and no rate limit, so many accounts can keep a Showtime's Seats held without buying ([ADR 0004](docs/adr/0004-seat-contention-via-unique-constraint-and-lazy-holds.md)).
+- **Lapsed Holds linger.** Expiry is lazy: a lapsed Hold stays in the database until someone books one of its Seats. Nothing cleans up the rest.
+- **No booking history.** Abandoned and Expired Bookings are deleted, so they cannot be analysed later.
+- **One concurrency strategy measured.** Only the unique-constraint approach was load tested; pessimistic locking, optimistic locking and queue-based booking were not compared.
+- **Cancellation side effects.** Cancelling a Showtime briefly blocks new bookings of it, and a Cancelled Showtime with Refunded Bookings can never be deleted ([ADR 0005](docs/adr/0005-showtime-cancellation-in-one-adapter-transaction.md)).
+
+**Security**
+- **Tokens cannot be revoked.** JWTs are signed with one shared HS256 secret and stay valid for their full hour; there is no refresh token and no logout.
+- **No rate limiting** on login, registration or booking, so passwords can be brute-forced and endpoints flooded.
+- **One Admin.** The only Admin comes from environment variables; there is no way to add Admins, audit their actions, or rotate the password without a restart.
+- **No CORS configuration.** A browser frontend on another origin cannot call the API.
+
+**API**
+- **No pagination.** `GET /movies`, `GET /cinemas` and `GET /bookings` return every row.
+- **Loose response types in the specification.** Success responses are documented as `*/*` instead of `application/json`.
+- **API docs always public.** Swagger UI and `/v3/api-docs` are exposed in every environment.
+
+**Operations and performance**
+- **Single instance, manual hosting.** CI publishes an image but nothing deploys it, and the static Swagger UI cannot send requests.
+- **Capacity unknown.** The baseline only covers 50 iterations/s, with the service, PostgreSQL and k6 sharing one Kaggle machine. The maximum throughput and the bottleneck were not measured, and the contention scenario does not synchronise requests into one simultaneous race ([baseline](docs/loadtest-baseline.md)).
+- **Untuned defaults.** The connection pool keeps Hikari's default of 10 connections, and the JVM runs without flags.
+- **Thin observability.** Actuator exposes health and metrics only; there is no tracing, structured logging or alerting.
+
+**Codebase**
+- **Two model sets.** Business models and JPA entities are separate, joined by hand-written mappers ([ADR 0001](docs/adr/0001-framework-free-business-layer.md)).
+- **Rules kept in two places.** Delete guards and the Showtime overlap rule live in both the business layer and the database, and must be changed together ([ADR 0006](docs/adr/0006-delete-guards-in-business-and-database.md)).
 
 ## License
 
