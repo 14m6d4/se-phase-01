@@ -155,6 +155,30 @@ Design decisions:
 - Spring Security's filter chain validates the JWT before any controller runs. Every access rule is in `config/SecurityConfig.java`, and controllers have no auth code.
 - The database settles seat contention. Concurrent bookings race on the `booked_seat` insert, the loser gets a `409`, and there are no application locks. A lapsed hold is deleted the next time someone books one of its seats ([ADR 0004](docs/adr/0004-seat-contention-via-unique-constraint-and-lazy-holds.md)).
 
+When two Customers want the same Seat, the unique index decides who gets it:
+
+```mermaid
+sequenceDiagram
+    actor A as Customer A
+    actor B as Customer B
+    participant S as Cinema service
+    participant DB as PostgreSQL
+    A->>S: POST /bookings (Seat A2)
+    B->>S: POST /bookings (Seat A2)
+    S->>DB: tx A: Showtime FOR SHARE, delete lapsed Holds on A2
+    S->>DB: tx B: Showtime FOR SHARE, delete lapsed Holds on A2
+    Note over DB: share locks don't block each other
+    S->>DB: tx A: insert Booking + booked_seat(A2)
+    S->>DB: tx B: insert Booking + booked_seat(A2)
+    Note over DB: tx B waits on UNIQUE(showtime_id, seat_id)
+    DB-->>S: tx A commits
+    S-->>A: 201 Pending, Hold for 10 min
+    DB-->>S: tx B: unique violation, rolled back
+    S->>DB: read occupied Seats
+    S-->>B: 409 Problem Details, taken: [A2]
+    Note over S,DB: a deadlock between lapsed-Hold deletes is retried once, then 409 "try again"
+```
+
 ## ✅ Assignment requirements
 
 | Requirement | Where it is met |
