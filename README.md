@@ -254,15 +254,16 @@ Docker must be running, because the integration tests start a real PostgreSQL th
 
 ## 📈 Performance
 
-The accepted baseline ran [k6](https://k6.io/) v2.3.0 on a Kaggle CPU notebook (kernel version 5), with the service, PostgreSQL and k6 on the same machine, at `RATE=50` for `DURATION=60s`. [`docs/loadtest-baseline.md`](docs/loadtest-baseline.md) records the source snapshot, and the run's `results/env.txt` has the runtime details.
+The accepted baseline ran [k6](https://k6.io/) v2.3.0 on a [Kaggle CPU notebook (version 6)](https://www.kaggle.com/code/tunichdi/se-phase-01-issue19-baseline/versions/6), with the service, PostgreSQL and k6 on the same machine, at `RATE=50` for `DURATION=60s`. [`docs/loadtest-baseline.md`](docs/loadtest-baseline.md) records the source snapshot, and the run's `results/env.txt` has the runtime details.
 
-| Scenario | Workflow | Throughput | p50 | p95 | p99 | Error rate |
+| Scenario | Workflow | Run-average RPS | p50 | p95 | p99 | Error rate |
 |---|---|---:|---:|---:|---:|---:|
-| browse | list showtimes → open seat map | 79.9 req/s | 3.51 ms | 5.75 ms | 9.09 ms | 0% |
-| book | hold seats → pay | 78.3 req/s | 7.98 ms | 11.47 ms | 15.75 ms | 0% |
-| contention | many customers race for the same 10 seats | 37.0 req/s | 9.09 ms | 11.54 ms | 12.99 ms | 0% |
+| smoke | read the signed-in Customer's account | 36.7 | 2.80 ms | 5.09 ms | 6.60 ms | 0% |
+| browse | list showtimes → open seat map | 79.9 | 3.06 ms | 5.22 ms | 8.78 ms | 0% |
+| book | hold seats → pay | 78.4 | 6.21 ms | 9.80 ms | 13.06 ms | 0% |
+| contention | many customers race for the same 10 seats | 37.0 | 6.30 ms | 8.32 ms | 10.26 ms | 0% |
 
-Under contention, exactly 10 bookings succeeded and 3,989 attempts got the expected `409`. A SQL check after the run found no seat sold twice. Compare another run only against its own `results/env.txt`.
+RPS averages the whole run, including setup and ramps, so it is not the service's maximum capacity. Under contention, exactly 10 bookings succeeded and the other 3,989 attempts got the expected `409`. A SQL check after the run found no seat sold twice. Compare another run only against its own `results/env.txt`.
 
 [`loadtest/`](loadtest/README.md) has the scenarios, seed data and steps to reproduce the run.
 
@@ -281,7 +282,7 @@ Phase 1 leaves these problems for phase 2.
 - **Seat hoarding.** A Hold claims its Seats whether or not it is ever paid. Registration is open, with no email verification and no rate limit, so many accounts can keep a Showtime's Seats held without buying ([ADR 0004](docs/adr/0004-seat-contention-via-unique-constraint-and-lazy-holds.md)).
 - **Lapsed Holds linger.** Expiry is lazy: a lapsed Hold stays in the database until someone books one of its Seats or its Customer books again. Nothing cleans up the rest.
 - **No booking history.** Abandoned and Expired Bookings are deleted, so they cannot be analysed later.
-- **One concurrency strategy measured.** Only the unique-constraint approach was load tested; pessimistic locking, optimistic locking and queue-based booking were not compared.
+- **Seat contention could be handled more cheaply.** A request for a Seat someone else holds runs a full transaction before it fails: it locks the Showtime row, deletes lapsed Holds, inserts the Booking, hits the unique constraint, rolls back, then reads the occupied Seats to build the `409`. When many Customers want the same Seats, most of that work is wasted, and a request that loses a deadlock twice gets a `409` asking it to retry. Phase 2 could try an availability check before the insert, pessimistic locking of Seat rows (`SELECT … FOR UPDATE`), optimistic locking with a version column, or a booking queue, keeping the unique constraint as the final guard ([ADR 0004](docs/adr/0004-seat-contention-via-unique-constraint-and-lazy-holds.md)).
 - **Cancellation side effects.** Cancelling a Showtime briefly blocks new bookings of it, and a Cancelled Showtime with Refunded Bookings can never be deleted ([ADR 0005](docs/adr/0005-showtime-cancellation-in-one-adapter-transaction.md)).
 
 **Security**
@@ -297,7 +298,6 @@ Phase 1 leaves these problems for phase 2.
 
 **Operations and performance**
 - **Single instance, manual hosting.** CI publishes an image but nothing deploys it.
-- **Capacity unknown.** The baseline only covers 50 iterations/s, with the service, PostgreSQL and k6 sharing one Kaggle machine. Nobody measured the maximum throughput or the bottleneck, and the contention scenario does not synchronise requests into one simultaneous race ([baseline](docs/loadtest-baseline.md)).
 - **Untuned defaults.** The connection pool keeps Hikari's default of 10 connections, and the JVM runs without flags.
 - **Thin observability.** Actuator exposes health and metrics only; there is no tracing, structured logging or alerting.
 
