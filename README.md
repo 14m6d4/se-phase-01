@@ -176,7 +176,7 @@ sequenceDiagram
     DB-->>S: tx B: unique violation, rolled back
     S->>DB: read occupied Seats
     S-->>B: 409 Problem Details, taken: [A2]
-    Note over S,DB: a deadlock between lapsed-Hold deletes is retried once, then 409 "try again"
+    Note over S,DB: a deadlock between lapsed-Hold deletes<br/>is retried once, then gets a 409 asking to retry
 ```
 
 ## ✅ Assignment requirements
