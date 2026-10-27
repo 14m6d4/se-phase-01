@@ -1,137 +1,141 @@
 # Load test
 
-The baseline load test runs on a Kaggle CPU notebook, so that phase 2 can repeat it on the same hardware. Kaggle has no Docker. The notebook therefore:
-
-1. installs PostgreSQL with `apt`;
-2. builds the service from this repository and runs it as a plain JAR;
-3. loads it with k6 from the same machine.
-
-| File | What it is |
-|---|---|
-| `kaggle.ipynb` | The harness: checks, PostgreSQL, build, service, k6, reports |
-| `k6/<scenario>.js` | One k6 scenario per file (`smoke`, `browse`, `book`, `contention`) |
-| `seed.sql` | Load-test data: 3 cinemas x 4 auditoriums (10x12 seats), 20 movies, 7 future days of showtimes and 2,000 Customers |
-| `k6/lib/` | Shared seeded-Customer login, seeded Showtime lookup and summary handling |
-| `report.py` | Prints RPS, p50/p95/p99 and error rate from a `summary.json` |
-
-## Seeded data
-
-`loadtest/seed.sql` inserts, against the database the service is already using (run it once, on a fresh database; the inserts are not idempotent):
-
-- 3 cinemas, each with 4 auditoriums of 10 rows x 12 seats (rows A–G STANDARD, H–I VIP, J COUPLE);
-- 20 movies (durations 80–165 minutes);
-- 5 showtimes a day per auditorium (09:00, 12:00, 15:00, 18:00, 21:00 Vietnam time) for the 7 days after the seed date — every showtime is strictly in the future when seeded, and the 3-hour slots cannot overlap;
-- 2,000 CUSTOMER accounts `loadtest-{1..2000}@loadtest.local`, all sharing the password **`loadtest-password`** (one prehashed bcrypt value, so logging in costs the same as any login).
-
-## One-time setup (Kaggle, optional)
-
-1. **GitHub token (Git path only).** With `CODE_BUNDLE = None`, the notebook clones the repository with a token.
-   - Create a [fine-grained personal access token](https://github.com/settings/personal-access-tokens/new).
-   - Resource owner: `14m6d4`. Repository access: only `se-phase-01`. Permissions: **Contents: Read-only**.
-2. **Kaggle account.** Only needed for the Kaggle path; if you do not have one (or prefer not to create it), use [Run a scenario locally](#run-a-scenario-locally) instead — same notebook steps work on any machine with Java, PostgreSQL and k6. For Kaggle, phone-verify the account (Settings → Phone verification): Kaggle does not allow internet in notebooks without it.
-3. **Notebook.** On Kaggle: **Create → New Notebook**, then **File → Import Notebook** and upload `loadtest/kaggle.ipynb`.
-4. **Notebook settings** (right-hand panel):
-   - **Accelerator:** None (CPU, no GPU).
-   - **Internet:** On.
-   - **Add-ons → Secrets:** attach `GITHUB_TOKEN` only when using the Git path. A full-source bundle needs no GitHub credential.
-
-Re-import the notebook whenever `kaggle.ipynb` changes. By default, `CODE_BUNDLE = None` preserves the token-authenticated clone of `GIT_REF` into `/tmp/se-phase-01`. For unpublished changes, attach a **private Kaggle Dataset** containing a full source snapshot and set `CODE_BUNDLE` to either the ZIP path (for example `/kaggle/input/<dataset>/source.zip`) or the expanded source-root directory (for example `/kaggle/input/<dataset>/source`). The selected directory must directly contain `loadtest-bundle.json` alongside repository-root files such as `pom.xml`, `mvnw`, `.mvn/`, `src/`, and `loadtest/`.
-
-```json
-{"snapshotMode":"working-tree","sourceCommit":"<40-character git rev-parse HEAD>"}
-```
-
-Create the ZIP from the repository root with this standard-library script; it includes tracked and new non-ignored files, preserves executable bits, and writes the manifest without adding it to the worktree:
-
-```bash
-python3 - <<'PY'
-import json, subprocess, zipfile
-from pathlib import Path, PurePosixPath
-
-files = subprocess.check_output(["git", "ls-files", "-co", "--exclude-standard", "-z"]).decode().split("\0")
-with zipfile.ZipFile("source.zip", "w", zipfile.ZIP_DEFLATED) as z:
-    for name in filter(None, files):
-        path = Path(name)
-        if path.name == "source.zip":
-            continue
-        if any(part in {".git", "target", "secrets"} or part.startswith(".env") for part in PurePosixPath(name).parts):
-            continue
-        if not path.is_file() or path.is_symlink():
-            continue
-        info = zipfile.ZipInfo(name)
-        info.create_system = 3
-        info.compress_type = zipfile.ZIP_DEFLATED
-        mode = 0o755 if path.stat().st_mode & 0o111 else 0o644
-        info.external_attr = (0o100000 | mode) << 16
-        z.writestr(info, path.read_bytes())
-    z.writestr("loadtest-bundle.json", json.dumps({
-        "snapshotMode": "working-tree",
-        "sourceCommit": subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip(),
-    }))
-PY
-```
-
-Attach the ZIP to a **private Kaggle Dataset**. Kaggle may expand it into a directory instead of mounting the archive; use `!find /kaggle/input -name loadtest-bundle.json -print` to inspect the attached files, then set `CODE_BUNDLE` to the manifest's parent directory. The notebook requires that explicit root and will not guess between datasets. ZIP input remains supported. Both paths copy validated files to `/tmp/se-phase-01`, outside the saved `/kaggle/working/results`; neither reconstructs a ZIP in notebook output. Omit `.git/`, `target/`, `.env*`, and secrets; symlinks and special files are rejected. `results/env.txt` records the manifest commit and bundle hash: ZIP mode hashes exact archive bytes; expanded-directory mode hashes a deterministic fingerprint of sorted relative regular-file paths, executable flags, and file bytes; Git mode reports `none`.
-
-## Run
-
-1. Adjust the **Parameters** cell:
-   - `GIT_REF`: branch, tag or commit to test (default `main`; ignored with `CODE_BUNDLE`).
-   - `SCENARIO`: `all` runs browse, book and contention in order; or select `smoke`, `browse`, `book` or `contention`.
-   - `RATE`: target iterations per second (actual HTTP RPS is in the report; scenarios may issue multiple requests per iteration).
-   - `HOLD`: how long that rate is held.
-2. Click **Save Version → Save & Run All (Commit)**. It runs unattended; the interactive editor stops after 20 minutes idle.
-3. Open the saved version. The last cell prints the headline numbers. The **Output** tab has `results/`:
-   - `<scenario>/summary.json`: full k6 summary per run; `summary.json` is also copied from the last scenario for compatibility.
-   - `contention/contention.json` and `contention-verification.txt`: tested Showtime and SQL PASS/FAIL comparing k6 HTTP 201s with its booked-seat rows and checking duplicate seat rows.
-   - `env.txt`: hardware (`nproc`, `free -h`, `lscpu`), source provenance/base commit/bundle hash, Java/JVM, PostgreSQL, Hikari pool.
-   - `app.log`: the service's log.
-
-The environment cell stops with an explanation if internet is off or (on the Git path) the secret is missing. If the service does not become healthy within 180 s, its log tail is printed.
-
-### Reading the numbers
-
-- Only requests tagged `phase:load` are reported. Setup's seeded-Customer logins (BCrypt) are excluded.
-- **RPS** is measured HTTP requests per second averaged over the whole run, ramps and setup included; it differs from the configured iteration rate when a scenario makes multiple requests per iteration.
-- **Dropped iterations > 0** means k6 ran out of VUs (`maxVUs`) and did not reach the target rate.
-- The service and k6 share the same ~4 vCPUs, so compare runs only with the same hardware in `env.txt`.
-- Scenario threshold failures are reported after all selected scenarios have run. Book requires zero failed measured requests and valid hold/payment responses. Contention treats only `201` and `409` as expected and fails on malformed responses or unexpected HTTP statuses.
-
-The notebook seeds the database automatically after the service is healthy.
-
-The accepted baseline numbers are in the [Performance section of the main README](../README.md#performance).
+Run k6 against the service and PostgreSQL, locally or in a Kaggle CPU notebook. See [loadtest-baseline.md](../docs/loadtest-baseline.md) for results.
 
 ## Scenarios
 
-**`smoke`**: `setup()` logs in the first `maxVUs` pre-seeded Customers once with `http.batch`; each VU calls `GET /api/me` with its own token under `ramping-arrival-rate`: 30 s ramp to `RATE`, hold for `HOLD`, 10 s ramp down. Like the booking tests, it needs `seed.sql`.
+An iteration is one workflow. A virtual user (VU) is a k6 worker.
 
-**`browse`**: no login — the measured endpoints are public. Every iteration calls `GET /api/showtimes?date=<today in Vietnam>` and then `GET /api/showtimes/{id}/seats` for one of the returned showtimes (120 seats per map). Requires `seed.sql` to have been run, so there is something to browse; otherwise setup fails the run before any VU starts (k6 exit code 107, `no showtimes seeded for today or tomorrow`). Same `ramping-arrival-rate` shape as `smoke`.
+| Scenario | Workflow | Requests/iteration |
+|---|---|---:|
+| `smoke` | Read the signed-in Customer's account | 1 |
+| `browse` | List Showtimes, open a seat map | 2 |
+| `book` | Hold one Seat, pay | 2 |
+| `contention` | Try to hold one of the same 10 Seats | 1 |
 
-**`book`**: setup logs in 12 seeded Customers with `http.batch`. Each VU owns a disjoint Showtime/Seat slice and uses `__ITER` for O(1) unique allocation. With the seed's 420 Showtimes, reserving one for contention leaves 50,280 slots—4,190 per VU, enough for all ~4,000 iterations of the default 50/s, 60s run even if one VU receives every iteration. `maxVUs=12` is the default allocation cap to keep those disjoint slices large enough; it is not a measured maximum-throughput claim. High per-iteration latency can still cause dropped iterations, and longer runs can exhaust a VU's slice.
+`SCENARIO="all"` runs smoke, browse, book and contention in order. Setup requests, including login, are excluded from measured requests.
 
-**`contention`**: setup logs in 200 seeded Customers and selects 10 available Seats on the first seeded Showtime. VUs repeatedly try those same Seats; only HTTP `201`, `409 Seat already taken`, and `409 Customer already has a Pending Booking` are accepted and counted separately. That second 409 is a real business rule, not seat contention. After the run, the notebook requires at least one seat conflict, checks the conflict-counter totals, compares k6's `bookings_created` count to `booked_seat` rows for that Showtime, and rejects duplicate seat rows.
+## Run locally
 
-To add a scenario, add `k6/<name>.js` and set `SCENARIO = "<name>"`. The script must:
+Start the service and PostgreSQL using the main README. Install the k6 version pinned by `K6_VERSION` in `kaggle.ipynb`.
 
-- spread `summaryOptions` into its `options`;
-- re-export `handleSummary` from `k6/lib/summary.js` (wrap it only to add scenario-specific output);
-- pass `LOAD` in the params of every request that should be measured;
-- read `BASE_URL`, `RATE` and `HOLD` from `__ENV`, like `smoke.js` does.
-- for authenticated load, use `lib/customers.js` so each VU gets one of the seeded Customers.
-
-## Run a scenario locally
-
-Run the standard-library allocation and notebook-verifier assertions with `python3 loadtest/test_loadtest.py` (Python and Node required).
-
-Useful for debugging a script without a Kaggle round trip (and the way to run without a Kaggle account). You need [k6](https://grafana.com/docs/k6/latest/set-up/install-k6/) (same version as `K6_VERSION` in the notebook), a PostgreSQL database and the service running, e.g. `docker compose up --build` (see the main README).
+**Use a fresh test database.** Run the seed once, after the service is healthy and Flyway has applied the migrations:
 
 ```bash
-# Once per fresh database, after the service is healthy (Flyway applied):
-psql "<your postgres url for the cinema database>" -f loadtest/seed.sql
-
-mkdir -p loadtest/results            # k6 does not create it
-k6 run -e RATE=20 -e HOLD=10s loadtest/k6/browse.js
-python3 loadtest/report.py           # reads loadtest/results/summary.json
+psql -v ON_ERROR_STOP=1 "<your postgres url for the cinema database>" -f loadtest/seed.sql
+mkdir -p loadtest/results
+k6 run -e RATE=20 -e DURATION=10s loadtest/k6/browse.js
+python3 loadtest/report.py
 ```
 
-`loadtest/results/` is git-ignored.
+To run another scenario, change the script path ending in `browse.js`. Run the helper tests with `python3 loadtest/test_loadtest.py` (Python and Node required).
+
+## Run on Kaggle
+
+The notebook installs PostgreSQL, builds the service as a JAR and runs k6. All three share the notebook CPUs; Docker is unavailable. See [ADR 0003](../docs/adr/0003-load-test-on-kaggle-without-docker.md).
+
+1. Import `loadtest/kaggle.ipynb`. Set **Accelerator: None**, **Internet: On** and complete any required account verification.
+2. Choose the source:
+   - Git: set `GIT_REF` and leave `CODE_BUNDLE=None`. Attach `GITHUB_TOKEN` in **Add-ons → Secrets**, with **Contents: Read-only** access to `14m6d4/se-phase-01`.
+   - Local changes: attach a private source Dataset and set `CODE_BUNDLE="auto"`; see [Source bundle](#source-bundle). No GitHub token needed.
+3. Set `SCENARIO`, `RATE` and `DURATION`. Defaults: `all`, 50 iterations/s, `60s`.
+4. Select **Save Version → Save & Run All (Commit)**. Read the final report and download files from **Output**.
+
+Re-import after notebook changes, including the `HOLD` → `DURATION` rename. A saved run continues unattended; the interactive editor stops after 20 minutes idle. Startup failures print an explanation or service log tail.
+
+## Read the results
+
+Every scenario ramps up for 30s, holds `RATE` iterations/s for `DURATION`, then ramps down for 10s. The default run schedules about 4,000 iterations per scenario.
+
+| Metric | Meaning |
+|---|---|
+| RPS | Measured HTTP requests divided by total elapsed time, including setup and ramps |
+| p50 / p95 / p99 | Duration within which 50% / 95% / 99% of measured HTTP requests completed |
+| Error rate | Unexpected HTTP outcomes; valid contention `409` responses are expected |
+| Dropped iterations | Scheduled iterations k6 could not start within the VU limit |
+
+Latency measures individual requests; a booking workflow takes two. RPS averages the requests over this run and does not measure maximum capacity. Check hardware and runtime settings in `env.txt` when comparing runs.
+
+k6 passes when all response checks pass, no measured HTTP request fails unexpectedly and no iterations are dropped. Contention also needs a successful booking and a seat conflict. The notebook runs SQL verification automatically; a local k6 run checks HTTP responses only. The notebook reports threshold failures after all selected scenarios finish. The latency and error limits printed by `report.py` are advisory.
+
+| Output | Contents |
+|---|---|
+| `<scenario>/summary.json` | Metrics and threshold results; local k6 writes `summary.json` directly unless `RESULTS_DIR` is set |
+| `contention/contention.json` | Tested Showtime; local k6 writes `contention.json` directly unless `RESULTS_DIR` is set |
+| `contention-verification.txt` | Notebook only: HTTP counts versus SQL rows, duplicate check |
+| `env.txt` | Notebook only: source identity, hardware, JVM, PostgreSQL and pool settings |
+| `app.log` | Service log saved by the notebook |
+
+Kaggle saves these under `results/`; local scripts default to `loadtest/results/`. `summary.json` at the output root copies the last scenario only. **Keep reports and raw outputs local; do not commit them.**
+
+## Seed and limits
+
+`seed.sql` creates 3 Cinemas, 12 Auditoriums with 120 Seats each, 20 Movies and 420 Showtimes across seven days starting tomorrow in Vietnam time. It also creates 2,000 Customers: `loadtest-{1..2000}@loadtest.local` / `loadtest-password`. They share a precomputed BCrypt hash; login still verifies passwords. Rerunning the seed inserts data again, so use it only once per fresh database. Kaggle runs it automatically.
+
+- Browse chooses today or tomorrow, whichever first has Showtimes. Setup fails if both are empty; seat maps must contain 120 Seats.
+- Book uses 12 Customers and separate Seat allocations to avoid conflicts. One Showtime is reserved for contention; the remaining 50,280 Showtime/Seat pairs give each VU 4,190 choices. Longer or higher-rate runs can exhaust them. The 12-VU cap is an allocation limit.
+- Contention logs in 200 Customers and selects 10 available Seats. It counts seat conflicts separately from rejections because a Customer already has a Pending Booking. The notebook's SQL check must match successful bookings to stored Seats with no duplicates. It does not require all 10 Seats to be booked or synchronise a simultaneous race.
+
+## Source bundle
+
+From the repository root, choose a new output path outside the repository:
+
+```bash
+python3 loadtest/bundle.py -o "<new-output-path>/source.zip"
+```
+
+The helper copies tracked and untracked non-ignored files into the ZIP and keeps executable bits. It skips `.git/`, `target/`, `.env*`, `secrets/`, symlinks and special files, and will not overwrite an existing output. Check for secrets stored under other filenames, then upload to a private Dataset.
+
+`CODE_BUNDLE="auto"` requires one expanded directory under `/kaggle/input` containing `loadtest-bundle.json`; aliases to the same directory count once. You can also give an explicit ZIP or expanded-root path. The root must contain the manifest beside `pom.xml`, `mvnw`, `.mvn/`, `src/` and `loadtest/`. Check the mounted path instead of guessing it from the dataset name.
+
+The manifest records `HEAD` as `sourceCommit`, but the bundle can include uncommitted changes. Match the hash in `env.txt` to your snapshot: ZIP input hashes archive bytes; expanded input hashes sorted paths, executable flags and bytes. Git input has no bundle hash. The notebook keeps the source outside saved output.
+
+<details>
+<summary>Kaggle CLI: update an existing private Dataset and notebook</summary>
+
+Use authenticated Kaggle CLI 2.2.4. Set staging directories outside the repository and replace the placeholders:
+
+```bash
+export DATASET_DIR=...
+export KERNEL_DIR=...
+export KERNEL_REF=...          # owner/notebook
+export SOURCE_DATASET_REF=...  # owner/dataset
+export OUT_DIR=...
+mkdir -p "$DATASET_DIR" "$KERNEL_DIR" "$OUT_DIR"
+kaggle kernels pull "$KERNEL_REF" -p "$KERNEL_DIR" -m
+```
+
+1. Put `dataset-metadata.json` in `DATASET_DIR`, with `id` matching `SOURCE_DATASET_REF`. Use flat upload metadata, not the `info` wrapper returned by `kaggle datasets metadata`.
+2. Copy the repository notebook into `KERNEL_DIR`, set `CODE_BUNDLE="auto"` and the run parameters.
+3. Update `kernel-metadata.json`: point `code_file` to the notebook; keep its identity fields; set `dataset_sources` to `["<owner>/<dataset>"]` without a version number. Set `is_private: true`, `enable_gpu: false`, `enable_tpu: false`, `enable_internet: true`. Never include credentials.
+4. Build and publish the source. The upload directory should contain only the ZIP and metadata:
+
+```bash
+python3 loadtest/bundle.py -o "$DATASET_DIR/source.zip"
+kaggle datasets version -p "$DATASET_DIR" -m "load-test source snapshot"
+kaggle datasets status "$SOURCE_DATASET_REF" --format 'json(status,current_version_number)'
+```
+
+Wait for version creation and `ready` with the new version number. Keep both resources unchanged until output verification finishes; the notebook attaches the latest dataset version. Versioning preserves dataset privacy.
+
+```bash
+kaggle kernels push -p "$KERNEL_DIR"
+kaggle kernels logs -f "$KERNEL_REF"
+kaggle kernels status "$KERNEL_REF"
+```
+
+Record the version number from `Kernel version N successfully pushed`. Investigate upload warnings or errors before continuing. Wait until the status says `COMPLETE`; the status command can return exit code 0 even for `ERROR`.
+
+```bash
+kaggle kernels output "$KERNEL_REF" -p "$OUT_DIR"
+```
+
+Verify `env.txt` against your source commit and matching hash type. CLI logs/status/output use the base reference and latest version; use the saved version's **Output** tab for older results. Evidence URLs end in `/code/<owner>/<slug>/versions/<N>` and `/datasets/<owner>/<slug>/versions/<M>`; their version numbers are independent. Keep existing privacy and older versions; do not enable GPU/TPU.
+
+</details>
+
+## Add a scenario
+
+Add `k6/<name>.js` and its name to the notebook's `SCENARIO` allowlist. Add it to `RUN_SCENARIOS` to include it in `all`.
+
+Reuse `summaryOptions`, including its thresholds, `LOAD` request tags and `handleSummary`. Read `BASE_URL`, `RATE`, `DURATION` from `__ENV`; use `lib/customers.js` for seeded-Customer login.

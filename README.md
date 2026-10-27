@@ -290,15 +290,15 @@ Docker must be running: integration tests start a real PostgreSQL through Testco
 
 ## Performance
 
-Baseline load test with [k6](https://k6.io/) on a Kaggle CPU instance (4 vCPU, 31 GiB RAM), with the service, PostgreSQL and k6 sharing the machine. Load was 50 iterations/s held for 60 s.
+Accepted Kaggle baseline (kernel version 5) with [k6](https://k6.io/) on a Kaggle CPU notebook, with the service, PostgreSQL and k6 sharing the machine. The run used the source snapshot identified in [`docs/loadtest-baseline.md`](docs/loadtest-baseline.md), the notebook's native `CODE_BUNDLE="auto"`, `RATE=50`, `DURATION=60s` and k6 v2.3.0; runtime details are in the run's `results/env.txt`.
 
 | Scenario | Workflow | Throughput | p50 | p95 | p99 | Error rate |
 |---|---|---:|---:|---:|---:|---:|
-| browse | list showtimes → open seat map | 119.8 req/s | 2.86 ms | 6.85 ms | 11.10 ms | 0% |
-| book | hold seats → pay | 78.2 req/s | 8.49 ms | 12.58 ms | 15.27 ms | 0% |
-| contention | many customers race for the same 10 seats | 36.9 req/s | 6.51 ms | 8.25 ms | 9.47 ms | 0% |
+| browse | list showtimes → open seat map | 79.9 req/s | 3.68 ms | 7.27 ms | 12.61 ms | 0% |
+| book | hold seats → pay | 78.2 req/s | 7.88 ms | 11.31 ms | 14.85 ms | 0% |
+| contention | many customers race for the same 10 seats | 37.1 req/s | 7.83 ms | 9.35 ms | 10.84 ms | 0% |
 
-Under contention, exactly 10 bookings succeeded and every other attempt received a `409`. A SQL check after the run confirmed no seat was sold twice.
+Under contention, exactly 10 bookings succeeded and 3,989 attempts received the expected `409` conflicts; a SQL check after the run confirmed no seat was sold twice. Compare another run only against its recorded `results/env.txt`.
 
 Scenarios, seed data and instructions for reproducing the run are in [`loadtest/`](loadtest/README.md).
 

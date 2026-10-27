@@ -7,9 +7,9 @@ import { loginCustomers, MAX_VUS } from './lib/customers.js';
 export { handleSummary };
 
 const BASE_URL = __ENV.BASE_URL || 'http://localhost:8080';
-// Target requests per second and how long to hold it; the notebook passes them with -e.
+// Target iterations per second and how long to hold it; the notebook passes them with -e.
 const RATE = Number(__ENV.RATE || 50);
-const HOLD = __ENV.HOLD || '60s';
+const DURATION = __ENV.DURATION || '60s';
 
 export const options = {
 	...summaryOptions,
@@ -24,7 +24,7 @@ export const options = {
 			maxVUs: MAX_VUS,
 			stages: [
 				{ duration: '30s', target: RATE },
-				{ duration: HOLD, target: RATE },
+				{ duration: DURATION, target: RATE },
 				{ duration: '10s', target: 0 },
 			],
 		},

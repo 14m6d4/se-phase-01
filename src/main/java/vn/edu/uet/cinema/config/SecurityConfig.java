@@ -52,7 +52,7 @@ public class SecurityConfig {
 			.sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
 			.authorizeHttpRequests(auth -> auth
 				.requestMatchers("/api/auth/**", "/error", "/actuator/health", "/swagger-ui.html", "/swagger-ui/**",
-					"/v3/api-docs/**").permitAll()
+					"/v3/api-docs/**", "/v3/api-docs.yaml").permitAll()
 				.requestMatchers(GET, CATALOGUE).permitAll()
 				.requestMatchers(CATALOGUE).hasRole("ADMIN")
 				.requestMatchers("/api/bookings/**").hasRole("CUSTOMER")
