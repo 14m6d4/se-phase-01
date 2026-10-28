@@ -278,18 +278,21 @@ Docker must be running, because the integration tests start a real PostgreSQL th
 
 ## Performance
 
-The accepted baseline ran [k6](https://k6.io/) v2.3.0 on a [Kaggle CPU notebook (version 6)](https://www.kaggle.com/code/tunichdi/se-phase-01-issue19-baseline/versions/6), with the service, PostgreSQL and k6 on the same machine, at `RATE=50` for `DURATION=60s`. [`docs/loadtest-baseline.md`](docs/loadtest-baseline.md) records the source snapshot, and the run's `results/env.txt` has the runtime details.
+The current capacity baseline uses [k6](https://k6.io/) v2.3.0 on two independent public Kaggle CPU notebooks. The service, PostgreSQL and k6 share each notebook, with k6 pinned to one CPU and the service plus PostgreSQL on CPUs 1-3. [`docs/loadtest-baseline.md`](docs/loadtest-baseline.md) records the source snapshot, stepped results, telemetry and comparison.
 
-| Scenario | Workflow | Run-average RPS | p50 | p95 | p99 | Error rate |
-|---|---|---:|---:|---:|---:|---:|
-| smoke | read the signed-in Customer's account | 36.7 | 2.80 ms | 5.09 ms | 6.60 ms | 0% |
-| browse | list showtimes → open seat map | 79.9 | 3.06 ms | 5.22 ms | 8.78 ms | 0% |
-| book | hold seats → pay | 78.4 | 6.21 ms | 9.80 ms | 13.06 ms | 0% |
-| contention | many customers race for the same 10 seats | 37.0 | 6.30 ms | 8.32 ms | 10.26 ms | 0% |
+![Capacity baseline summary](docs/loadtest/summary.png)
 
-RPS averages the whole run, including setup and ramps, so it is not the service's maximum capacity. Under contention, exactly 10 bookings succeeded and the other 3,989 attempts got the expected `409`. A SQL check after the run found no seat sold twice. Compare another run only against its own `results/env.txt`.
+| Scenario | Workflow | Run 1 highest held | Run 2 highest held | Run 1 first broken rate | Run 2 first broken rate |
+|---|---|---:|---:|---:|---:|
+| account | read the signed-in Customer's Account | 1,200 it/s | 1,200 it/s | 1,600 it/s | 1,600 it/s |
+| browse | list Showtimes and open a seat map | 400 it/s | 400 it/s | 600 it/s | 600 it/s |
+| book | hold an unused Seat and pay | 50 it/s | none | 75 it/s | 50 it/s |
+| contention | try to hold the same 10 held Seats | 200 it/s | 400 it/s | 300 it/s | 600 it/s |
+| race | race for the same free Seats, then abandon | 200 it/s | 300 it/s | 300 it/s | 400 it/s |
 
-[`loadtest/`](loadtest/README.md) has the scenarios, seed data and steps to reproduce the run.
+These are the highest configured steps that held under the baseline rules. They do not measure maximum service capacity. Browse's first broken step used 92% and 93% of the one k6 core, so its ceiling is generator-confounded. Run 2's book step dropped three iterations at 50 it/s with low service CPU and no pool queue, so no service bottleneck was isolated.
+
+[`loadtest/`](loadtest/README.md) has the scenarios, seed data and reproduction steps.
 
 ## CI/CD
 
