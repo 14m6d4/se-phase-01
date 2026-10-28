@@ -54,7 +54,7 @@ _Avoid_: Lock, reservation
 A Booking whose Hold is running and which has not been paid yet. A Customer can abandon it; it then disappears and its Seats are free.
 
 **Expired**:
-A Pending Booking whose Hold has lapsed. It can no longer be paid and is eventually removed.
+A Pending Booking whose Hold has lapsed. It can no longer be paid and no longer claims its Seats.
 
 **Confirmed**:
 A paid Booking. The Customer can never cancel it or get a refund; a Customer who can't attend passes it on themselves. Only the cinema cancelling its Showtime ends it, as Refunded.

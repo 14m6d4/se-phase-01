@@ -278,19 +278,19 @@ Docker must be running, because the integration tests start a real PostgreSQL th
 
 ## Performance
 
-The current capacity baseline uses [k6](https://k6.io/) v2.3.0 on two independent public Kaggle CPU notebooks. The service, PostgreSQL and k6 share each notebook, with k6 pinned to one CPU and the service plus PostgreSQL on CPUs 1-3. [`docs/loadtest-baseline.md`](docs/loadtest-baseline.md) records the source snapshot, stepped results, telemetry and comparison.
+The current capacity baseline uses [k6](https://k6.io/) v2.3.0 on two independent public Kaggle CPU notebooks. The service, PostgreSQL and k6 share each notebook, with k6 pinned to one CPU and the service plus PostgreSQL on CPUs 1-3. [`docs/loadtest-baseline.md`](docs/loadtest-baseline.md) records the source snapshot, stepped results, telemetry and comparison. Rates are in it/s, completed workflows per second; browse and book make two HTTP requests per workflow.
 
 ![Capacity baseline summary](docs/loadtest/summary.png)
 
-| Scenario | Workflow | Run 1 highest held | Run 2 highest held | Run 1 first broken rate | Run 2 first broken rate |
-|---|---|---:|---:|---:|---:|
-| account | read the signed-in Customer's Account | 1,200 it/s | 1,200 it/s | 1,600 it/s | 1,600 it/s |
-| browse | list Showtimes and open a seat map | 400 it/s | 400 it/s | 600 it/s | 600 it/s |
-| book | hold an unused Seat and pay | 50 it/s | none | 75 it/s | 50 it/s |
-| contention | try to hold the same 10 held Seats | 200 it/s | 400 it/s | 300 it/s | 600 it/s |
-| race | race for the same free Seats, then abandon | 200 it/s | 300 it/s | 300 it/s | 400 it/s |
+| Scenario | Highest held, it/s (Run 1 / Run 2) | Gave out first |
+|---|---:|---|
+| account | 1,200 / 1,200 | Application request queue (Tomcat threads, Hikari pending) |
+| browse | 400 / 400 | Inconclusive: k6 at 92-93% of its one core |
+| book | 50 / none | Not identified; high iowait is the first lead |
+| contention | 200 / 400 | PostgreSQL and app contention on the seat-status query |
+| race | 200 / 300 | PostgreSQL and app contention on the seat-status query |
 
-These are the highest configured steps that held under the baseline rules. They are not a measure of the service's maximum capacity. Browse's first broken step used 92% and 93% of the one k6 core, so k6 may have set that ceiling. Run 2's book step dropped three iterations at 50 it/s with low service CPU and no pool queue, which points to no particular tier.
+These are the highest configured steps that held under the baseline rules. They are not a measure of the service's maximum capacity. All 21 contention and race steps passed SQL verification: no Seat was booked twice, and the `201` and `409` counts add up. Under contention, the query that reads a Showtime's taken Seats (`booking` joined with `booked_seat`) used 51-149 s of database time per step, which makes it the first target for phase 2.
 
 [`loadtest/`](loadtest/README.md) has the scenarios, seed data and reproduction steps.
 
@@ -322,6 +322,7 @@ Phase 1 leaves these problems for phase 2.
 
 **Operations and performance**
 - **Single instance, manual hosting.** CI publishes an image but nothing deploys it.
+- **Booking throughput is low and unexplained.** Book held only 50 it/s, with no tier saturated. iowait was 6-12% there, far above every other scenario, so disk and commit latency is the first lead ([baseline](docs/loadtest-baseline.md#book)).
 - **Thin observability.** Actuator exposes health and metrics only; there is no tracing, structured logging or alerting.
 
 ## Documentation
@@ -334,6 +335,7 @@ Phase 1 leaves these problems for phase 2.
 | [`docs/development.md`](docs/development.md) | Running without Compose, configuration, project layout |
 | [`docs/adr/`](docs/adr/) | Architecture decisions and why they were made |
 | [`docs/loadtest-baseline.md`](docs/loadtest-baseline.md) | Accepted Kaggle load-test results |
+| [`loadtest/README.md`](loadtest/README.md) | Load-test scenarios, seed data, and how to run them locally or on Kaggle |
 
 ## License
 

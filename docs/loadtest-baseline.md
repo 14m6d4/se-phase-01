@@ -10,7 +10,7 @@ Two public Kaggle CPU notebooks ran the same code (`4d40ac3`) with the same sett
 |---|---|---:|---:|---|
 | account | Read the signed-in Customer's Account | 1,200 / 1,200 | 1,600 / 1,600 | Application request queue (Tomcat threads, Hikari pending) |
 | browse | List Showtimes and open a seat map | 400 / 400 | 600 / 600 | Inconclusive: k6 at 92-93% of its one core |
-| book | Hold an unused Seat and pay | 50 / none | 75 / 50 | Not identified: only dropped iterations, no tier saturated |
+| book | Hold an unused Seat and pay | 50 / none | 75 / 50 | Not identified: only dropped iterations, no tier saturated; iowait (6-12%) is the first lead |
 | contention | Many Customers try to book the same 10 Seats, which are already on Hold | 200 / 400 | 300 / 600 | PostgreSQL and app contention on the seat-status query |
 | race | Customers race for the same free Seats, and each winner abandons | 200 / 300 | 300 / 400 | PostgreSQL and app contention on the seat-status query, plus lock waits in Run 1 |
 
@@ -167,7 +167,7 @@ Both runs broke at 600 it/s: they reached only 420 and 430 it/s, p95 rose to abo
 | Run 1 | 100 | 98.7 | 197.3 | 6.83 | 9.83 | 146.84 | 0.00% | 99.99% | 80 | 0 | broke: dropped iterations |
 | Run 2 | 50 | 50.0 | 99.9 | 5.76 | 8.28 | 83.75 | 0.00% | 99.98% | 3 | 0 | broke: dropped iterations |
 
-Book broke on dropped iterations alone: one at 75 it/s in Run 1, and three at 50 it/s in Run 2, which therefore has no held step. Latency stayed low (p95 under 10 ms), errors were 0%, and nothing was saturated: Java under 40%, PostgreSQL under 25%, k6 under 15%, and no Hikari queue. These runs do not identify a tier.
+Book broke on dropped iterations alone: one at 75 it/s in Run 1, and three at 50 it/s in Run 2, which therefore has no held step. Latency stayed low (p95 under 10 ms), errors were 0%, and nothing was saturated: Java under 40%, PostgreSQL under 25%, k6 under 15%, and no Hikari queue. These runs do not identify a tier. The one signal out of line is iowait, at 12.43% and 6.20% against at most 1.78% in the other scenarios, with IO the largest PostgreSQL wait type. Book is the only scenario that commits a write on every request, so disk and commit latency is the first thing to check in phase 2.
 
 | At first broken step | Run 1 at 75 it/s | Run 2 at 50 it/s |
 |---|---:|---:|

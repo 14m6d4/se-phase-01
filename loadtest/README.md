@@ -43,7 +43,7 @@ The notebook installs PostgreSQL, builds the service as a JAR and runs k6; Docke
 3. Set `SCENARIO`, `START_RATE`, `MAX_RATE` and `DURATION`. Defaults: `all`, 50 and 6,400 iterations/s, `60s`. Keep the defaults for a baseline that phase 2 compares against.
 4. Select **Save Version → Save & Run All (Commit)**. Read the final report and download files from **Output**.
 
-A baseline is two such versions of the same source: Kaggle machines vary, and the spread between the two runs shows how much of a later difference is noise. Note any scenario whose max sustainable throughput, or p95 at the same step, differs by more than 10% between the two. Re-import after notebook changes, including the `RATE` → `START_RATE` and `MAX_RATE` change. A saved run continues unattended; a full `all` run takes about an hour. The interactive editor stops after 20 minutes idle. Startup failures print an explanation or service log tail.
+A baseline is two such versions of the same source: Kaggle machines vary, and the spread between the two runs shows how much of a later difference is noise. Note any scenario whose max sustainable throughput, or p95 at the same step, differs by more than 10% between the two. A saved run continues unattended; a full `all` run takes about an hour. The interactive editor stops after 20 minutes idle. Startup failures print an explanation or service log tail.
 
 ## Read the results
 

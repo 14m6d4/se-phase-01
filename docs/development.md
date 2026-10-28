@@ -1,6 +1,6 @@
 # Development guide
 
-For the Docker Compose quick start, see the [README](../README.md#-getting-started).
+For the Docker Compose quick start, see the [README](../README.md#getting-started).
 
 ## Running locally
 
