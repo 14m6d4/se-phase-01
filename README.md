@@ -1,8 +1,8 @@
 <div align="center">
 
-# 🎬 Cinema Booking API
+# Cinema Booking API
 
-[![Tech stack](https://skillicons.dev/icons?i=java,spring,hibernate,postgres,maven,docker,githubactions)](#-tech-stack)
+[![Tech stack](https://skillicons.dev/icons?i=java,spring,hibernate,postgres,maven,docker,githubactions)](#tech-stack)
 
 [![CI](https://github.com/14m6d4/se-phase-01/actions/workflows/ci.yml/badge.svg)](https://github.com/14m6d4/se-phase-01/actions/workflows/ci.yml)
 [![OpenAPI 3.1](https://img.shields.io/badge/OpenAPI-3.1-6BA539?logo=openapiinitiative&logoColor=white)](docs/openapi.json)
@@ -18,28 +18,28 @@
 ![Testcontainers 2](https://img.shields.io/badge/Testcontainers-2-291A3F)
 ![k6](https://img.shields.io/badge/k6-load%20test-7D64FF?logo=k6&logoColor=white)
 
-</div>
-
 A REST backend for a cinema chain. Admins run the catalogue of cinemas, auditoriums, movies and showtimes; customers hold seats and pay for them. It is the phase 1 project of the Software Architecture course at VNU University of Engineering and Technology (UET).
 
-## 📑 Table of contents
+</div>
 
-- [Features](#-features)
-- [Domain model](#-domain-model)
-- [Booking lifecycle](#-booking-lifecycle)
-- [Architecture](#-architecture)
-- [Assignment requirements](#-assignment-requirements)
-- [Tech stack](#-tech-stack)
-- [Getting started](#-getting-started)
-- [API overview](#-api-overview)
-- [Testing](#-testing)
-- [Performance](#-performance)
-- [CI/CD](#-cicd)
-- [Known issues](#-known-issues)
-- [Documentation](#-documentation)
-- [License](#-license)
+## Table of contents
 
-## ✨ Features
+- [Features](#features)
+- [Domain model](#domain-model)
+- [Booking lifecycle](#booking-lifecycle)
+- [Architecture](#architecture)
+- [Assignment requirements](#assignment-requirements)
+- [Tech stack](#tech-stack)
+- [Getting started](#getting-started)
+- [API overview](#api-overview)
+- [Testing](#testing)
+- [Performance](#performance)
+- [CI/CD](#cicd)
+- [Known issues](#known-issues)
+- [Documentation](#documentation)
+- [License](#license)
+
+## Features
 
 **Catalogue management (Admin)**
 - Cinemas and auditoriums. An auditorium's seat layout is generated from its size (up to 26 rows), and each row is Standard, VIP or Couple.
@@ -59,7 +59,7 @@ A REST backend for a cinema chain. Admins run the catalogue of cinemas, auditori
 - Health and metrics endpoints through Spring Boot Actuator.
 - A Docker image, published to GitHub Container Registry.
 
-## 🎬 Domain model
+## Domain model
 
 ```mermaid
 erDiagram
@@ -100,7 +100,7 @@ The database enforces three rules on its own:
 
 [`GLOSSARY.md`](GLOSSARY.md) defines each term (Hold, Pending, Refunded and the rest).
 
-## 🎫 Booking lifecycle
+## Booking lifecycle
 
 ```mermaid
 stateDiagram-v2
@@ -122,7 +122,7 @@ Each booked seat keeps the price it had when the booking was made, so later pric
 
 A customer can have only one live pending booking at a time, a showtime can't be booked once it has started, and paying a confirmed booking again returns it unchanged. The [booking walkthrough](docs/booking-walkthrough.md) runs the whole lifecycle on a live service.
 
-## 🧱 Architecture
+## Architecture
 
 The service is one deployable with a layered architecture, one package per layer under `vn.edu.uet.cinema`.
 
@@ -179,11 +179,11 @@ sequenceDiagram
     Note over S,DB: a deadlock between lapsed-Hold deletes<br/>is retried once, then gets a 409 asking to retry
 ```
 
-## ✅ Assignment requirements
+## Assignment requirements
 
 | Requirement | Where it is met |
 |---|---|
-| REST + JSON with POST, GET and DELETE | [API overview](#-api-overview) |
+| REST + JSON with POST, GET and DELETE | [API overview](#api-overview) |
 | OpenAPI / Swagger specification | springdoc, Swagger UI at `/swagger-ui.html`, exported as [`docs/openapi.json`](docs/openapi.json) |
 | Layered architecture, business layer free of web and DB imports | `api` → `business` → `persistence`, enforced by an ArchUnit test ([ADR 0001](docs/adr/0001-framework-free-business-layer.md)) |
 | Repository / data access layer with an ORM | Spring Data JPA (Hibernate) adapters implementing business-layer repository interfaces |
@@ -192,7 +192,7 @@ sequenceDiagram
 | Docker | Multi-stage [`Dockerfile`](Dockerfile), [`docker-compose.yml`](docker-compose.yml), image published to GHCR |
 | Load test on a Kaggle CPU notebook | [`loadtest/`](loadtest/README.md) with k6 ([ADR 0003](docs/adr/0003-load-test-on-kaggle-without-docker.md)), results in [`docs/loadtest-baseline.md`](docs/loadtest-baseline.md) |
 
-## 🧰 Tech stack
+## Tech stack
 
 | Area | Technology |
 |---|---|
@@ -205,7 +205,7 @@ sequenceDiagram
 | Build & delivery | Maven Wrapper, Docker, GitHub Actions, GHCR |
 | Load testing | k6 |
 
-## 🚀 Getting started
+## Getting started
 
 You need Docker with Docker Compose.
 
@@ -228,7 +228,7 @@ The Admin account comes from `ADMIN_EMAIL` and `ADMIN_PASSWORD` at startup. Comp
 
 The [development guide](docs/development.md) covers running without Compose, every environment variable, a `curl` login example and the project layout.
 
-## 📡 API overview
+## API overview
 
 Base path: `/api`. Swagger UI and [`docs/openapi.json`](docs/openapi.json) have the full request and response schemas.
 
@@ -263,7 +263,7 @@ A login returns a bearer token valid for one hour; send it as `Authorization: Be
 
 Money is an integer amount in VND. Timestamps are ISO-8601 with an offset. The service runs on `Asia/Ho_Chi_Minh`, and `?date=` covers that calendar day in Vietnam time.
 
-## 🧪 Testing
+## Testing
 
 ```bash
 ./mvnw verify
@@ -276,7 +276,7 @@ Docker must be running, because the integration tests start a real PostgreSQL th
 - Architecture tests (ArchUnit) for the layer rules.
 - Contract tests checking that the generated OpenAPI specification lists every operation, error response and security requirement.
 
-## 📈 Performance
+## Performance
 
 The accepted baseline ran [k6](https://k6.io/) v2.3.0 on a [Kaggle CPU notebook (version 6)](https://www.kaggle.com/code/tunichdi/se-phase-01-issue19-baseline/versions/6), with the service, PostgreSQL and k6 on the same machine, at `RATE=50` for `DURATION=60s`. [`docs/loadtest-baseline.md`](docs/loadtest-baseline.md) records the source snapshot, and the run's `results/env.txt` has the runtime details.
 
@@ -291,14 +291,14 @@ RPS averages the whole run, including setup and ramps, so it is not the service'
 
 [`loadtest/`](loadtest/README.md) has the scenarios, seed data and steps to reproduce the run.
 
-## 🔄 CI/CD
+## CI/CD
 
 GitHub Actions ([`ci.yml`](.github/workflows/ci.yml)) runs on pull requests and on pushes to `main`. A change that touches only `docs/`, Markdown files or `LICENSE` skips it.
 
 1. The `verify` job runs the load-test helper checks and `./mvnw verify`.
 2. On a push to `main`, the `image` job builds the Docker image and pushes it to `ghcr.io/14m6d4/se-phase-01`, tagged `latest` and with the commit SHA.
 
-## 🐛 Known issues
+## Known issues
 
 Phase 1 leaves these problems for phase 2.
 
@@ -329,7 +329,7 @@ Phase 1 leaves these problems for phase 2.
 - **Two model sets.** Business models and JPA entities are separate, joined by hand-written mappers ([ADR 0001](docs/adr/0001-framework-free-business-layer.md)).
 - **Rules kept in two places.** Delete guards and the Showtime overlap rule live in both the business layer and the database, and must be changed together ([ADR 0006](docs/adr/0006-delete-guards-in-business-and-database.md)).
 
-## 📚 Documentation
+## Documentation
 
 | Document | What it covers |
 |---|---|
@@ -340,6 +340,6 @@ Phase 1 leaves these problems for phase 2.
 | [`docs/adr/`](docs/adr/) | Architecture decisions and why they were made |
 | [`docs/loadtest-baseline.md`](docs/loadtest-baseline.md) | Accepted Kaggle load-test results |
 
-## 📄 License
+## License
 
 Released under the [MIT License](LICENSE).
