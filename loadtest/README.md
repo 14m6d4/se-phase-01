@@ -71,8 +71,19 @@ The highest step that held is the scenario's **max sustainable throughput**. A `
 | `<scenario>/<rate>/k6.log`, `<scenario>/warmup/` | k6 output of the step; the warm-up's results |
 | `env.txt` | Notebook only: source identity, hardware, CPU affinity, JVM, PostgreSQL and pool settings |
 | `app.log` | Service log saved by the notebook |
+| `charts/` | Notebook only: the charts below for this run |
 
 The sampler adds a few actuator requests and one SQL query per second. A failed SQL verification fails the notebook after the report. **Keep reports and raw outputs local; do not commit them.**
+
+### Charts
+
+`charts.py` draws one PNG per scenario and `summary.png`, the max sustainable throughput of every scenario. A scenario's panels share the rate axis: throughput against the target, p50/p95/p99, CPU per process, Hikari connections, PostgreSQL waits and, for contention and race, 409s by reason. A filled marker held, a hollow red one broke, a gray one ran out of Seats. It needs matplotlib (`pip install matplotlib`); `report.py` does not, and a chart failure in the notebook only prints a warning.
+
+For a baseline, overlay both runs; the line style tells them apart. These PNGs are the only output that goes into the repo:
+
+```bash
+python3 loadtest/charts.py --out docs/loadtest baseline-1=<run 1>/results baseline-2=<run 2>/results
+```
 
 ## Seed and limits
 

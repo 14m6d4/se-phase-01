@@ -57,6 +57,60 @@ def test_report_verdict():
     assert verdict(summary(exhausted=900))["status"] == "exhausted"
 
 
+def fake_results(root, slowdown=1.0):
+    """A capacity run's results/ in which every scenario holds up to 800 it/s and breaks at 1,600."""
+    for scenario in ["account", "browse", "book", "contention", "race"]:
+        for rate in [50, 100, 200, 400, 800, 1600, 1200]:
+            load = min(rate, 1100 / slowdown) / 1100
+            achieved = rate if rate <= 800 else 1100 / slowdown
+            p95 = 8 + 400 * load ** 6
+            iterations = 60 * achieved
+            metrics = {
+                "iterations": {"values": {"count": iterations}},
+                "http_reqs{phase:load}": {"values": {"count": 2 * iterations}},
+                "http_req_duration{phase:load}": {"values": {"med": p95 / 3, "p(95)": p95, "p(99)": 1.8 * p95}},
+                "http_req_failed{phase:load}": {"values": {"rate": 0.0}},
+                "checks": {"values": {"rate": 1.0}},
+                "seat_conflicts": {"values": {"count": 0.8 * iterations}},
+                "pending_customer_conflicts": {"values": {"count": 0.05 * iterations}},
+                "busy_conflicts": {"values": {"count": 0.1 * iterations * load}},
+                "free_again_conflicts": {"values": {"count": 0.02 * iterations}},
+            }
+            if rate == 1600:
+                metrics["dropped_iterations"] = {"values": {"count": 500}}
+            step = root / scenario / str(rate)
+            step.mkdir(parents=True)
+            (step / "summary.json").write_text(json.dumps({"load": {"rate": rate, "duration": "60s"},
+                                                           "metrics": metrics}))
+            rows = ["t,cpu_java,cpu_postgres,cpu_k6,iowait,hikari_active,hikari_pending,hikari_acquire_count,"
+                    "hikari_acquire_total_ms,tomcat_busy,gc_pause_count,gc_pause_total_ms,pg_active,pg_lock,"
+                    "pg_lwlock,pg_io,pg_other"]
+            for t in range(3):
+                rows.append(f"{t},{280 * load},{120 * load},{40 + 55 * load},0.5,{10 * load},{30 * load ** 4},"
+                            f"{t * iterations},{t * iterations * 0.2},{150 * load},{t},{t * 5},{6 * load},"
+                            f"{3 * load ** 3},{load},0.2,0.1")
+            (step / "telemetry.csv").write_text("\n".join(rows) + "\n")
+
+
+def test_charts():
+    try:
+        import matplotlib  # noqa: F401
+    except ImportError:
+        print("SKIP  charts: matplotlib is not installed")
+        return
+    with tempfile.TemporaryDirectory() as directory:
+        root = Path(directory)
+        fake_results(root / "one")
+        fake_results(root / "two", slowdown=1.1)
+        out = root / "charts"
+        subprocess.run([sys.executable, "-B", str(ROOT / "loadtest/charts.py"), "--out", str(out),
+                        f"baseline-1={root / 'one'}", f"baseline-2={root / 'two'}"], check=True,
+                       capture_output=True)
+        pngs = {path.name: path.stat().st_size for path in out.glob("*.png")}
+        assert set(pngs) == {f"{name}.png" for name in ["account", "browse", "book", "contention", "race", "summary"]}
+        assert all(size > 10_000 for size in pngs.values()), pngs
+
+
 def test_seat_slots():
     source = (ROOT / "loadtest/k6/lib/seat-allocation.js").read_text()
     node(source + """
@@ -621,6 +675,7 @@ def test_source_bundle_inputs():
 
 if __name__ == "__main__":
     test_report_verdict()
+    test_charts()
     test_seat_slots()
     test_conflicts()
     test_browse_setup()
@@ -631,5 +686,5 @@ if __name__ == "__main__":
     test_contention_verifier()
     test_source_bundle_paths()
     test_source_bundle_inputs()
-    print("PASS  report verdict; seat slots; conflicts; browse; showtimes; notebook; SQL verifier; "
+    print("PASS  report verdict; charts; seat slots; conflicts; browse; showtimes; notebook; SQL verifier; "
           "Git fallback; bundle.py ZIP/directory round trips, deterministic hash, and path/symlink rejection")
