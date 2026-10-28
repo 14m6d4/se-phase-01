@@ -303,27 +303,20 @@ GitHub Actions ([`ci.yml`](.github/workflows/ci.yml)) runs on pull requests and 
 
 ## Known issues
 
-Phase 1 leaves these problems for phase 2.
+Phase 1 deliberately stops short of these; phase 2 reruns the [load test](docs/loadtest-baseline.md) to measure each change.
 
-**Booking and concurrency**
-- **Seat hoarding.** A Hold claims its Seats whether or not it is ever paid. Registration is open, with no email verification and no rate limit, so many accounts can keep a Showtime's Seats held without buying ([ADR 0004](docs/adr/0004-seat-contention-via-unique-constraint-and-lazy-holds.md)).
-- **Lapsed Holds linger.** Expiry is lazy: a lapsed Hold stays in the database until someone books one of its Seats or its Customer books again. Nothing cleans up the rest.
-- **No booking history.** Abandoned and Expired Bookings are deleted, so they cannot be analysed later.
-- **Seat contention is handled simply.** Concurrent requests for the same Seats are settled only by the database's unique constraint. This is correct but wastes work when many Customers want the same Seats, so it can be optimised ([ADR 0004](docs/adr/0004-seat-contention-via-unique-constraint-and-lazy-holds.md)).
-- **Cancellation side effects.** Cancelling a Showtime briefly blocks new bookings of it, and a Cancelled Showtime with Refunded Bookings can never be deleted ([ADR 0005](docs/adr/0005-showtime-cancellation-in-one-adapter-transaction.md)).
-
-**Security**
-- **Tokens cannot be revoked.** JWTs are signed with one shared HS256 secret and stay valid for their full hour; there is no refresh token and no logout.
-- **No rate limiting** on login, registration or booking, so passwords can be brute-forced and endpoints flooded.
-- **One Admin.** The only Admin comes from environment variables. Nobody can add Admins or audit their actions, and rotating the password needs a restart.
-
-**API**
-- **No pagination.** `GET /movies`, `GET /cinemas` and `GET /bookings` return every row.
-
-**Operations and performance**
-- **Single instance, manual hosting.** CI publishes an image but nothing deploys it.
-- **Booking throughput is low and unexplained.** Book held only 50 it/s, with no tier saturated. iowait was 6-12% there, far above every other scenario, so disk and commit latency is the first lead ([baseline](docs/loadtest-baseline.md#book)).
-- **Thin observability.** Actuator exposes health and metrics only; there is no tracing, structured logging or alerting.
+| Issue | Severity | Impact | Phase 2 direction |
+|---|---|---|---|
+| Seat hoarding | High | Many free accounts can together keep a Showtime's Seats held without paying | Rate-limit holds, verify email before booking |
+| Simulated payment | High | No gateway: payments can't fail and refunds move no money | Integrate a payment gateway; make charges and refunds idempotent |
+| Tokens can't be revoked | High | A leaked token works for its full hour; no logout | Short-lived access tokens plus revocable refresh tokens |
+| No rate limiting | High | Login can be brute-forced and endpoints flooded | Per-IP and per-account limits |
+| One Admin | Medium | The Admin comes from env vars; no audit; rotating the password needs a restart | Admin management and an audit log |
+| Seat contention settled by the database alone | Medium | Under contention the service holds 200-400 it/s, and most database time goes to reading which Seats are taken | Cheaper seat-status reads, then compare pessimistic locking, optimistic locking and a booking queue ([ADR 0004](docs/adr/0004-seat-contention-via-unique-constraint-and-lazy-holds.md)) |
+| Seat layouts re-read every request | Medium | The most expensive browse query, though a layout never changes | Cache layouts per Auditorium |
+| Single instance | Medium | No failover or horizontal scaling; CI publishes an image but nothing deploys it | Several instances behind a load balancer |
+| Thin observability | Low | Health and metrics only | Tracing, structured logs, alerts |
+| No pagination | Low | `GET /movies`, `/cinemas` and `/bookings` return every row | `page` and `size` parameters |
 
 ## Documentation
 
