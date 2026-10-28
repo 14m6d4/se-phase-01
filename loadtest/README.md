@@ -1,80 +1,87 @@
 # Load test
 
-Run k6 against the service and PostgreSQL, locally or in a Kaggle CPU notebook. See [loadtest-baseline.md](../docs/loadtest-baseline.md) for the latest results and the public [Kaggle notebook (version 6)](https://www.kaggle.com/code/tunichdi/se-phase-01-issue19-baseline/versions/6) for the run and outputs.
+Find the highest rate each workflow sustains and which tier gives out first, by running k6 against the service and PostgreSQL in a Kaggle CPU notebook (or locally, one step at a time). The method is in [ADR 0007](../docs/adr/0007-capacity-baseline-by-stepped-arrival-rate-runs.md). See [loadtest-baseline.md](../docs/loadtest-baseline.md) for the latest results.
 
 ## Scenarios
 
-An iteration is one workflow. A virtual user (VU) is a k6 worker.
+An iteration is one workflow. A virtual user (VU) is a k6 worker. A step is one k6 run at one constant rate.
 
-| Scenario | Workflow | Requests/iteration |
-|---|---|---:|
-| `smoke` | Read the signed-in Customer's account | 1 |
-| `browse` | List Showtimes, open a seat map | 2 |
-| `book` | Hold one Seat, pay | 2 |
-| `contention` | Try to hold one of the same 10 Seats | 1 |
+| Scenario | Workflow | Requests/iteration | Customers |
+|---|---|---:|---|
+| `account` | Read the signed-in Customer's Account | 1 | 1..2000 |
+| `browse` | List Showtimes, open a seat map | 2 | none |
+| `book` | Hold one unused Seat, pay | 2 | 1..2000 |
+| `contention` | Try to hold one of the same 10 Seats, which stay held | 1 | 2001..4000 |
+| `race` | Like contention, but a winner abandons at once, so attempts race for free Seats | 1 | 4001..6000 |
 
-`SCENARIO="all"` runs smoke, browse, book and contention in order. Setup requests, including login, are excluded from measured requests.
+`SCENARIO="all"` runs them in that order. Contention measures the cost of meeting a held Seat; race measures Customers racing for the same free Seat. Setup requests, including login, are excluded from measured requests, and so is the abandon after a race win.
 
 ## Run locally
 
 Start the service and PostgreSQL using the main README. Install the k6 version pinned by `K6_VERSION` in `kaggle.ipynb`.
 
-**Use a fresh test database.** Run the seed once, after the service is healthy and Flyway has applied the migrations:
+**Use a fresh test database.** Run the seed once, after the service is healthy and Flyway has applied the migrations. A local run is one step; only the notebook steps through rates and samples telemetry.
 
 ```bash
 psql -v ON_ERROR_STOP=1 "<your postgres url for the cinema database>" -f loadtest/seed.sql
 mkdir -p loadtest/results
-k6 run -e RATE=20 -e DURATION=10s loadtest/k6/browse.js
+k6 run -e COUNT=200 loadtest/k6/login.js             # saves loadtest/results/tokens.json
+k6 run -e RATE=20 -e DURATION=10s loadtest/k6/book.js
 python3 loadtest/report.py
 ```
 
-To run another scenario, change the script path ending in `browse.js`. Run the helper tests with `python3 loadtest/test_loadtest.py` (Python and Node required).
+`browse` needs no tokens. For `contention` or `race`, log in their own Customers first (`-e FIRST=2001` or `-e FIRST=4001`) and pass `-e STEP=<n>` so each run uses a fresh Showtime. For a second `book` run, pass `-e SLOT_OFFSET=<iterations already run>` so it does not reuse Seats. Run the helper tests with `python3 loadtest/test_loadtest.py` (Python and Node required).
 
 ## Run on Kaggle
 
-The notebook installs PostgreSQL, builds the service as a JAR and runs k6. All three share the notebook CPUs; Docker is unavailable. See [ADR 0003](../docs/adr/0003-load-test-on-kaggle-without-docker.md).
+The notebook installs PostgreSQL, builds the service as a JAR and runs k6; Docker is unavailable. k6 runs on one CPU, the service and PostgreSQL on the rest. See [ADR 0003](../docs/adr/0003-load-test-on-kaggle-without-docker.md).
 
 1. Import `loadtest/kaggle.ipynb`. Set **Accelerator: None**, **Internet: On** and complete any required account verification.
 2. Choose the source:
    - Git: set `GIT_REF` and leave `CODE_BUNDLE=None`. Attach `GITHUB_TOKEN` in **Add-ons → Secrets**, with **Contents: Read-only** access to `14m6d4/se-phase-01`.
    - Local changes: attach a private source Dataset and set `CODE_BUNDLE="auto"`; see [Source bundle](#source-bundle). No GitHub token needed.
-3. Set `SCENARIO`, `RATE` and `DURATION`. Defaults: `all`, 50 iterations/s, `60s`.
+3. Set `SCENARIO`, `START_RATE`, `MAX_RATE` and `DURATION`. Defaults: `all`, 50 and 6,400 iterations/s, `60s`. Keep the defaults for a baseline that phase 2 compares against.
 4. Select **Save Version → Save & Run All (Commit)**. Read the final report and download files from **Output**.
 
-Re-import after notebook changes, including the `HOLD` → `DURATION` rename. A saved run continues unattended; the interactive editor stops after 20 minutes idle. Startup failures print an explanation or service log tail.
+A baseline is two such versions of the same source: Kaggle machines vary, and the spread between the two runs shows how much of a later difference is noise. Note any scenario whose max sustainable throughput, or p95 at the same step, differs by more than 10% between the two. Re-import after notebook changes, including the `RATE` → `START_RATE` and `MAX_RATE` change. A saved run continues unattended; a full `all` run takes about an hour. The interactive editor stops after 20 minutes idle. Startup failures print an explanation or service log tail.
 
 ## Read the results
 
-Every scenario ramps up for 30s, holds `RATE` iterations/s for `DURATION`, then ramps down for 10s. The default run schedules about 4,000 iterations per scenario.
+For each scenario the notebook logs in its Customers once, runs an unmeasured warm-up at `START_RATE`, then one step per rate: 50, 100, 200 and so on, doubling up to `MAX_RATE`. It stops at the first step that breaks and runs one more step halfway between the last step that held and that one.
 
-| Metric | Meaning |
+A step breaks when any of these is true over its whole duration:
+
+| Rule | Breaks when |
 |---|---|
-| RPS | Measured HTTP requests divided by total elapsed time, including setup and ramps |
-| p50 / p95 / p99 | Duration within which 50% / 95% / 99% of measured HTTP requests completed |
-| Error rate | Unexpected HTTP outcomes; valid contention `409` responses are expected |
-| Dropped iterations | Scheduled iterations k6 could not start within the VU limit |
+| p95 of measured requests | above 200 ms |
+| Measured requests that failed unexpectedly | above 1%; contention and race `409`s are expected |
+| Checks that passed | below 99% |
+| Dropped iterations: arrivals k6 could not start within the VU limit | any |
+| Achieved iterations/s | below 95% of the target |
 
-Latency measures individual requests; a booking workflow takes two. RPS averages the requests over this run and does not measure maximum capacity. Check hardware and runtime settings in `env.txt` when comparing runs.
+The highest step that held is the scenario's **max sustainable throughput**. A `book` step that runs out of seeded Seats is reported as exhausted, not broken, and ends the scenario. Latency is per request; a booking workflow takes two. `report.py` prints the step table, then the telemetry of the first step that broke, which shows the tier that gave out. If k6 itself used 90% or more of its core there, the report warns that the limit may be k6's. Check hardware and runtime settings in `env.txt` when comparing runs.
 
-k6 passes when all response checks pass, no measured HTTP request fails unexpectedly and no iterations are dropped. Contention also needs a successful booking and a seat conflict. The notebook runs SQL verification automatically; a local k6 run checks HTTP responses only. The notebook reports threshold failures after all selected scenarios finish. The latency and error limits printed by `report.py` are advisory.
-
-| Output | Contents |
+| Output under `results/` | Contents |
 |---|---|
-| `<scenario>/summary.json` | Metrics and threshold results; local k6 writes `summary.json` directly unless `RESULTS_DIR` is set |
-| `contention/contention.json` | Tested Showtime; local k6 writes `contention.json` directly unless `RESULTS_DIR` is set |
-| `contention-verification.txt` | Notebook only: HTTP counts versus SQL rows, duplicate check |
-| `env.txt` | Notebook only: source identity, hardware, JVM, PostgreSQL and pool settings |
+| `<scenario>/<rate>/summary.json` | k6 metrics of one step; local k6 writes `summary.json` directly unless `RESULTS_DIR` is set |
+| `<scenario>/<rate>/telemetry.csv` | Notebook only: every second, CPU of java, postgres and k6 (% of one core), iowait, Hikari active/pending/acquire, Tomcat busy threads, GC pause, and PostgreSQL active backends by wait type |
+| `<scenario>/<rate>/statements.csv` | Notebook only: top 20 SQL statements by total time (`pg_stat_statements`) |
+| `<scenario>/<rate>/database.json` | Notebook only: deadlocks and rolled-back transactions during the step |
+| `<scenario>/<rate>/verification.txt` | Notebook only, contention and race: HTTP counts versus SQL rows, duplicate check |
+| `<scenario>/<rate>/k6.log`, `<scenario>/warmup/` | k6 output of the step; the warm-up's results |
+| `env.txt` | Notebook only: source identity, hardware, CPU affinity, JVM, PostgreSQL and pool settings |
 | `app.log` | Service log saved by the notebook |
 
-Kaggle saves these under `results/`; local scripts default to `loadtest/results/`. `summary.json` at the output root copies the last scenario only. **Keep reports and raw outputs local; do not commit them.**
+The sampler adds a few actuator requests and one SQL query per second. A failed SQL verification fails the notebook after the report. **Keep reports and raw outputs local; do not commit them.**
 
 ## Seed and limits
 
-`seed.sql` creates 3 Cinemas, 12 Auditoriums with 120 Seats each, 20 Movies and 420 Showtimes across seven days starting tomorrow in Vietnam time. It also creates 2,000 Customers: `loadtest-{1..2000}@loadtest.local` / `loadtest-password`. They share a precomputed BCrypt hash; login still verifies passwords. Rerunning the seed inserts data again, so use it only once per fresh database. Kaggle runs it automatically.
+`seed.sql` creates 3 Cinemas, 12 Auditoriums with 120 Seats each, 20 Movies and 4,500 Showtimes across 75 days starting tomorrow in Vietnam time. It also creates 6,000 Customers: `loadtest-{1..6000}@loadtest.local` / `loadtest-password`. They share a precomputed BCrypt hash; login still verifies passwords. Rerunning the seed inserts data again, so use it only once per fresh database. Kaggle runs it automatically.
 
 - Browse chooses today or tomorrow, whichever first has Showtimes. Setup fails if both are empty; seat maps must contain 120 Seats.
-- Book uses 12 Customers and separate Seat allocations to avoid conflicts. One Showtime is reserved for contention; the remaining 50,280 Showtime/Seat pairs give each VU 4,190 choices. Longer or higher-rate runs can exhaust them. The 12-VU cap is an allocation limit.
-- Contention logs in 200 Customers and selects 10 available Seats. It counts seat conflicts separately from rejections because a Customer already has a Pending Booking. The notebook's SQL check must match successful bookings to stored Seats with no duplicates. It does not require all 10 Seats to be booked or synchronise a simultaneous race.
+- Every scenario allows up to 2,000 VUs. In `account`, `book`, `contention` and `race` each VU is one Customer, so a token file holds 2,000 tokens. Tokens last an hour; the notebook logs in again after 50 minutes.
+- The first 40 Showtimes are reserved: contention and race take a fresh one per step, so each gets at most 20 steps. Book gives every iteration of the run its own pair from the other 535,200 Showtime/Seat pairs. Warm-up and doublings through 3,200 iterations/s use 384,000, enough for a 2,400 midpoint too, so only a 6,400 step can run out.
+- Contention and race pick 10 available Seats. They count seat conflicts, rejections because a Customer already has a Pending Booking, `409 try again` after a Booking lost a deadlock twice, and seat conflicts that list no Seat because the winner abandoned before the loser looked. Book counts its `409 try again` in the report's `busy 409` column. The SQL check needs booked-seat rows to equal 201s minus abandons, with no Seat booked twice. Neither synchronises requests; at higher rates they overlap on their own. `BookingPersistenceTest` covers a synchronised race in the integration tests.
 
 ## Source bundle
 
@@ -136,6 +143,6 @@ Verify `env.txt` against your source commit and matching hash type. CLI logs/sta
 
 ## Add a scenario
 
-Add `k6/<name>.js` and its name to the notebook's `SCENARIO` allowlist. Add it to `RUN_SCENARIOS` to include it in `all`.
+Add `k6/<name>.js`, then add its name to the notebook's `SCENARIOS` and to `SCENARIOS` in `report.py`.
 
-Reuse `summaryOptions`, including its thresholds, `LOAD` request tags and `handleSummary`. Read `BASE_URL`, `RATE`, `DURATION` from `__ENV`; use `lib/customers.js` for seeded-Customer login.
+Reuse `summaryOptions`, `arrivalRate()`, the `LOAD` request tags and `handleSummary` from `lib/summary.js`. Read `BASE_URL` from `__ENV`; use `savedTokens()` from `lib/customers.js` for seeded Customers, and give the scenario its own block in the notebook's `FIRST_CUSTOMER` if it leaves Pending Bookings.

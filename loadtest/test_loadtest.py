@@ -21,54 +21,54 @@ def node(source):
     subprocess.run(["node", "--input-type=module", "-e", source], cwd=ROOT, check=True)
 
 
-def test_acceptance_thresholds():
-    # Dropping a shared threshold or replacing a scenario's thresholds must not
-    # let failed requests/checks or missed arrivals pass acceptance.
-    shared = (ROOT / "loadtest/k6/lib/summary.js").read_text()
-    shared = re.sub(r"^import .*$", "", shared, flags=re.MULTILINE)
-    for scenario in ("smoke", "browse", "book", "contention"):
-        source = (ROOT / f"loadtest/k6/{scenario}.js").read_text()
-        source = re.sub(r"^import .*$", "", source, flags=re.MULTILINE)
-        source = re.sub(r"^export \{.*\};$", "", source, flags=re.MULTILINE)
-        source = source.replace("export default function", "function iteration")
-        source = source.replace("export const ", "const ").replace("export function ", "function ")
-        node("""
-import assert from 'node:assert/strict';
-const __ENV = {};
-const summaryOptions = (() => {
-""" + shared.replace("export ", "") + """
-return summaryOptions;
-})();
-const LOAD = {};
-const http = { expectedStatuses: () => ({}) };
-const MAX_VUS = 200, BOOK_MAX_VUS = 12;
-class Counter {}
-""" + source + f"""
-function accepts(metric, values) {{
-    return (options.thresholds[metric] || []).every((expression) =>
-        new Function('rate', 'count', `return (${{expression}})`)(values.rate, values.count));
-}}
-for (const [metric, passing, failing] of [
-    ['checks', {{ rate: 1 }}, {{ rate: 0.99 }}],
-    ['http_req_failed{{phase:load}}', {{ rate: 0 }}, {{ rate: 0.01 }}],
-    ['dropped_iterations', {{ count: 0 }}, {{ count: 1 }}],
-]) {{
-    assert.equal(accepts(metric, passing), true, '{scenario}: healthy ' + metric);
-    assert.equal(accepts(metric, failing), false, '{scenario}: must reject ' + metric);
-}}
-""")
+def test_report_verdict():
+    sys.dont_write_bytecode = True  # keep __pycache__ out of the repository
+    sys.path.insert(0, str(ROOT / "loadtest"))
+    from report import seconds, verdict
+
+    def summary(rate=100, iterations=6_000, p95=50.0, failed=0.0, checks=1.0, dropped=None, exhausted=None):
+        metrics = {
+            "iterations": {"values": {"count": iterations}},
+            "http_reqs{phase:load}": {"values": {"count": 2 * iterations}},
+            "http_req_duration{phase:load}": {"values": {"med": 5.0, "p(95)": p95, "p(99)": 2 * p95}},
+            "http_req_failed{phase:load}": {"values": {"rate": failed}},
+            "checks": {"values": {"rate": checks}},
+        }
+        if dropped:
+            metrics["dropped_iterations"] = {"values": {"count": dropped}}
+        if exhausted:
+            metrics["seats_exhausted"] = {"values": {"count": exhausted}}
+        return {"load": {"rate": rate, "duration": "1m"}, "metrics": metrics}
+
+    assert [seconds(d) for d in ("60s", "2m", "1m30s", "1h")] == [60, 120, 90, 3600]
+    held = verdict(summary())
+    assert held["status"] == "held" and held["reasons"] == []
+    assert held["achieved"] == 100 and held["rps"] == 200
+    for broken, reason in [
+        (summary(p95=200.1), "p95"),
+        (summary(failed=0.011), "errors"),
+        (summary(checks=0.98), "checks"),
+        (summary(dropped=1), "dropped"),
+        (summary(iterations=5_600), "achieved"),
+    ]:
+        step = verdict(broken)
+        assert step["status"] == "broke" and len(step["reasons"]) == 1 and reason in step["reasons"][0], step
+    # Running out of seeded Seats ends the scenario without counting as a break.
+    assert verdict(summary(exhausted=900))["status"] == "exhausted"
 
 
-def test_seat_slices():
+def test_seat_slots():
     source = (ROOT / "loadtest/k6/lib/seat-allocation.js").read_text()
     node(source + """
 import assert from 'node:assert/strict';
-const all = Array.from({ length: 50_280 }, (_, i) => i);
-const slices = partitionSlots(all, BOOK_MAX_VUS);
-assert.equal(slices.length, 12);
-assert.deepEqual(slices.map((slice) => slice.length), Array(12).fill(4_190));
-assert.deepEqual(slices.flat(), all);
-assert.ok(slices.every((slice) => slice.length >= BOOK_MIN_SEATS_PER_VU));
+const showtimes = [{ id: 's1', auditoriumId: 'a' }, { id: 's2', auditoriumId: 'b' }, { id: 's3', auditoriumId: 'a' }];
+const seats = { a: Array.from({ length: 120 }, (_, i) => `a${i}`), b: Array.from({ length: 120 }, (_, i) => `b${i}`) };
+const slots = Array.from({ length: 360 }, (_, n) => slotAt(n, showtimes, seats));
+assert.deepEqual(slots[0], { showtimeId: 's1', seatId: 'a0' });
+assert.deepEqual(slots[121], { showtimeId: 's2', seatId: 'b1' });
+assert.deepEqual(slots[359], { showtimeId: 's3', seatId: 'a119' });
+assert.equal(new Set(slots.map((slot) => slot.showtimeId + slot.seatId)).size, 360);
+assert.equal(slotAt(360, showtimes, seats), null);
 """)
 
 
@@ -90,7 +90,11 @@ const pendingBooking = {
 assert.equal(conflictReason(409, 'application/problem+json', seatTaken, seat), 'seat');
 assert.equal(conflictReason(409, 'APPLICATION/PROBLEM+JSON; charset=UTF-8', seatTaken, seat), 'seat');
 assert.equal(conflictReason(409, 'application/problem+json', pendingBooking, seat), 'pending_customer');
+assert.equal(conflictReason(409, 'application/problem+json',
+	{ status: 409, detail: 'Seats are being booked by others right now, try again' }, seat), 'busy');
 assert.equal(conflictReason(409, 'application/problem+json', { ...seatTaken, seatIds: [other] }, seat), null);
+// The winner abandoned before the loser re-read the Seats (JpaBookingRepository#insert).
+assert.equal(conflictReason(409, 'application/problem+json', { ...seatTaken, seatIds: [] }, seat), 'free_again');
 assert.equal(conflictReason(409, 'application/problem+json', { ...seatTaken, seatIds: [seat] }, other), null);
 assert.equal(conflictReason(409, 'application/problem+json', { ...pendingBooking, seatIds: [other] }, seat), null);
 assert.equal(conflictReason(409, 'application/problem+json', { status: 409, detail: 'Seat already taken' }, seat), null);
@@ -121,6 +125,7 @@ import assert from 'node:assert/strict';
 const __ENV = {};
 const LOAD = { tags: { phase: 'load' } };
 const summaryOptions = { thresholds: {} };
+function arrivalRate() { return {}; }
 function handleSummary() { return {}; }
 function fail(message) { throw new Error(message); }
 function check(value, assertions) {
@@ -164,7 +169,7 @@ assert.notEqual(expectedToday, expectedTomorrow);
 def test_showtimes_scan():
     source = (ROOT / "loadtest/k6/lib/showtimes.js").read_text()
     source = re.sub(r"^import .*$", "", source, flags=re.MULTILINE)
-    source = source.replace("export function ", "function ")
+    source = source.replace("export function ", "function ").replace("export const ", "const ")
     node("""
 import assert from 'node:assert/strict';
 const __ENV = {};
@@ -183,11 +188,11 @@ const http = {
 """ + source + """
 const showtimes = seededShowtimes();
 const dates = urls.map((url) => new URL(url).searchParams.get('date'));
-const expected = Array.from({ length: 9 }, (_, day) =>
+const expected = Array.from({ length: SEED_DAYS + 2 }, (_, day) =>
 	new Date(start + (7 + day * 24) * 3600 * 1000).toISOString().slice(0, 10));
 assert.deepEqual(dates, expected);
-assert.equal(new Set(dates).size, 9);
-assert.equal(showtimes.length, 9);
+assert.equal(new Set(dates).size, SEED_DAYS + 2);
+assert.equal(showtimes.length, SEED_DAYS + 2);
 """)
 
 
@@ -208,8 +213,9 @@ def test_notebook_cells():
 def test_notebook_scenarios():
     notebook = json.loads((ROOT / "loadtest/kaggle.ipynb").read_text())
     source = "".join(next(cell for cell in notebook["cells"] if cell.get("id") == "c02")["source"])
-    expected = ["smoke", "browse", "book", "contention"]
-    assert set(expected) == {path.stem for path in (ROOT / "loadtest/k6").glob("*.js")}
+    expected = ["account", "browse", "book", "contention", "race"]
+    # login.js only saves tokens for the scenarios.
+    assert set(expected) | {"login"} == {path.stem for path in (ROOT / "loadtest/k6").glob("*.js")}
     for selected in ("all", *expected, "unknown"):
         parameters = re.sub(r'^SCENARIO = .*$', f'SCENARIO = {selected!r}', source, flags=re.MULTILINE)
         result = subprocess.run([sys.executable, "-c", parameters + "\nprint(RUN_SCENARIOS)"],
@@ -262,6 +268,8 @@ def test_contention_verifier():
         SimpleNamespace(returncode=0, stdout="10|10\n"),
         SimpleNamespace(returncode=0, stdout="10|9\n"),
         SimpleNamespace(returncode=1, stdout="ERROR: relation booked_seat does not exist; db-test-password gh-test-token\n"),
+        SimpleNamespace(returncode=0, stdout="3|3\n"),
+        SimpleNamespace(returncode=0, stdout="3|3\n"),
     ]
 
     def subprocess_run(command, **kwargs):
@@ -280,40 +288,40 @@ def test_contention_verifier():
     assert "-d postgres" in commands[-1][0]  # bootstrap/system-catalog callers retain their original database
 
     with tempfile.TemporaryDirectory() as directory:
-        results = Path(directory)
-        summary = results / "summary.json"
-        details = results / "contention.json"
-        details.write_text(json.dumps({"showtimeId": "01234567-89ab-cdef-0123-456789abcdef"}))
-        summary.write_text(json.dumps({"metrics": {
-            "bookings_created": {"values": {"count": 10}},
-            "booking_conflicts": {"values": {"count": 100}},
-            "seat_conflicts": {"values": {"count": 90}},
-            "pending_customer_conflicts": {"values": {"count": 10}},
-        }}))
-        namespace = {
-            "RESULTS": results,
-            "contention_verification_passed": None,
-            "json": json,
-            "re": re,
-            "psql": psql_namespace["psql"],
-        }
+        step = Path(directory)
+        (step / "contention.json").write_text(json.dumps({"showtimeId": "01234567-89ab-cdef-0123-456789abcdef"}))
+
+        def counts(**values):
+            (step / "summary.json").write_text(json.dumps({"metrics": {
+                name: {"values": {"count": count}} for name, count in values.items()}}))
+
+        namespace = {"json": json, "re": re, "psql": psql_namespace["psql"]}
         code = ast.Module(body=[verifier_function], type_ignores=[])
         exec(compile(code, "kaggle-c12-verifier", "exec"), namespace)
-        namespace["verify_contention"](summary, details, 0)
-        report = (results / "contention-verification.txt").read_text()
+        verify = namespace["verify_contention"]
+        counts(bookings_created=10, booking_conflicts=103, seat_conflicts=90, pending_customer_conflicts=10,
+               busy_conflicts=3)
+        assert verify(step, False) is True
+        report = (step / "verification.txt").read_text()
         assert report.startswith("PASS ") and "duplicate rows: 0" in report
         assert "409 Seat already taken: 90" in report
         assert "409 Customer already has Pending Booking: 10" in report
+        assert "409 busy, try again: 3" in report
         assert "-d cinema" in commands[-1][0]
 
-        namespace["verify_contention"](summary, details, 0)
-        assert (results / "contention-verification.txt").read_text().startswith("FAIL ")
+        assert verify(step, False) is False  # a Seat booked twice
+        assert (step / "verification.txt").read_text().startswith("FAIL ")
         assert "-d cinema" in commands[-1][0]
 
-        namespace["verify_contention"](summary, details, 0)
-        report = (results / "contention-verification.txt").read_text()
+        assert verify(step, False) is False
+        report = (step / "verification.txt").read_text()
         assert "ERROR: relation booked_seat does not exist" in report
         assert "db-test-password" not in report and "gh-test-token" not in report
+
+        # Race: winners abandon, so only the unabandoned ones keep rows, and seat conflicts may be absent.
+        counts(bookings_created=50, bookings_abandoned=47, booking_conflicts=5, busy_conflicts=3, free_again_conflicts=2)
+        assert verify(step, True) is True
+        assert verify(step, False) is False  # contention needs seat conflicts
 
 
 def test_source_bundle_paths():
@@ -612,8 +620,8 @@ def test_source_bundle_inputs():
 
 
 if __name__ == "__main__":
-    test_acceptance_thresholds()
-    test_seat_slices()
+    test_report_verdict()
+    test_seat_slots()
     test_conflicts()
     test_browse_setup()
     test_showtimes_scan()
@@ -623,5 +631,5 @@ if __name__ == "__main__":
     test_contention_verifier()
     test_source_bundle_paths()
     test_source_bundle_inputs()
-    print("PASS  acceptance thresholds; allocation; conflicts; browse; showtimes; notebook; SQL verifier; "
+    print("PASS  report verdict; seat slots; conflicts; browse; showtimes; notebook; SQL verifier; "
           "Git fallback; bundle.py ZIP/directory round trips, deterministic hash, and path/symlink rejection")

@@ -2,32 +2,15 @@
 // No login: both endpoints are public, so no BCrypt is paid anywhere in the run.
 import http from 'k6/http';
 import { check, fail } from 'k6';
-import { LOAD, handleSummary, summaryOptions } from './lib/summary.js';
+import { LOAD, arrivalRate, handleSummary, summaryOptions } from './lib/summary.js';
 
 export { handleSummary };
 
 const BASE_URL = __ENV.BASE_URL || 'http://localhost:8080';
-// Target iterations per second and how long to hold it; the notebook passes them with -e.
-const RATE = Number(__ENV.RATE || 50);
-const DURATION = __ENV.DURATION || '60s';
 
 export const options = {
 	...summaryOptions,
-	scenarios: {
-		browse: {
-			// Arrival rate: throughput is set by the target, not by how fast responses come back.
-			executor: 'ramping-arrival-rate',
-			startRate: 0,
-			timeUnit: '1s',
-			preAllocatedVUs: 50,
-			maxVUs: 200,
-			stages: [
-				{ duration: '30s', target: RATE },
-				{ duration: DURATION, target: RATE },
-				{ duration: '10s', target: 0 },
-			],
-		},
-	},
+	scenarios: { browse: arrivalRate() },
 };
 
 // Today's date in the Vietnam timezone, as the API expects it (`?date=` is

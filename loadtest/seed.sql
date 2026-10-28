@@ -1,11 +1,12 @@
 -- Load-test seed data (issue #18): 3 cinemas x 4 auditoriums (10 rows x 12 seats),
--- 20 movies, 7 future days of showtimes and 2,000 CUSTOMER accounts that all
--- share one prehashed bcrypt password.
+-- 20 movies, 75 future days of showtimes and 6,000 CUSTOMER accounts that all
+-- share one prehashed bcrypt password. k6/lib/showtimes.js must match the day count.
+-- Book, contention and race log in disjoint blocks of 2,000 Customers.
 --
 -- Run AFTER the service has started (Flyway must have applied all migrations) and only
 -- against a fresh database: the inserts are not idempotent.
 --
--- Shared credentials: loadtest-{1..2000}@loadtest.local / loadtest-password
+-- Shared credentials: loadtest-{1..6000}@loadtest.local / loadtest-password
 -- (every account stores the same bcrypt hash; the raw password is never stored).
 BEGIN;
 
@@ -58,13 +59,13 @@ FROM generate_series(1, 20) AS g;
 
 -- -------------------------------------------------------------- showtimes ---
 -- 5 slots a day (09:00, 12:00, 15:00, 18:00, 21:00 Vietnam time) per
--- auditorium for the 7 days after today (VN local date), so every showtime is
+-- auditorium for the 75 days after today (VN local date), so every showtime is
 -- strictly in the future at seed time. 3-hour slots with <= 165-minute movies
 -- cannot overlap, satisfying the V5 exclusion constraint.
 WITH day AS (
     SELECT ((now() AT TIME ZONE 'Asia/Ho_Chi_Minh')::date + d) AS vn_date,
            d
-    FROM generate_series(1, 7) AS d
+    FROM generate_series(1, 75) AS d
 ), slot AS (
     SELECT d.vn_date, d.d AS day_no, s.n AS slot_no,
            (d.vn_date + (s.n * 3) * interval '1 hour'
@@ -90,7 +91,7 @@ FROM pick AS p
 JOIN movies_indexed AS mi ON mi.idx = p.movie_idx;
 
 -- --------------------------------------------------------------- accounts ---
--- 2,000 Customers sharing one valid prehashed bcrypt password
+-- 6,000 Customers sharing one valid prehashed bcrypt password
 -- ("loadtest-password"). Spring Security's BCryptPasswordEncoder accepts the
 -- $2a$ format, so no application change is needed.
 INSERT INTO account (id, email, password_hash, full_name, role)
@@ -99,6 +100,6 @@ SELECT gen_random_uuid(),
        '$2a$10$HxPCwAysCl/cAKxpANoI2uw2Re2f4s8cSN4ZDMkOkP.EVhE1FO6yi',
        'Loadtest Customer ' || g,
        'CUSTOMER'
-FROM generate_series(1, 2000) AS g;
+FROM generate_series(1, 6000) AS g;
 
 COMMIT;
