@@ -303,6 +303,53 @@ def test_notebook_build_tail():
     assert commands == [("./mvnw -B -q -Dmaven.test.skip=true package", {"cwd": Path("/tmp/source")})]
 
 
+def test_postgres_affinity():
+    notebook = json.loads((ROOT / "loadtest/kaggle.ipynb").read_text())
+    cell = next(cell for cell in notebook["cells"] if cell.get("id") == "c06")
+    tree = ast.parse("".join(cell["source"]))
+    affinity = next(node for node in tree.body if isinstance(node, ast.Expr)
+                    and isinstance(node.value, ast.Call)
+                    and isinstance(node.value.func, ast.Name) and node.value.func.id == "run"
+                    and "pgrep" in ast.unparse(node))
+    commands = []
+
+    def capture(command, **kwargs):
+        commands.append(command)
+
+    exec(compile(ast.Module(body=[affinity], type_ignores=[]), "kaggle-c06-affinity", "exec"),
+         {"APP_CPUS": "1,2,3", "run": capture})
+    expected = "su postgres -c 'for pid in $(pgrep -u postgres -x postgres); do taskset -a -cp 1,2,3 \"$pid\" > /dev/null || exit; done'"
+    assert commands == [expected], commands
+
+    with tempfile.TemporaryDirectory() as directory:
+        root = Path(directory)
+        bindir = root / "bin"
+        bindir.mkdir()
+        log = root / "taskset.log"
+        (bindir / "su").write_text("#!/bin/sh\n"
+                                    "[ \"$1\" = postgres ] && [ \"$2\" = -c ] || exit 90\n"
+                                    "exec /bin/sh -c \"$3\"\n")
+        (bindir / "pgrep").write_text("#!/bin/sh\n"
+                                       "[ \"$1\" = -u ] && [ \"$2\" = postgres ] && [ \"$3\" = -x ] && "
+                                       "[ \"$4\" = postgres ] || exit 91\n"
+                                       "printf '101\\n102\\n'\n")
+        (bindir / "taskset").write_text("#!/bin/sh\n"
+                                         "printf '%s\\n' \"$*\" >> \"$AFFINITY_LOG\"\n"
+                                         "[ \"${TASKSET_FAIL:-}\" = 1 ] && exit 7\n"
+                                         "exit 0\n")
+        for path in bindir.iterdir():
+            path.chmod(0o755)
+        env = {**os.environ, "PATH": f"{bindir}:/bin", "AFFINITY_LOG": str(log)}
+        success = subprocess.run(commands[0], shell=True, env=env, capture_output=True, text=True)
+        assert success.returncode == 0, success.stderr
+        assert log.read_text().splitlines() == ["-a -cp 1,2,3 101", "-a -cp 1,2,3 102"]
+        log.write_text("")
+        env["TASKSET_FAIL"] = "1"
+        failure = subprocess.run(commands[0], shell=True, env=env, capture_output=True, text=True)
+        assert failure.returncode != 0
+        assert log.read_text().splitlines() == ["-a -cp 1,2,3 101"]
+
+
 def test_contention_verifier():
     notebook = json.loads((ROOT / "loadtest/kaggle.ipynb").read_text())
     cells = {cell.get("id"): cell for cell in notebook["cells"]}
@@ -683,8 +730,9 @@ if __name__ == "__main__":
     test_notebook_cells()
     test_notebook_scenarios()
     test_notebook_build_tail()
+    test_postgres_affinity()
     test_contention_verifier()
     test_source_bundle_paths()
     test_source_bundle_inputs()
-    print("PASS  report verdict; charts; seat slots; conflicts; browse; showtimes; notebook; SQL verifier; "
+    print("PASS  report verdict; charts; seat slots; conflicts; browse; showtimes; notebook; PostgreSQL affinity; SQL verifier; "
           "Git fallback; bundle.py ZIP/directory round trips, deterministic hash, and path/symlink rejection")
