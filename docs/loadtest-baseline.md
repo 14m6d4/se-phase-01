@@ -28,7 +28,7 @@ The target is the configured iteration rate. Achieved it/s is completed workflow
 | Runtime | OpenJDK 21.0.12.1, G1 GC, no JVM flags; PostgreSQL 14.24; Hikari maximum 10 | Same |
 | Load generator | k6 v2.3.0 | k6 v2.3.0 |
 
-Both saved notebooks have the same cell content. The source bundle hash in each `env.txt` is the expanded tree hash above, which includes relative paths, executable flags and file bytes. It is not a ZIP archive hash.
+Both saved notebooks have the same cell content. The source bundle hash in each `env.txt` is the expanded tree hash above, computed over relative paths, executable flags and file bytes, so it will not match a hash of the ZIP archive.
 
 ## Summary
 
@@ -44,7 +44,7 @@ The highest held target is the max sustainable throughput for that run. A value 
 | contention | Customers try to hold the same 10 held Seats | 200 | 400 | 300 | 600 |
 | race | Customers race for the same free Seats; winners abandon | 200 | 300 | 300 | 400 |
 
-Run 2's `book` step at 50 iterations/s dropped three iterations, so it has no held step. Its p95 was 8.28 ms, checks were 99.98%, errors were 0%, k6 CPU was 9%, Java CPU was 34%, PostgreSQL CPU was 13%, Hikari had no pending connections, and iowait was 6.20%. The result does not isolate a service bottleneck. Run 1's first book break was also caused only by dropped iterations, with one drop at 75 iterations/s. No book step exhausted seeded Seats.
+Run 2's `book` step at 50 iterations/s dropped three iterations, so it has no held step. Its p95 was 8.28 ms, checks were 99.98%, errors were 0%, k6 CPU was 9%, Java CPU was 34%, PostgreSQL CPU was 13%, Hikari had no pending connections, and iowait was 6.20%. The result does not isolate a service bottleneck. Run 1's first book break was also caused only by dropped iterations, with one drop at 75 iterations/s.
 
 ## Scenario results
 
@@ -170,7 +170,7 @@ The step broke at 600 iterations/s on p95 1,764.66 ms, 10,833 dropped iterations
 
 ### Run 2 browse at 600 iterations/s
 
-The step broke at 600 iterations/s on p95 1,739.33 ms, 10,161 dropped iterations, and achieved 430.3 iterations/s against a target of 600. Errors were 0% and checks were 100%. Java used 135.07%, PostgreSQL 63.41%, and k6 92.82%; iowait was 0.01%. Hikari averaged 3.08 active connections, peaked at 36 pending, and had a 2.52 ms mean acquire time. Tomcat peaked at 46 busy threads and GC pause totaled 296 ms. PostgreSQL active backends averaged 0.30 on CPU, 0.00 in Lock, 0.00 in LWLock, 0.00 in IO, and 0.08 in other waits. There were 0 deadlocks and 0 rollbacks. k6 again exceeded the 90% one-core flag, so the measured browse ceiling is generator-confounded rather than a claim about maximum service throughput.
+The step broke at 600 iterations/s on p95 1,739.33 ms, 10,161 dropped iterations, and achieved 430.3 iterations/s against a target of 600. Errors were 0% and checks were 100%. Java used 135.07%, PostgreSQL 63.41%, and k6 92.82%; iowait was 0.01%. Hikari averaged 3.08 active connections, peaked at 36 pending, and had a 2.52 ms mean acquire time. Tomcat peaked at 46 busy threads and GC pause totaled 296 ms. PostgreSQL active backends averaged 0.30 on CPU, 0.00 in Lock, 0.00 in LWLock, 0.00 in IO, and 0.08 in other waits. There were 0 deadlocks and 0 rollbacks. k6 again exceeded the 90% one-core flag, so this browse ceiling may be set by the generator and says nothing firm about the service's maximum.
 
 | Calls | Total ms | Mean ms | Normalized query snippet |
 |---:|---:|---:|---|
@@ -180,7 +180,7 @@ The step broke at 600 iterations/s on p95 1,739.33 ms, 10,161 dropped iterations
 
 ### Run 1 book at 75 iterations/s
 
-The step broke because it dropped one iteration. p95 was 9.29 ms, errors were 0%, and checks were 100.00%. Java used 39.26%, PostgreSQL 23.28%, and k6 13.66%; iowait was 12.43%. Hikari averaged 0.82 active connections with no pending requests and a 0.21 ms mean acquire time. Tomcat peaked at 4 busy threads and GC pause totaled 31 ms. PostgreSQL active backends averaged 0.05 on CPU, 0.00 in Lock, 0.02 in LWLock, 0.22 in IO, and 0.05 in other waits. There were 0 deadlocks and 0 rollbacks. The low CPU and empty pool queue do not identify a service bottleneck, so the single dropped iteration is a measurement limit rather than evidence of a specific tier giving out.
+The step broke because it dropped one iteration. p95 was 9.29 ms, errors were 0%, and checks were 100.00%. Java used 39.26%, PostgreSQL 23.28%, and k6 13.66%; iowait was 12.43%. Hikari averaged 0.82 active connections with no pending requests and a 0.21 ms mean acquire time. Tomcat peaked at 4 busy threads and GC pause totaled 31 ms. PostgreSQL active backends averaged 0.05 on CPU, 0.00 in Lock, 0.02 in LWLock, 0.22 in IO, and 0.05 in other waits. There were 0 deadlocks and 0 rollbacks. With low CPU and an empty pool queue, the single dropped iteration does not point to any tier.
 
 | Calls | Total ms | Mean ms | Normalized query snippet |
 |---:|---:|---:|---|
@@ -200,7 +200,7 @@ The step broke because it dropped three iterations. p95 was 8.28 ms, errors were
 
 ### Run 1 contention at 300 iterations/s
 
-The step broke at 300 iterations/s on p95 453.17 ms. Achieved throughput was 300.0 iterations/s, with 0% errors and 100% checks. Java used 105.63%, PostgreSQL 142.53%, and k6 27.20%; iowait was 0.28%. Hikari averaged 4.21 active connections, peaked at 189 pending, and had a 9.76 ms mean acquire time. Tomcat peaked at 200 busy threads and GC pause totaled 174 ms. PostgreSQL active backends averaged 2.11 on CPU, 0.00 in Lock, 0.00 in LWLock, 0.02 in IO, and 0.23 in other waits. There were 0 deadlocks and 14,401 rollbacks. The application queue and PostgreSQL CPU both rose at the first broken step. The booking status query consumed 95,431 ms over 14,360 calls, so the observed constraint is database and application contention on the held-seat path, not k6 saturation.
+The step broke at 300 iterations/s on p95 453.17 ms. Achieved throughput was 300.0 iterations/s, with 0% errors and 100% checks. Java used 105.63%, PostgreSQL 142.53%, and k6 27.20%; iowait was 0.28%. Hikari averaged 4.21 active connections, peaked at 189 pending, and had a 9.76 ms mean acquire time. Tomcat peaked at 200 busy threads and GC pause totaled 174 ms. PostgreSQL active backends averaged 2.11 on CPU, 0.00 in Lock, 0.00 in LWLock, 0.02 in IO, and 0.23 in other waits. There were 0 deadlocks and 14,401 rollbacks. The application queue and PostgreSQL CPU both rose at the first broken step. The booking status query consumed 95,431 ms over 14,360 calls, so the observed constraint is database and application contention on the held-seat path. k6 stayed well below its saturation flag.
 
 | Calls | Total ms | Mean ms | Normalized query snippet |
 |---:|---:|---:|---|
@@ -238,7 +238,7 @@ The step broke at 400 iterations/s on p95 1,522.60 ms and 167 dropped iterations
 | 23,835 | 10,630 | 0.446 | `select ... from seat s1_0 where s1_0.auditorium_id=$1 order by s1_0.row_letter,s1_0.seat_number` |
 | 23,834 | 7,308 | 0.307 | `delete from booking b where b.status = 'PENDING' and b.expires_at <= $1 and (b.customer_id = $2 or b.id in (...))` |
 
-The browse results require a generator caveat. At each first broken browse step, k6 used 92.37% and 92.82% of its one core. Those steps show a real latency and drop limit for this shared notebook setup, but they do not prove that the service alone has reached its maximum capacity. The account, contention, and race first broken steps did not hit the k6 90% flag. The two book breaks had low process CPU and no Hikari queue, so their dropped iterations did not identify a tier.
+Of the first broken steps, only browse hit the k6 90% flag, at 92.37% and 92.82% of its one core. Browse does hit a latency and drop limit in this shared notebook setup, but the service may hold more on its own. The two book breaks had low process CPU and no Hikari queue, so their dropped iterations did not identify a tier.
 
 ## Run-to-run comparison
 
@@ -278,7 +278,7 @@ For each scenario, the throughput delta is `abs(Run 2 target - Run 1 target) / R
 | race | 300 | 776.64 | 19.45 | 97.50% | yes |
 | race | 400 | 8,009.27 | 1,522.60 | 80.99% | yes |
 
-Contention's highest held target differed by 100%; race's differed by 50%. Account and browse held the same highest target in both runs. Book has no comparable max-held target because Run 2 did not hold its first step. Shared-rate p95 differs by more than 10% in every scenario, at the rates flagged above. These two runs show substantial variation, but do not establish its cause or a statistical confidence interval.
+Contention's highest held target differed by 100%; race's differed by 50%. Account and browse held the same highest target in both runs. Book has no comparable max-held target because Run 2 did not hold its first step. Shared-rate p95 differs by more than 10% in every scenario, at the rates flagged above. Two runs are enough to show substantial variation, but not to explain it or put a confidence interval on it.
 
 ## Contention and race verification
 

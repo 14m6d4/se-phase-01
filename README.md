@@ -290,7 +290,7 @@ The current capacity baseline uses [k6](https://k6.io/) v2.3.0 on two independen
 | contention | try to hold the same 10 held Seats | 200 it/s | 400 it/s | 300 it/s | 600 it/s |
 | race | race for the same free Seats, then abandon | 200 it/s | 300 it/s | 300 it/s | 400 it/s |
 
-These are the highest configured steps that held under the baseline rules. They do not measure maximum service capacity. Browse's first broken step used 92% and 93% of the one k6 core, so its ceiling is generator-confounded. Run 2's book step dropped three iterations at 50 it/s with low service CPU and no pool queue, so no service bottleneck was isolated.
+These are the highest configured steps that held under the baseline rules. They are not a measure of the service's maximum capacity. Browse's first broken step used 92% and 93% of the one k6 core, so k6 may have set that ceiling. Run 2's book step dropped three iterations at 50 it/s with low service CPU and no pool queue, which points to no particular tier.
 
 [`loadtest/`](loadtest/README.md) has the scenarios, seed data and reproduction steps.
 
