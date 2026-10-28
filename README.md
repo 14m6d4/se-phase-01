@@ -306,28 +306,20 @@ Phase 1 leaves these problems for phase 2.
 - **Seat hoarding.** A Hold claims its Seats whether or not it is ever paid. Registration is open, with no email verification and no rate limit, so many accounts can keep a Showtime's Seats held without buying ([ADR 0004](docs/adr/0004-seat-contention-via-unique-constraint-and-lazy-holds.md)).
 - **Lapsed Holds linger.** Expiry is lazy: a lapsed Hold stays in the database until someone books one of its Seats or its Customer books again. Nothing cleans up the rest.
 - **No booking history.** Abandoned and Expired Bookings are deleted, so they cannot be analysed later.
-- **Seat contention could be handled more cheaply.** A request for a Seat someone else holds runs a full transaction before it fails: it locks the Showtime row, deletes lapsed Holds, inserts the Booking, hits the unique constraint, rolls back, then reads the occupied Seats to build the `409`. When many Customers want the same Seats, most of that work is wasted, and a request that loses a deadlock twice gets a `409` asking it to retry. Phase 2 could try an availability check before the insert, pessimistic locking of Seat rows (`SELECT … FOR UPDATE`), optimistic locking with a version column, or a booking queue, keeping the unique constraint as the final guard ([ADR 0004](docs/adr/0004-seat-contention-via-unique-constraint-and-lazy-holds.md)).
+- **Seat contention is handled simply.** Concurrent requests for the same Seats are settled only by the database's unique constraint. This is correct but wastes work when many Customers want the same Seats, so it can be optimised ([ADR 0004](docs/adr/0004-seat-contention-via-unique-constraint-and-lazy-holds.md)).
 - **Cancellation side effects.** Cancelling a Showtime briefly blocks new bookings of it, and a Cancelled Showtime with Refunded Bookings can never be deleted ([ADR 0005](docs/adr/0005-showtime-cancellation-in-one-adapter-transaction.md)).
 
 **Security**
 - **Tokens cannot be revoked.** JWTs are signed with one shared HS256 secret and stay valid for their full hour; there is no refresh token and no logout.
 - **No rate limiting** on login, registration or booking, so passwords can be brute-forced and endpoints flooded.
 - **One Admin.** The only Admin comes from environment variables. Nobody can add Admins or audit their actions, and rotating the password needs a restart.
-- **No CORS configuration.** A browser frontend on another origin cannot call the API.
 
 **API**
 - **No pagination.** `GET /movies`, `GET /cinemas` and `GET /bookings` return every row.
-- **Loose response types in the specification.** Success responses are documented as `*/*` instead of `application/json`.
-- **API docs always public.** Swagger UI and `/v3/api-docs` are exposed in every environment.
 
 **Operations and performance**
 - **Single instance, manual hosting.** CI publishes an image but nothing deploys it.
-- **Untuned defaults.** The connection pool keeps Hikari's default of 10 connections, and the JVM runs without flags.
 - **Thin observability.** Actuator exposes health and metrics only; there is no tracing, structured logging or alerting.
-
-**Codebase**
-- **Two model sets.** Business models and JPA entities are separate, joined by hand-written mappers ([ADR 0001](docs/adr/0001-framework-free-business-layer.md)).
-- **Rules kept in two places.** Delete guards and the Showtime overlap rule live in both the business layer and the database, and must be changed together ([ADR 0006](docs/adr/0006-delete-guards-in-business-and-database.md)).
 
 ## Documentation
 
