@@ -1,5 +1,7 @@
 # Load test
 
+English | [Tiếng Việt](README.vi.md)
+
 Find the highest rate each workflow sustains and which tier gives out first, by running k6 against the service and PostgreSQL in a Kaggle CPU notebook (or locally, one step at a time). The method is in [ADR 0007](../docs/adr/0007-capacity-baseline-by-stepped-arrival-rate-runs.md). [loadtest-baseline.md](../docs/loadtest-baseline.md) has the current baseline, from [Run 1, canonical version 8](https://www.kaggle.com/code/tunichdi/se-phase-01-issue19-baseline/versions/8) and [Run 2, independent version 1](https://www.kaggle.com/code/tunichdi/se-phase-01-capacity-baseline-2/versions/1).
 
 ## Scenarios

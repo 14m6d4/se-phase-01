@@ -2,6 +2,8 @@
 
 # Cinema Booking API
 
+English | [Tiếng Việt](README.vi.md)
+
 [![Tech stack](https://skillicons.dev/icons?i=java,spring,hibernate,postgres,maven,docker,githubactions)](#tech-stack)
 
 [![CI](https://github.com/14m6d4/se-phase-01/actions/workflows/ci.yml/badge.svg)](https://github.com/14m6d4/se-phase-01/actions/workflows/ci.yml)

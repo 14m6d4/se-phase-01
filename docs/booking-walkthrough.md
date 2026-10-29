@@ -1,5 +1,7 @@
 # Booking walkthrough
 
+English | [Tiếng Việt](booking-walkthrough.vi.md)
+
 An Admin builds a small catalogue, then a Customer holds two Seats, pays, and sees them sold. Two optional steps show a seat conflict and a Showtime cancellation.
 
 Follow it in Swagger UI (good for a live demo) or run it as one bash script with `curl`. Either way the service must be running, for example with `docker compose up` from the [README](../README.md#getting-started). Log in as the Admin with the `ADMIN_EMAIL` and `ADMIN_PASSWORD` the service was started with.

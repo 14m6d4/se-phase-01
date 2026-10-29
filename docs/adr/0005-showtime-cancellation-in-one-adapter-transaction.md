@@ -1,5 +1,7 @@
 # Showtime cancellation in one adapter transaction
 
+English | [Tiếng Việt](0005-showtime-cancellation-in-one-adapter-transaction.vi.md)
+
 Cancelling a Showtime changes the Showtime and every Booking of it: its Pending Bookings are deleted and its Confirmed ones become Refunded. That breaks the rule that each use case saves exactly one aggregate, and deliberately so: a Showtime left Cancelled with a Confirmed Booking still on it would mean a Customer paid for a screening that won't happen and was never refunded. So `ShowtimeRepository.cancel` does all of it in one transaction in the persistence adapter, as `deleteById` already does when it removes lapsed Holds. The business layer still has no transactions: the service validates, then calls one repository method.
 
 The statements run in this order, and the order is what makes concurrent payment safe:

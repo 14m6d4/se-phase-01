@@ -1,5 +1,7 @@
 # Kaggle load-test capacity baseline
 
+English | [Tiếng Việt](loadtest-baseline.vi.md)
+
 Two public Kaggle CPU notebooks ran the same code (`4d40ac3`) with the same settings on 2026-10-29, and both finished all five scenarios: [Run 1, notebook version 8](https://www.kaggle.com/code/tunichdi/se-phase-01-issue19-baseline/versions/8) and [Run 2, notebook version 1](https://www.kaggle.com/code/tunichdi/se-phase-01-capacity-baseline-2/versions/1). Raw outputs stay on Kaggle, not in Git.
 
 ## Summary

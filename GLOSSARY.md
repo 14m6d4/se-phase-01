@@ -1,5 +1,7 @@
 # Cinema Booking
 
+English | [Tiếng Việt](GLOSSARY.vi.md)
+
 Backend for a cinema chain: admins publish what is showing where, customers book seats for a specific screening.
 
 ## Language
