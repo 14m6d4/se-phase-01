@@ -47,11 +47,22 @@ interface BookingEntityRepository extends JpaRepository<BookingEntity, UUID> {
 		""")
 	void deleteLapsedHolds(UUID customerId, UUID showtimeId, Collection<UUID> seatIds, Instant now);
 
+	/**
+	 * Filters on {@code booked_seat.showtime_id}, which leads {@code uq_booked_seat_showtime_seat}, rather than on
+	 * {@code booking.showtime_id}, which no index leads. The two are equal: {@code fk_booked_seat_booking} ties them.
+	 */
 	@Query(nativeQuery = true, value = """
-		select s.seat_id as seatId, b.status as status from booking b join booked_seat s on s.booking_id = b.id
-		where b.showtime_id = :showtimeId and (b.status = 'CONFIRMED' or b.expires_at > :now)
+		select s.seat_id as seatId, b.status as status from booked_seat s join booking b on b.id = s.booking_id
+		where s.showtime_id = :showtimeId and (b.status = 'CONFIRMED' or b.expires_at > :now)
 		""")
 	List<OccupiedSeat> findOccupiedSeats(UUID showtimeId, Instant now);
+
+	/** Which of these Seats are taken at {@code now}: at most one index row per Seat, whatever the Showtime's size. */
+	@Query(nativeQuery = true, value = """
+		select s.seat_id from booked_seat s join booking b on b.id = s.booking_id
+		where s.showtime_id = :showtimeId and s.seat_id in (:seatIds) and (b.status = 'CONFIRMED' or b.expires_at > :now)
+		""")
+	List<UUID> findTakenSeats(UUID showtimeId, Collection<UUID> seatIds, Instant now);
 
 	interface OccupiedSeat {
 
