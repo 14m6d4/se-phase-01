@@ -16,6 +16,14 @@
 
 	<properties>
 		<java.version>21</java.version>
+		<!-- Security overrides of versions managed by spring-boot-dependencies 4.1.1 (DEP1). Remove each one
+		     once the Spring Boot parent manages that version or newer (Spring Boot 4.1.2 already does). -->
+		<!-- tomcat-embed-core 11.0.24: CRITICAL CVE-2026-65182, -65637, -65905, -68525; fixed in 11.0.25. -->
+		<tomcat.version>11.0.25</tomcat.version>
+		<!-- tools.jackson (Jackson 3) 3.1.5: HIGH/MEDIUM; fixed in 3.1.7. -->
+		<jackson-bom.version>3.1.7</jackson-bom.version>
+		<!-- com.fasterxml.jackson (Jackson 2) 2.21.5, pulled in by springdoc via swagger-core: HIGH; fixed in 2.21.7. -->
+		<jackson-2-bom.version>2.21.7</jackson-2-bom.version>
 	</properties>
 
 	<dependencies>
