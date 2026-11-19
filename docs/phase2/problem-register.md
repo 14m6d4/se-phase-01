@@ -111,6 +111,14 @@ Priority rests on four questions, in this order: does it bear on the race condit
   with Spring's default error body. No endpoint accepts uploads, yet the multipart resolver parses every request.
 - Direction: `spring.servlet.multipart.enabled: false`, or map `MultipartException` to 400; API test with the curl above.
 
+### B8: A NUL character in a text field returns 500
+- Labels: `tier:1`, `area:bug`. Severity medium. Status: confirmed (Schemathesis in CI, not seen locally before).
+- Evidence: `POST /api/movies` as Admin with `"posterUrl": "\u0000..."` returns 500. PostgreSQL refuses NUL (0x00)
+  in text columns, and nothing rejects it before the insert. Likely every text field (titles, names, addresses,
+  full name, notes).
+- Direction: reject NUL in request strings with 400 (one place, e.g. a Jackson string deserializer or validation),
+  plus an API test that sends it. The CI Schemathesis gate fails until this is fixed.
+
 ### B6: Errors handled outside MVC are not problem+json
 - Labels: `tier:3`, `area:bug`. Severity low. Status: confirmed (Schemathesis ST105).
 - Evidence: a malformed path (`/api/showtimes/%C3%B4d...`) or an empty query parameter name (`?=null`) returns 400 as
