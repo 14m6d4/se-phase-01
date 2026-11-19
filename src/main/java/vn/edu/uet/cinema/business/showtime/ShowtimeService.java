@@ -5,9 +5,11 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
 import vn.edu.uet.cinema.business.ConflictException;
 import vn.edu.uet.cinema.business.NotFoundException;
 import vn.edu.uet.cinema.business.auditorium.AuditoriumService;
+import vn.edu.uet.cinema.business.auditorium.Seat;
 import vn.edu.uet.cinema.business.movie.MovieService;
 
 public class ShowtimeService {
@@ -18,6 +20,7 @@ public class ShowtimeService {
 	private final AuditoriumService auditoriums;
 	private final ShowtimeRepository showtimes;
 	private final SeatOccupancyReader occupancy;
+	private final Map<UUID, List<Seat>> layouts = new ConcurrentHashMap<>();
 
 	public ShowtimeService(MovieService movies, AuditoriumService auditoriums, ShowtimeRepository showtimes,
 		SeatOccupancyReader occupancy) {
@@ -59,9 +62,20 @@ public class ShowtimeService {
 	/** The Seats of the Showtime's Auditorium in layout order, each priced from its Seat Type, keyed by Seat id. */
 	public Map<UUID, PricedSeat> pricedSeats(Showtime showtime) {
 		Map<UUID, PricedSeat> priced = new LinkedHashMap<>();
-		auditoriums.get(showtime.auditoriumId()).seats().forEach(seat -> priced.put(seat.id(),
+		layout(showtime.auditoriumId()).forEach(seat -> priced.put(seat.id(),
 			new PricedSeat(seat, SeatPricing.price(seat.type(), showtime.basePrice()))));
 		return priced;
+	}
+
+	/**
+	 * An Auditorium's Seats, read once (ADR 0008). Auditoriums are not edited, and one with a Showtime cannot be
+	 * deleted (ADR 0006), so the layout behind a Showtime is fixed on every instance. A change that lets an
+	 * Auditorium's Seats change must evict it here.
+	 */
+	private List<Seat> layout(UUID auditoriumId) {
+		// get() never locks; computeIfAbsent() can lock its bin even for a key that is already there.
+		List<Seat> seats = layouts.get(auditoriumId);
+		return seats != null ? seats : layouts.computeIfAbsent(auditoriumId, id -> auditoriums.get(id).seats());
 	}
 
 	/** Every Seat of a Scheduled Showtime with its price and status at {@code now}. */
