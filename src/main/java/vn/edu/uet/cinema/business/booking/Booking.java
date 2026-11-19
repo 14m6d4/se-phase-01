@@ -11,9 +11,20 @@ public record Booking(UUID id, UUID customerId, UUID showtimeId, BookingStatus s
 		seats = List.copyOf(seats);
 	}
 
-	/** The stored status, except that a Pending Booking whose Hold has lapsed at {@code now} is Expired. */
+	/**
+	 * The stored status, except that a Pending Booking whose Hold has lapsed at {@code now} is Expired. This and
+	 * {@link #occupiesSeatsAt} are the live-Hold rule; the persistence adapter's SQL twin must say the same.
+	 */
 	public BookingStatus statusAt(Instant now) {
 		return status == BookingStatus.PENDING && !now.isBefore(expiresAt) ? BookingStatus.EXPIRED : status;
+	}
+
+	/**
+	 * Whether the Booking keeps its Seats from anyone else at {@code now}. A Refunded Booking whose Hold has not
+	 * lapsed still does through {@code expiresAt} (register entry B2).
+	 */
+	public boolean occupiesSeatsAt(Instant now) {
+		return status == BookingStatus.CONFIRMED || now.isBefore(expiresAt);
 	}
 
 	public Booking confirmed() {

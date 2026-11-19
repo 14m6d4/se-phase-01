@@ -180,6 +180,13 @@ class BookingServiceTest {
 	}
 
 	@Test
+	void liveHoldsAndConfirmedBookingsOccupyTheirSeatsButLapsedHoldsDoNot() {
+		assertThat(stored(BookingStatus.PENDING, NOW.plusSeconds(1)).occupiesSeatsAt(NOW)).isTrue();
+		assertThat(stored(BookingStatus.PENDING, NOW).occupiesSeatsAt(NOW)).isFalse();
+		assertThat(stored(BookingStatus.CONFIRMED, NOW).occupiesSeatsAt(NOW)).isTrue();
+	}
+
+	@Test
 	void paymentConfirmsALiveHold() {
 		Booking pending = stored(BookingStatus.PENDING, NOW.plusSeconds(1));
 

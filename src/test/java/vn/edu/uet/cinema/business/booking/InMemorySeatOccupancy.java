@@ -23,9 +23,8 @@ public class InMemorySeatOccupancy implements SeatOccupancyReader {
 			if (!b.showtimeId().equals(showtimeId)) {
 				continue;
 			}
-			SeatStatus status = b.status() == BookingStatus.CONFIRMED ? SeatStatus.SOLD
-				: b.expiresAt().isAfter(now) ? SeatStatus.HELD : null;
-			if (status != null) {
+			if (b.occupiesSeatsAt(now)) {
+				SeatStatus status = b.status() == BookingStatus.CONFIRMED ? SeatStatus.SOLD : SeatStatus.HELD;
 				b.seats().forEach(seat -> statuses.put(seat.seatId(), status));
 			}
 		}

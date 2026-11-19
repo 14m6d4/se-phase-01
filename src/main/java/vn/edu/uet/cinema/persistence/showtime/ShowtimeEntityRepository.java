@@ -1,5 +1,7 @@
 package vn.edu.uet.cinema.persistence.showtime;
 
+import static vn.edu.uet.cinema.persistence.HoldSql.LAPSED_HOLD;
+
 import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
@@ -28,9 +30,7 @@ interface ShowtimeEntityRepository extends JpaRepository<ShowtimeEntity, UUID> {
 
 	/** ADR 0004: lapsed Holds never block deleting their Showtime. booked_seat rows go by ON DELETE CASCADE. */
 	@Modifying
-	@Query(nativeQuery = true, value = """
-		delete from booking where showtime_id = :showtimeId and status = 'PENDING' and expires_at <= :now
-		""")
+	@Query(nativeQuery = true, value = "delete from booking b where b.showtime_id = :showtimeId and " + LAPSED_HOLD)
 	void deleteLapsedHolds(UUID showtimeId, Instant now);
 
 	@Modifying
