@@ -20,11 +20,12 @@ public record Booking(UUID id, UUID customerId, UUID showtimeId, BookingStatus s
 	}
 
 	/**
-	 * Whether the Booking keeps its Seats from anyone else at {@code now}. A Refunded Booking whose Hold has not
-	 * lapsed still does through {@code expiresAt} (register entry B2).
+	 * Whether the Booking keeps its Seats from anyone else at {@code now}: it is Confirmed, Refunded (its Seats were
+	 * sold, and the database still refuses them to others) or Pending with a live Hold.
 	 */
 	public boolean occupiesSeatsAt(Instant now) {
-		return status == BookingStatus.CONFIRMED || now.isBefore(expiresAt);
+		return status == BookingStatus.CONFIRMED || status == BookingStatus.REFUNDED
+			|| statusAt(now) == BookingStatus.PENDING;
 	}
 
 	public Booking confirmed() {

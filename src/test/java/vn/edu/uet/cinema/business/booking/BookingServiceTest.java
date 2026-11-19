@@ -180,10 +180,21 @@ class BookingServiceTest {
 	}
 
 	@Test
-	void liveHoldsAndConfirmedBookingsOccupyTheirSeatsButLapsedHoldsDoNot() {
+	void liveHoldsConfirmedAndRefundedBookingsOccupyTheirSeatsButLapsedHoldsDoNot() {
 		assertThat(stored(BookingStatus.PENDING, NOW.plusSeconds(1)).occupiesSeatsAt(NOW)).isTrue();
 		assertThat(stored(BookingStatus.PENDING, NOW).occupiesSeatsAt(NOW)).isFalse();
 		assertThat(stored(BookingStatus.CONFIRMED, NOW).occupiesSeatsAt(NOW)).isTrue();
+		assertThat(stored(BookingStatus.REFUNDED, NOW).occupiesSeatsAt(NOW)).isTrue();
+	}
+
+	@Test
+	void seatsOfARefundedBookingStaySold() {
+		Booking refunded = stored(BookingStatus.REFUNDED, NOW.plusSeconds(60));
+		InMemorySeatOccupancy occupancy = new InMemorySeatOccupancy(repository);
+
+		assertThat(occupancy.statuses(showtime.id(), NOW)).isEqualTo(Map.of(standard.id(), SeatStatus.SOLD));
+		assertThat(occupancy.statuses(showtime.id(), refunded.expiresAt()))
+			.isEqualTo(Map.of(standard.id(), SeatStatus.SOLD));
 	}
 
 	@Test

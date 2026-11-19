@@ -269,6 +269,22 @@ class BookingPersistenceTest {
 	}
 
 	@Test
+	void seatsOfARefundedBookingStaySoldWhetherOrNotItsHoldHasLapsed() {
+		Auditorium hall = auditorium();
+		UUID showtimeId = showtime(hall);
+		UUID seatId = hall.seats().get(0).id();
+		Booking paid = bookings.book(customer(), showtimeId, List.of(seatId), now);
+		bookings.pay(paid.customerId(), paid.id(), now);
+		showtimes.cancel(showtimeId, CancellationReason.EQUIPMENT_FAILURE, null, now);
+		Instant afterTheHold = paid.expiresAt();
+
+		// The same Seats the unique constraint still refuses to anyone else.
+		assertThat(occupancy.statuses(showtimeId, now)).containsExactly(Map.entry(seatId, SeatStatus.SOLD));
+		assertThat(occupancy.statuses(showtimeId, afterTheHold)).containsExactly(Map.entry(seatId, SeatStatus.SOLD));
+		assertThat(jpa.findTakenSeats(showtimeId, List.of(seatId), afterTheHold)).containsExactly(seatId);
+	}
+
+	@Test
 	void persistenceRefusesABookingOnACancelledShowtimeEvenWhenServiceGuardWasBypassed() {
 		Auditorium hall = auditorium();
 		UUID showtimeId = showtime(hall);

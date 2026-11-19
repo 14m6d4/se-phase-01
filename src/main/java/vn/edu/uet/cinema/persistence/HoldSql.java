@@ -13,10 +13,10 @@ public final class HoldSql {
 	public static final String LAPSED_HOLD = "b.status = 'PENDING' and b.expires_at <= :now";
 
 	/**
-	 * A Booking that keeps its Seats from anyone else at {@code :now}. A Refunded Booking whose Hold has not lapsed
-	 * still matches through {@code expires_at} (register entry B2).
+	 * A Booking that keeps its Seats from anyone else at {@code :now}: Confirmed, Refunded or a live Hold. These are
+	 * exactly the rows {@code uq_booked_seat_showtime_seat} still refuses a new Booking for, once lapsed Holds are gone.
 	 */
-	public static final String OCCUPIES = "(b.status = 'CONFIRMED' or b.expires_at > :now)";
+	public static final String OCCUPIES = "(b.status in ('CONFIRMED', 'REFUNDED') or (" + LIVE_HOLD + "))";
 
 	private HoldSql() {
 	}

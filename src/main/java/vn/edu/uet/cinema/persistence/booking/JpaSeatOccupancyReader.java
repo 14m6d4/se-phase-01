@@ -18,12 +18,12 @@ class JpaSeatOccupancyReader implements SeatOccupancyReader {
 		this.jpa = jpa;
 	}
 
-	/** Only rows that pass {@code HoldSql.OCCUPIES} come back, so anything not Confirmed is a live Hold. */
+	/** Only rows that pass {@code HoldSql.OCCUPIES} come back: a Pending one is a live Hold, the others were sold. */
 	@Override
 	public Map<UUID, SeatStatus> statuses(UUID showtimeId, Instant now) {
 		return jpa.findOccupiedSeats(showtimeId, now).stream().collect(Collectors.toMap(
 			BookingEntityRepository.OccupiedSeat::getSeatId,
-			seat -> BookingStatus.valueOf(seat.getStatus()) == BookingStatus.CONFIRMED ? SeatStatus.SOLD
-				: SeatStatus.HELD));
+			seat -> BookingStatus.valueOf(seat.getStatus()) == BookingStatus.PENDING ? SeatStatus.HELD
+				: SeatStatus.SOLD));
 	}
 }
