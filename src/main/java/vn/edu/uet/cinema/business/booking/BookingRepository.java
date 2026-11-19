@@ -18,16 +18,15 @@ public interface BookingRepository {
 	/**
 	 * Inserts a new Booking after deleting, in the same transaction, the lapsed Holds (as of {@code now}) on its
 	 * Seats and the Customer's own lapsed Pending Booking. A transaction that loses a deadlock is retried once.
-	 *
-	 * @throws SeatsTakenException naming the requested Seats that are HELD or SOLD
-	 * @throws vn.edu.uet.cinema.business.ConflictException if the Showtime is Cancelled, the Customer already has a
-	 * Pending Booking, or the retry lost a deadlock too
 	 */
-	Booking saveNew(Booking booking, Instant now);
+	HoldOutcome saveNew(Booking booking, Instant now);
 
-	/** Makes the Booking Confirmed if it is Pending with a Hold still running at {@code now}; false otherwise. */
-	boolean confirm(UUID id, Instant now);
+	/**
+	 * Makes the Booking Confirmed if it is Pending with a Hold still running at {@code now}. Otherwise its current
+	 * state, read in the same transaction, says why not.
+	 */
+	PayOutcome confirm(Booking booking, Instant now);
 
-	/** Deletes the Booking if it is Pending; false otherwise. */
-	boolean deletePending(UUID id);
+	/** Deletes the Booking if it is Pending. Otherwise its current state, read in the same transaction, says why not. */
+	AbandonOutcome deletePending(Booking booking);
 }

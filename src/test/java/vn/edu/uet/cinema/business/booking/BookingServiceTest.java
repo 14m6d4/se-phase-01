@@ -227,16 +227,18 @@ class BookingServiceTest {
 	@Test
 	void paymentOfABookingWhoseHoldLapsesDuringPaymentIsConflict() {
 		Booking pending = stored(BookingStatus.PENDING, NOW.plusSeconds(60));
+		// The adapter finds the Hold lapsed when it pays: its outcome is mapped, not re-read.
 		InMemoryBookings lapsing = new InMemoryBookings(showtimeRows) {
 			@Override
-			public boolean confirm(UUID id, Instant now) {
-				return super.confirm(id, pending.expiresAt());
+			public PayOutcome confirm(Booking booking, Instant now) {
+				return new PayOutcome.NotPayable(BookingStatus.EXPIRED);
 			}
 		};
 		BookingService racing = new BookingService(showtimes, lapsing);
 
 		assertThatThrownBy(() -> racing.pay(customerId, pending.id(), pending.expiresAt().minusSeconds(1)))
-			.isInstanceOf(ConflictException.class);
+			.isInstanceOf(ConflictException.class)
+			.hasMessage("Booking is EXPIRED, only a Pending Booking can be paid");
 	}
 
 	@Test
@@ -252,9 +254,8 @@ class BookingServiceTest {
 		// The other payment confirms it between our read and our conditional update.
 		InMemoryBookings racing = new InMemoryBookings(showtimeRows) {
 			@Override
-			public boolean confirm(UUID id, Instant now) {
-				super.confirm(id, now);
-				return false;
+			public PayOutcome confirm(Booking booking, Instant now) {
+				return new PayOutcome.AlreadyPaid(pending.confirmed());
 			}
 		};
 
@@ -289,14 +290,59 @@ class BookingServiceTest {
 		// Someone else deletes it between our read and our delete.
 		InMemoryBookings racing = new InMemoryBookings(showtimeRows) {
 			@Override
-			public boolean deletePending(UUID id) {
-				super.deletePending(id);
-				return false;
+			public AbandonOutcome deletePending(Booking booking) {
+				return new AbandonOutcome.Gone();
 			}
 		};
 
 		assertThatThrownBy(() -> new BookingService(showtimes, racing).abandon(customerId, pending.id()))
 			.isInstanceOf(NotFoundException.class);
+	}
+
+	@Test
+	void eachHoldOutcomeIsTheConflictTheClientsClassify() {
+		UUID seatId = standard.id();
+		Map<HoldOutcome, String> messages = Map.of(
+			new HoldOutcome.SeatsTaken(List.of(seatId)), "Seat already taken: [" + seatId + "]",
+			new HoldOutcome.SeatsTaken(List.of()), "Seat already taken: []",
+			new HoldOutcome.ShowtimeCancelled(), "Showtime is Cancelled",
+			new HoldOutcome.ShowtimeGone(), "Showtime no longer exists",
+			new HoldOutcome.CustomerHasPending(), "Customer already has a Pending Booking",
+			new HoldOutcome.Busy(), "Seats are being booked by others right now, try again");
+		messages.forEach((outcome, message) -> {
+			InMemoryBookings answering = new InMemoryBookings(showtimeRows) {
+				@Override
+				public HoldOutcome saveNew(Booking booking, Instant now) {
+					return outcome;
+				}
+			};
+
+			assertThatThrownBy(() -> new BookingService(showtimes, answering).book(customerId, showtime.id(),
+				List.of(seatId), NOW)).as("%s", outcome).isInstanceOf(ConflictException.class).hasMessage(message);
+		});
+		InMemoryBookings taken = new InMemoryBookings(showtimeRows) {
+			@Override
+			public HoldOutcome saveNew(Booking booking, Instant now) {
+				return new HoldOutcome.SeatsTaken(List.of(seatId));
+			}
+		};
+		assertThatThrownBy(() -> new BookingService(showtimes, taken).book(customerId, showtime.id(), List.of(seatId),
+			NOW)).isInstanceOfSatisfying(SeatsTakenException.class, e -> assertThat(e.seatIds()).containsExactly(seatId));
+	}
+
+	@Test
+	void abandoningABookingPaidMeanwhileIsConflictNamingItsStatus() {
+		Booking pending = stored(BookingStatus.PENDING, NOW.plusSeconds(60));
+		InMemoryBookings racing = new InMemoryBookings(showtimeRows) {
+			@Override
+			public AbandonOutcome deletePending(Booking booking) {
+				return new AbandonOutcome.NotPending(BookingStatus.CONFIRMED);
+			}
+		};
+
+		assertThatThrownBy(() -> new BookingService(showtimes, racing).abandon(customerId, pending.id()))
+			.isInstanceOf(ConflictException.class)
+			.hasMessage("Booking is CONFIRMED, only a Pending Booking can be abandoned");
 	}
 
 	private Booking stored(BookingStatus status, Instant expiresAt) {

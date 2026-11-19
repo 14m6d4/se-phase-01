@@ -7,7 +7,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
-import vn.edu.uet.cinema.business.ConflictException;
 import vn.edu.uet.cinema.business.auditorium.Auditorium;
 import vn.edu.uet.cinema.business.auditorium.InMemoryAuditoriums;
 import vn.edu.uet.cinema.business.booking.Booking;
@@ -40,19 +39,20 @@ public class InMemoryShowtimes implements ShowtimeRepository {
 	}
 
 	@Override
-	public void deleteById(UUID id, Instant now) {
+	public DeleteOutcome deleteById(UUID id, Instant now) {
 		bookingRows.values().removeIf(b -> b.showtimeId().equals(id) && b.statusAt(now) == BookingStatus.EXPIRED);
 		if (bookingRows.values().stream().anyMatch(b -> b.showtimeId().equals(id))) {
-			throw new ConflictException("Showtime has Bookings");
+			return new DeleteOutcome.HasBookings();
 		}
 		rows.remove(id);
+		return new DeleteOutcome.Deleted();
 	}
 
 	@Override
-	public boolean cancel(UUID id, Cancellation cancellation, Instant now) {
+	public CancelOutcome cancel(UUID id, Cancellation cancellation, Instant now) {
 		Showtime s = rows.get(id);
 		if (s == null || s.status() != ShowtimeStatus.SCHEDULED || !s.endsAt().isAfter(now)) {
-			return false;
+			return new CancelOutcome.NotCancellable();
 		}
 		rows.put(id, new Showtime(id, s.movieId(), s.auditoriumId(), s.startsAt(), s.endsAt(), s.basePrice(),
 			ShowtimeStatus.CANCELLED, cancellation));
@@ -61,7 +61,7 @@ public class InMemoryShowtimes implements ShowtimeRepository {
 			? new Booking(b.id(), b.customerId(), b.showtimeId(), BookingStatus.REFUNDED, b.createdAt(), b.expiresAt(),
 				b.seats())
 			: b);
-		return true;
+		return new CancelOutcome.Cancelled();
 	}
 
 	@Override

@@ -47,8 +47,18 @@ public class BookingService {
 		bookings.findLivePending(customerId, now).ifPresent(pending -> {
 			throw new ConflictException("Customer already has a Pending Booking " + pending.id());
 		});
-		return bookings.saveNew(new Booking(UUID.randomUUID(), customerId, showtimeId, BookingStatus.PENDING, now,
-			now.plus(HOLD), booked), now);
+		HoldOutcome outcome = bookings.saveNew(new Booking(UUID.randomUUID(), customerId, showtimeId,
+			BookingStatus.PENDING, now, now.plus(HOLD), booked), now);
+		return switch (outcome) {
+			case HoldOutcome.Held held -> held.booking();
+			case HoldOutcome.SeatsTaken taken -> throw new SeatsTakenException(taken.seatIds());
+			case HoldOutcome.ShowtimeCancelled cancelled -> throw new ConflictException("Showtime is Cancelled");
+			case HoldOutcome.ShowtimeGone gone -> throw new ConflictException("Showtime no longer exists");
+			case HoldOutcome.CustomerHasPending pending ->
+				throw new ConflictException("Customer already has a Pending Booking");
+			case HoldOutcome.Busy busy ->
+				throw new ConflictException("Seats are being booked by others right now, try again");
+		};
 	}
 
 	/** The Customer's own Bookings, newest first. */
@@ -64,26 +74,27 @@ public class BookingService {
 
 	/** Simulated payment: always succeeds, so only the Hold decides. Paying a Confirmed Booking returns it. */
 	public Booking pay(UUID customerId, UUID id, Instant now) {
-		Booking booking = get(customerId, id);
-		if (booking.statusAt(now) == BookingStatus.PENDING && bookings.confirm(id, now)) {
-			return booking.confirmed();
-		}
-		// Not confirmed by us: it was already, or a concurrent payment just did, or the Hold has lapsed.
-		Booking current = get(customerId, id);
-		BookingStatus status = current.statusAt(now);
-		if (status != BookingStatus.CONFIRMED) {
-			throw new ConflictException("Booking is " + status + ", only a Pending Booking can be paid");
-		}
-		return current;
+		// Not confirmed by us: it was already, or a concurrent payment just did, or the Hold has lapsed or the
+		// Booking was deleted meanwhile. The adapter tells which, in the transaction of its conditional update.
+		return switch (bookings.confirm(get(customerId, id), now)) {
+			case PayOutcome.Paid paid -> paid.confirmed();
+			case PayOutcome.AlreadyPaid already -> already.current();
+			case PayOutcome.NotPayable notPayable -> throw new ConflictException(
+				"Booking is " + notPayable.status() + ", only a Pending Booking can be paid");
+			case PayOutcome.Gone gone -> throw new NotFoundException("Booking not found");
+		};
 	}
 
 	/** An Expired Booking can be abandoned too: it is removed like any lapsed Hold. */
 	public void abandon(UUID customerId, UUID id) {
-		if (get(customerId, id).status() == BookingStatus.PENDING && bookings.deletePending(id)) {
-			return;
-		}
 		// Nothing deleted: it is Confirmed or Refunded, was paid just now, or is already gone (then this is 404).
-		BookingStatus status = get(customerId, id).status();
-		throw new ConflictException("Booking is " + status + ", only a Pending Booking can be abandoned");
+		// The adapter tells which, in the transaction of its conditional delete.
+		switch (bookings.deletePending(get(customerId, id))) {
+			case AbandonOutcome.Abandoned abandoned -> {
+			}
+			case AbandonOutcome.NotPending notPending -> throw new ConflictException(
+				"Booking is " + notPending.status() + ", only a Pending Booking can be abandoned");
+			case AbandonOutcome.Gone gone -> throw new NotFoundException("Booking not found");
+		}
 	}
 }

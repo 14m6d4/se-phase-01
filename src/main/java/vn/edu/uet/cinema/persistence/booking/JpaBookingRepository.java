@@ -12,11 +12,13 @@ import org.springframework.dao.PessimisticLockingFailureException;
 import org.springframework.stereotype.Repository;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionOperations;
-import vn.edu.uet.cinema.business.ConflictException;
+import vn.edu.uet.cinema.business.booking.AbandonOutcome;
 import vn.edu.uet.cinema.business.booking.BookedSeat;
 import vn.edu.uet.cinema.business.booking.Booking;
 import vn.edu.uet.cinema.business.booking.BookingRepository;
-import vn.edu.uet.cinema.business.booking.SeatsTakenException;
+import vn.edu.uet.cinema.business.booking.BookingStatus;
+import vn.edu.uet.cinema.business.booking.HoldOutcome;
+import vn.edu.uet.cinema.business.booking.PayOutcome;
 
 @Repository
 class JpaBookingRepository implements BookingRepository {
@@ -49,7 +51,7 @@ class JpaBookingRepository implements BookingRepository {
 
 	/** Not {@code @Transactional}: each attempt runs in its own transaction, so a deadlock loser can retry. */
 	@Override
-	public Booking saveNew(Booking booking, Instant now) {
+	public HoldOutcome saveNew(Booking booking, Instant now) {
 		try {
 			return insert(booking, now);
 		} catch (PessimisticLockingFailureException deadlock) {
@@ -57,20 +59,21 @@ class JpaBookingRepository implements BookingRepository {
 			try {
 				return insert(booking, now);
 			} catch (PessimisticLockingFailureException again) {
-				throw new ConflictException("Seats are being booked by others right now, try again");
+				return new HoldOutcome.Busy();
 			}
 		}
 	}
 
-	private Booking insert(Booking booking, Instant now) {
+	private HoldOutcome insert(Booking booking, Instant now) {
 		List<UUID> seatIds = booking.seats().stream().map(BookedSeat::seatId).toList();
 		try {
 			return transaction.execute(status -> {
 				if ("CANCELLED".equals(jpa.lockShowtimeStatus(booking.showtimeId()))) {
-					throw new ConflictException("Showtime is Cancelled");
+					status.setRollbackOnly();
+					return new HoldOutcome.ShowtimeCancelled();
 				}
 				jpa.deleteLapsedHolds(booking.customerId(), booking.showtimeId(), seatIds, now);
-				return jpa.saveAndFlush(BookingEntity.from(booking)).toBooking();
+				return new HoldOutcome.Held(jpa.saveAndFlush(BookingEntity.from(booking)).toBooking());
 			});
 		} catch (DataIntegrityViolationException e) {
 			// The insert that loses the race fails here (ADR 0004).
@@ -79,27 +82,44 @@ class JpaBookingRepository implements BookingRepository {
 				// in between, the list is empty: the Seats are free again and the client can simply retry.
 				// Only the requested Seats are read: this runs once per lost race, so it must not scan the Showtime.
 				Set<UUID> taken = Set.copyOf(jpa.findTakenSeats(booking.showtimeId(), seatIds, now));
-				throw new SeatsTakenException(seatIds.stream().filter(taken::contains).toList());
+				return new HoldOutcome.SeatsTaken(seatIds.stream().filter(taken::contains).toList());
 			}
 			if (hasConstraint(e, "uq_booking_customer_pending")) {
-				throw new ConflictException("Customer already has a Pending Booking");
+				return new HoldOutcome.CustomerHasPending();
 			}
 			if (hasConstraint(e, "fk_booking_showtime")) {
-				throw new ConflictException("Showtime no longer exists");
+				return new HoldOutcome.ShowtimeGone();
 			}
 			throw e;
 		}
 	}
 
+	/**
+	 * When the conditional update changes nothing, the row is read again in the same transaction. Each statement
+	 * sees what was committed when it started, so the read sees a concurrent payment the update waited for. A single
+	 * statement (a data-modifying CTE) would not: its outer select shares the snapshot taken before the wait.
+	 */
 	@Override
 	@Transactional
-	public boolean confirm(UUID id, Instant now) {
-		return jpa.confirm(id, now) == 1;
+	public PayOutcome confirm(Booking booking, Instant now) {
+		if (jpa.confirm(booking.id(), now) == 1) {
+			return new PayOutcome.Paid(booking.confirmed());
+		}
+		return jpa.findById(booking.id()).map(BookingEntity::toBooking).<PayOutcome>map(current -> {
+			BookingStatus status = current.statusAt(now);
+			return status == BookingStatus.CONFIRMED ? new PayOutcome.AlreadyPaid(current)
+				: new PayOutcome.NotPayable(status);
+		}).orElseGet(PayOutcome.Gone::new);
 	}
 
+	/** Like {@link #confirm}, the row is read again in the same transaction when nothing was deleted. */
 	@Override
 	@Transactional
-	public boolean deletePending(UUID id) {
-		return jpa.deletePending(id) == 1;
+	public AbandonOutcome deletePending(Booking booking) {
+		if (jpa.deletePending(booking.id()) == 1) {
+			return new AbandonOutcome.Abandoned();
+		}
+		return jpa.findById(booking.id()).<AbandonOutcome>map(current -> new AbandonOutcome.NotPending(
+			current.toBooking().status())).orElseGet(AbandonOutcome.Gone::new);
 	}
 }

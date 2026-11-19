@@ -99,15 +99,23 @@ public class ShowtimeService {
 		if (given != null && given.length() > MAX_NOTE_LENGTH) {
 			throw new InvalidShowtimeException("A cancellation note has at most " + MAX_NOTE_LENGTH + " characters");
 		}
-		get(id);
-		if (!showtimes.cancel(id, new Cancellation(reason, given), now)) {
-			throw new ConflictException("Showtime is already Cancelled or has ended");
-		}
-		return get(id);
+		Showtime showtime = get(id);
+		Cancellation cancellation = new Cancellation(reason, given);
+		return switch (showtimes.cancel(id, cancellation, now)) {
+			case CancelOutcome.Cancelled cancelled -> new Showtime(showtime.id(), showtime.movieId(),
+				showtime.auditoriumId(), showtime.startsAt(), showtime.endsAt(), showtime.basePrice(),
+				ShowtimeStatus.CANCELLED, cancellation);
+			case CancelOutcome.NotCancellable notCancellable ->
+				throw new ConflictException("Showtime is already Cancelled or has ended");
+		};
 	}
 
 	public void delete(UUID id, Instant now) {
 		get(id);
-		showtimes.deleteById(id, now);
+		switch (showtimes.deleteById(id, now)) {
+			case DeleteOutcome.Deleted deleted -> {
+			}
+			case DeleteOutcome.HasBookings hasBookings -> throw new ConflictException("Showtime has Bookings");
+		}
 	}
 }

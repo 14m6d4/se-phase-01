@@ -8,7 +8,6 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 import java.util.stream.Collectors;
-import vn.edu.uet.cinema.business.ConflictException;
 import vn.edu.uet.cinema.business.showtime.InMemoryShowtimes;
 import vn.edu.uet.cinema.business.showtime.ShowtimeStatus;
 
@@ -44,11 +43,11 @@ public class InMemoryBookings implements BookingRepository {
 	}
 
 	@Override
-	public Booking saveNew(Booking booking, Instant now) {
-		showtimes.findById(booking.showtimeId()).filter(s -> s.status() == ShowtimeStatus.CANCELLED)
-			.ifPresent(s -> {
-				throw new ConflictException("Showtime is Cancelled");
-			});
+	public HoldOutcome saveNew(Booking booking, Instant now) {
+		if (showtimes.findById(booking.showtimeId()).filter(s -> s.status() == ShowtimeStatus.CANCELLED)
+			.isPresent()) {
+			return new HoldOutcome.ShowtimeCancelled();
+		}
 		List<UUID> seatIds = booking.seats().stream().map(BookedSeat::seatId).toList();
 		rows.values().removeIf(b -> b.statusAt(now) == BookingStatus.EXPIRED && (b.customerId().equals(booking.customerId())
 			|| b.showtimeId().equals(booking.showtimeId()) && b.seats().stream().anyMatch(s -> seatIds.contains(s.seatId()))));
@@ -56,28 +55,41 @@ public class InMemoryBookings implements BookingRepository {
 			.flatMap(b -> b.seats().stream()).map(BookedSeat::seatId).collect(Collectors.toSet());
 		List<UUID> clash = seatIds.stream().filter(taken::contains).toList();
 		if (!clash.isEmpty()) {
-			throw new SeatsTakenException(clash);
+			return new HoldOutcome.SeatsTaken(clash);
 		}
 		if (rows.values().stream().anyMatch(b -> b.customerId().equals(booking.customerId())
 			&& b.status() == BookingStatus.PENDING)) {
-			throw new ConflictException("Customer already has a Pending Booking");
+			return new HoldOutcome.CustomerHasPending();
 		}
 		rows.put(booking.id(), booking);
-		return booking;
+		return new HoldOutcome.Held(booking);
 	}
 
 	@Override
-	public boolean confirm(UUID id, Instant now) {
-		Booking b = rows.get(id);
-		if (b == null || b.statusAt(now) != BookingStatus.PENDING) {
-			return false;
+	public PayOutcome confirm(Booking booking, Instant now) {
+		Booking current = rows.get(booking.id());
+		if (current == null) {
+			return new PayOutcome.Gone();
 		}
-		rows.put(id, b.confirmed());
-		return true;
+		BookingStatus status = current.statusAt(now);
+		if (status == BookingStatus.PENDING) {
+			rows.put(current.id(), current.confirmed());
+			return new PayOutcome.Paid(booking.confirmed());
+		}
+		return status == BookingStatus.CONFIRMED ? new PayOutcome.AlreadyPaid(current)
+			: new PayOutcome.NotPayable(status);
 	}
 
 	@Override
-	public boolean deletePending(UUID id) {
-		return rows.values().removeIf(b -> b.id().equals(id) && b.status() == BookingStatus.PENDING);
+	public AbandonOutcome deletePending(Booking booking) {
+		Booking current = rows.get(booking.id());
+		if (current == null) {
+			return new AbandonOutcome.Gone();
+		}
+		if (current.status() != BookingStatus.PENDING) {
+			return new AbandonOutcome.NotPending(current.status());
+		}
+		rows.remove(current.id());
+		return new AbandonOutcome.Abandoned();
 	}
 }

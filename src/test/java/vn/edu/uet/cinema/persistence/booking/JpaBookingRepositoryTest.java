@@ -1,7 +1,6 @@
 package vn.edu.uet.cinema.persistence.booking;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.times;
@@ -14,11 +13,10 @@ import java.util.UUID;
 import org.junit.jupiter.api.Test;
 import org.springframework.dao.CannotAcquireLockException;
 import org.springframework.transaction.support.TransactionOperations;
-import vn.edu.uet.cinema.business.ConflictException;
 import vn.edu.uet.cinema.business.booking.BookedSeat;
 import vn.edu.uet.cinema.business.booking.Booking;
 import vn.edu.uet.cinema.business.booking.BookingStatus;
-import vn.edu.uet.cinema.business.booking.SeatsTakenException;
+import vn.edu.uet.cinema.business.booking.HoldOutcome;
 
 /**
  * A real deadlock between lapsed-Hold deletes depends on the order PostgreSQL visits rows, so it can't be forced
@@ -39,7 +37,7 @@ class JpaBookingRepositoryTest {
 		when(jpa.saveAndFlush(any())).thenThrow(new CannotAcquireLockException("deadlock detected"))
 			.thenAnswer(invocation -> invocation.getArgument(0));
 
-		assertThat(repository.saveNew(booking, NOW)).isEqualTo(booking);
+		assertThat(repository.saveNew(booking, NOW)).isEqualTo(new HoldOutcome.Held(booking));
 		verify(jpa, times(2)).saveAndFlush(any());
 	}
 
@@ -47,8 +45,7 @@ class JpaBookingRepositoryTest {
 	void secondDeadlockIsAConflictThatDoesNotClaimTheSeatsAreTaken() {
 		when(jpa.saveAndFlush(any())).thenThrow(new CannotAcquireLockException("deadlock detected"));
 
-		assertThatThrownBy(() -> repository.saveNew(booking, NOW)).isInstanceOf(ConflictException.class)
-			.isNotInstanceOf(SeatsTakenException.class);
+		assertThat(repository.saveNew(booking, NOW)).isEqualTo(new HoldOutcome.Busy());
 		verify(jpa, times(2)).saveAndFlush(any());
 	}
 }
