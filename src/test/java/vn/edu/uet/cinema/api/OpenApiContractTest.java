@@ -216,6 +216,7 @@ class OpenApiContractTest {
 		assertProperty(schemas, "BookingRequest", "seatIds", "maxItems", 8);
 		assertProperty(schemas, "MovieRequest", "durationMinutes", "minimum", 1);
 		assertProperty(schemas, "ShowtimeRequest", "basePrice", "minimum", 1);
+		assertProperty(schemas, "ShowtimeRequest", "basePrice", "maximum", 100000000);
 		assertProperty(schemas, "CancellationRequest", "note", "maxLength", 200);
 		assertProperty(schemas, "BookedSeat", "seatId", "example", "550e8400-e29b-41d4-a716-446655440020");
 		assertProperty(schemas, "BookedSeat", "price", "example", 100000);
