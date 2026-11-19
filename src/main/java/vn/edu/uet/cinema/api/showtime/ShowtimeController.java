@@ -6,6 +6,7 @@ import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.security.SecurityRequirement;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
+import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Positive;
 import java.time.Instant;
@@ -26,6 +27,7 @@ import org.springframework.web.bind.annotation.RestController;
 import vn.edu.uet.cinema.business.auditorium.Seat;
 import vn.edu.uet.cinema.business.showtime.Cancellation;
 import vn.edu.uet.cinema.business.showtime.CancellationReason;
+import vn.edu.uet.cinema.business.showtime.SeatPricing;
 import vn.edu.uet.cinema.business.showtime.SeatStatus;
 import vn.edu.uet.cinema.business.showtime.Showtime;
 import vn.edu.uet.cinema.business.showtime.ShowtimeService;
@@ -117,7 +119,9 @@ class ShowtimeController {
 		@Schema(description = "Start instant as ISO-8601 date-time with an offset.", example = "2026-05-01T19:30:00+07:00")
 		OffsetDateTime startsAt,
 		@NotNull(message = "Base price is required") @Positive(message = "Base price must be positive")
-		@Schema(description = "Positive integer VND base price.", minimum = "1", example = "100000") Long basePrice) {
+		@Max(value = SeatPricing.MAX_BASE_PRICE, message = "Base price must be at most " + SeatPricing.MAX_BASE_PRICE)
+		@Schema(description = "Positive integer VND base price, at most 100,000,000.", minimum = "1",
+			maximum = "100000000", example = "100000") Long basePrice) {
 	}
 
 	record CancellationRequest(@NotNull(message = "Cancellation reason is required")

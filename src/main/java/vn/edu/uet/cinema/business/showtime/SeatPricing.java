@@ -4,6 +4,12 @@ import vn.edu.uet.cinema.business.auditorium.SeatType;
 
 public final class SeatPricing {
 
+	/**
+	 * The highest base price a Showtime accepts, in VND. Well above any real ticket, and low enough that the largest
+	 * Booking cannot overflow: 8 Couple Seats cost 8 * (2 * 100,000,000 + 10,000), about 1.6e9.
+	 */
+	public static final long MAX_BASE_PRICE = 100_000_000L;
+
 	private SeatPricing() {
 	}
 

@@ -1566,10 +1566,11 @@
           "basePrice": {
             "type": "integer",
             "format": "int64",
-            "description": "Positive integer VND base price.",
+            "description": "Positive integer VND base price, at most 100,000,000.",
             "example": 100000,
             "exclusiveMinimum": 0,
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 100000000
           }
         },
         "required": [

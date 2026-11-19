@@ -51,6 +51,16 @@ class ShowtimeServiceTest {
 	}
 
 	@Test
+	void rejectsBasePriceAboveTheMaximumAndAcceptsTheMaximum() {
+		UUID movieId = movie(120);
+
+		assertThatThrownBy(() -> service.create(movieId, auditoriumId, STARTS_AT, SeatPricing.MAX_BASE_PRICE + 1))
+			.isInstanceOf(InvalidShowtimeException.class);
+		assertThat(service.create(movieId, auditoriumId, STARTS_AT, SeatPricing.MAX_BASE_PRICE).basePrice())
+			.isEqualTo(SeatPricing.MAX_BASE_PRICE);
+	}
+
+	@Test
 	void creationSnapshotsMovieDurationPlusCleaningTime() {
 		UUID movieId = movie(120);
 

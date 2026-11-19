@@ -31,6 +31,9 @@ public class ShowtimeService {
 		if (basePrice <= 0) {
 			throw new InvalidShowtimeException("Base price must be positive");
 		}
+		if (basePrice > SeatPricing.MAX_BASE_PRICE) {
+			throw new InvalidShowtimeException("Base price must be at most " + SeatPricing.MAX_BASE_PRICE);
+		}
 		int durationMinutes = movies.get(movieId).durationMinutes();
 		auditoriums.get(auditoriumId);
 		Instant endsAt = startsAt.plusSeconds(((long) durationMinutes + 15) * 60);
