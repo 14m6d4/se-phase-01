@@ -1,0 +1,137 @@
+name: Phase 2 checks
+
+# Runs every test tool of phase 2 on every push: unit and integration tests, secret and vulnerability scans,
+# black-box API tests against the running stack, and a short load smoke test. The gating steps must pass; steps
+# marked "report only" list known problems from docs/phase2/problem-register.md without failing the run.
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    name: Unit, ArchUnit and Testcontainers tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - run: python3 loadtest/test_loadtest.py
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: maven
+      - run: ./mvnw -B verify
+
+  secrets:
+    name: Gitleaks (full history)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - run: >
+          docker run --rm --user "$(id -u):$(id -g)" -v "$PWD":/repo zricethezav/gitleaks:v8.30.0
+          git /repo --redact --no-banner
+
+  vulnerabilities:
+    name: Trivy (dependencies, Dockerfile, image)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Dependencies, Dockerfile and files
+        run: >
+          docker run --rm -v "$PWD":/src aquasec/trivy:0.69.3 fs --quiet --scanners vuln,misconfig,secret
+          --severity CRITICAL,HIGH --exit-code 1 /src
+      - run: docker build -t se-phase-01:ci .
+      - name: Image
+        run: >
+          docker run --rm -v /var/run/docker.sock:/var/run/docker.sock aquasec/trivy:0.69.3 image --quiet
+          --severity CRITICAL,HIGH --exit-code 1 se-phase-01:ci
+
+  api:
+    name: Newman and Schemathesis
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Start the stack
+        run: |
+          printf 'DB_PASSWORD=%s\nJWT_SECRET=%s\nADMIN_EMAIL=admin@cinema.local\nADMIN_PASSWORD=%s\n' \
+            "$(openssl rand -hex 16)" "$(openssl rand -base64 48 | tr -d '\n')" "$(openssl rand -hex 12)" > .env
+          docker compose up -d --build
+          for i in $(seq 1 60); do curl -sf localhost:8080/actuator/health && break; sleep 3; done
+      - name: Newman, booking flow
+        run: |
+          set -a; . ./.env; set +a
+          npx --yes newman@6.2.3 run apitest/booking-flow.postman_collection.json \
+            --env-var baseUrl=http://localhost:8080 --env-var adminEmail="$ADMIN_EMAIL" --env-var adminPassword="$ADMIN_PASSWORD" \
+            --folder "Setup" --folder "Access rules" --folder "Catalogue" --folder "Booking" --folder "Cancellation"
+      - name: Newman, known bugs (report only)
+        continue-on-error: true
+        run: |
+          set -a; . ./.env; set +a
+          npx --yes newman@6.2.3 run apitest/booking-flow.postman_collection.json \
+            --env-var baseUrl=http://localhost:8080 --env-var adminEmail="$ADMIN_EMAIL" --env-var adminPassword="$ADMIN_PASSWORD" \
+            --folder "Setup" --folder "Catalogue" --folder "Known bugs (phase 2)"
+      - name: Schemathesis, no server errors (Admin and Customer)
+        run: |
+          set -a; . ./.env; set +a
+          login() { curl -s -X POST localhost:8080/api/auth/login -H 'Content-Type: application/json' -d "$1" | jq -r .accessToken; }
+          ADMIN=$(login "$(jq -n --arg e "$ADMIN_EMAIL" --arg p "$ADMIN_PASSWORD" '{email:$e,password:$p}')")
+          curl -s -o /dev/null -X POST localhost:8080/api/auth/register -H 'Content-Type: application/json' \
+            -d '{"email":"ci-customer@example.com","password":"password123","fullName":"CI"}'
+          CUSTOMER=$(login '{"email":"ci-customer@example.com","password":"password123"}')
+          for token in "$ADMIN" "$CUSTOMER"; do
+            pipx run schemathesis==4.33.4 run docs/openapi.json --url http://localhost:8080 \
+              -H "Authorization: Bearer $token" --checks not_a_server_error -n 20 --no-color
+          done
+      - name: Schemathesis, every check (report only)
+        continue-on-error: true
+        run: |
+          set -a; . ./.env; set +a
+          ADMIN=$(jq -n --arg e "$ADMIN_EMAIL" --arg p "$ADMIN_PASSWORD" '{email:$e,password:$p}' |
+            curl -s -X POST localhost:8080/api/auth/login -H 'Content-Type: application/json' -d @- | jq -r .accessToken)
+          pipx run schemathesis==4.33.4 run docs/openapi.json --url http://localhost:8080 \
+            -H "Authorization: Bearer $ADMIN" --checks all -n 20 --no-color
+      - name: Service log on failure
+        if: failure()
+        run: docker compose logs app | tail -100
+
+  load-smoke:
+    name: Locust smoke (all five scenarios)
+    runs-on: ubuntu-latest
+    env:
+      COMPOSE: docker compose -f docker-compose.yml -f loadtest/locust/compose.kaggle-like.yml
+      BASE_URL: http://localhost:18080
+    steps:
+      - uses: actions/checkout@v7
+      - name: Start the Kaggle-like stack and seed it
+        run: |
+          printf 'DB_PASSWORD=%s\nJWT_SECRET=%s\nADMIN_EMAIL=admin@cinema.local\nADMIN_PASSWORD=%s\n' \
+            "$(openssl rand -hex 16)" "$(openssl rand -base64 48 | tr -d '\n')" "$(openssl rand -hex 12)" > .env
+          export APP_CPUS="0-$(($(nproc) - 1))"
+          $COMPOSE up -d --build
+          for i in $(seq 1 60); do curl -sf localhost:18080/actuator/health && break; sleep 3; done
+          $COMPOSE exec -T db psql -v ON_ERROR_STOP=1 -U cinema -d cinema -q < loadtest/seed.sql
+      - run: pip install locust==2.47.0
+      - name: Each scenario for 20 s at 20 users, no failed request
+        run: |
+          mkdir -p loadtest/results
+          for scenario in Account Browse Book Contention Race; do
+            CUSTOMERS=20 STEP=0 RESULTS=loadtest/results/smoke-$scenario.json \
+              locust -f loadtest/locust/locustfile.py --headless --only-summary --loglevel WARNING -u 20 -r 20 -t 20s $scenario
+            jq -e '.requests > 0 and .failures == 0' loadtest/results/smoke-$scenario.json \
+              || { echo "$scenario failed"; cat loadtest/results/smoke-$scenario.json; exit 1; }
+          done
+      - name: No Seat booked twice
+        run: |
+          duplicates=$($COMPOSE exec -T db psql -U cinema -d cinema -tAc \
+            "select count(*) from (select showtime_id, seat_id from booked_seat group by 1, 2 having count(*) > 1) d")
+          echo "duplicate Seats: $duplicates"
+          test "$duplicates" = "0"
+      - name: Service log on failure
+        if: failure()
+        run: $COMPOSE logs app | tail -100
