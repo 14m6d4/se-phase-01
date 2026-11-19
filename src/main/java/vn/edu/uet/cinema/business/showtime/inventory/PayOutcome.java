@@ -1,4 +1,4 @@
-package vn.edu.uet.cinema.business.booking;
+package vn.edu.uet.cinema.business.showtime.inventory;
 
 /** What happened to a payment, decided in the same transaction as the conditional update. */
 public sealed interface PayOutcome {

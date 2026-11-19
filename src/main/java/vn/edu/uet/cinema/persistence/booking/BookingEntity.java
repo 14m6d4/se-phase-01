@@ -16,9 +16,9 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 import java.util.UUID;
-import vn.edu.uet.cinema.business.booking.BookedSeat;
-import vn.edu.uet.cinema.business.booking.Booking;
-import vn.edu.uet.cinema.business.booking.BookingStatus;
+import vn.edu.uet.cinema.business.showtime.inventory.BookedSeat;
+import vn.edu.uet.cinema.business.showtime.inventory.Booking;
+import vn.edu.uet.cinema.business.showtime.inventory.BookingStatus;
 
 @Entity
 @Table(name = "booking")

@@ -15,9 +15,9 @@ import vn.edu.uet.cinema.business.cinema.CinemaRepository;
 import vn.edu.uet.cinema.business.cinema.CinemaService;
 import vn.edu.uet.cinema.business.movie.MovieRepository;
 import vn.edu.uet.cinema.business.movie.MovieService;
-import vn.edu.uet.cinema.business.showtime.SeatOccupancyReader;
 import vn.edu.uet.cinema.business.showtime.ShowtimeRepository;
 import vn.edu.uet.cinema.business.showtime.ShowtimeService;
+import vn.edu.uet.cinema.business.showtime.inventory.SeatInventory;
 
 /** Business services carry no Spring annotations (ADR 0001), so they are wired here. */
 @Configuration
@@ -46,13 +46,13 @@ class BusinessConfig {
 
 	@Bean
 	ShowtimeService showtimeService(MovieService movies, AuditoriumService auditoriums, ShowtimeRepository showtimes,
-		SeatOccupancyReader occupancy) {
-		return new ShowtimeService(movies, auditoriums, showtimes, occupancy);
+		SeatInventory inventory) {
+		return new ShowtimeService(movies, auditoriums, showtimes, inventory);
 	}
 
 	@Bean
-	BookingService bookingService(ShowtimeService showtimes, BookingRepository bookings) {
-		return new BookingService(showtimes, bookings);
+	BookingService bookingService(ShowtimeService showtimes, BookingRepository bookings, SeatInventory inventory) {
+		return new BookingService(showtimes, bookings, inventory);
 	}
 
 	/** Admins are never self-registered: the one Admin comes from ADMIN_EMAIL / ADMIN_PASSWORD. */

@@ -1,8 +1,8 @@
 package vn.edu.uet.cinema.persistence.booking;
 
-import static vn.edu.uet.cinema.persistence.HoldSql.LAPSED_HOLD;
-import static vn.edu.uet.cinema.persistence.HoldSql.LIVE_HOLD;
-import static vn.edu.uet.cinema.persistence.HoldSql.OCCUPIES;
+import static vn.edu.uet.cinema.persistence.booking.HoldSql.LAPSED_HOLD;
+import static vn.edu.uet.cinema.persistence.booking.HoldSql.LIVE_HOLD;
+import static vn.edu.uet.cinema.persistence.booking.HoldSql.OCCUPIES;
 
 import java.time.Instant;
 import java.util.Collection;
@@ -61,6 +61,34 @@ interface BookingEntityRepository extends JpaRepository<BookingEntity, UUID> {
 		where s.showtime_id = :showtimeId and s.seat_id in (:seatIds) and
 		""" + OCCUPIES)
 	List<UUID> findTakenSeats(UUID showtimeId, Collection<UUID> seatIds, Instant now);
+
+	/** ADR 0004: lapsed Holds never block deleting their Showtime. booked_seat rows go by ON DELETE CASCADE. */
+	@Modifying
+	@Query(nativeQuery = true, value = "delete from booking b where b.showtime_id = :showtimeId and " + LAPSED_HOLD)
+	void deleteLapsedHoldsOfShowtime(UUID showtimeId, Instant now);
+
+	/** Fails on {@code fk_booking_showtime} while any Booking of it is left. */
+	@Modifying
+	@Query(nativeQuery = true, value = "delete from showtime where id = :showtimeId")
+	void deleteShowtime(UUID showtimeId);
+
+	@Modifying
+	@Query(nativeQuery = true, value = """
+		update showtime set status = 'CANCELLED', cancellation_reason = :reason, cancellation_note = :note
+		where id = :id and status = 'SCHEDULED' and ends_at > :now
+		""")
+	int cancelShowtime(UUID id, String reason, String note, Instant now);
+
+	/** Expired ones too: they are stored as PENDING. booked_seat rows go by ON DELETE CASCADE. */
+	@Modifying
+	@Query(nativeQuery = true, value = "delete from booking where showtime_id = :showtimeId and status = 'PENDING'")
+	void deletePendingBookings(UUID showtimeId);
+
+	@Modifying
+	@Query(nativeQuery = true, value = """
+		update booking set status = 'REFUNDED' where showtime_id = :showtimeId and status = 'CONFIRMED'
+		""")
+	void refundConfirmedBookings(UUID showtimeId);
 
 	interface OccupiedSeat {
 

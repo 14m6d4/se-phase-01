@@ -28,10 +28,10 @@ import vn.edu.uet.cinema.business.auditorium.Seat;
 import vn.edu.uet.cinema.business.showtime.Cancellation;
 import vn.edu.uet.cinema.business.showtime.CancellationReason;
 import vn.edu.uet.cinema.business.showtime.SeatPricing;
-import vn.edu.uet.cinema.business.showtime.SeatStatus;
 import vn.edu.uet.cinema.business.showtime.Showtime;
 import vn.edu.uet.cinema.business.showtime.ShowtimeService;
 import vn.edu.uet.cinema.business.showtime.ShowtimeStatus;
+import vn.edu.uet.cinema.business.showtime.inventory.SeatStatus;
 import vn.edu.uet.cinema.config.OpenApiConfig;
 
 @RestController

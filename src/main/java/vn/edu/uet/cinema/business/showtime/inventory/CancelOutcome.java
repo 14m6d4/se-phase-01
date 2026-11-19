@@ -1,4 +1,4 @@
-package vn.edu.uet.cinema.business.showtime;
+package vn.edu.uet.cinema.business.showtime.inventory;
 
 /** What happened to a cancellation. */
 public sealed interface CancelOutcome {

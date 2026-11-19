@@ -32,8 +32,8 @@ import vn.edu.uet.cinema.business.auditorium.AuditoriumService;
 import vn.edu.uet.cinema.business.booking.BookingService;
 import vn.edu.uet.cinema.business.cinema.CinemaService;
 import vn.edu.uet.cinema.business.movie.MovieService;
-import vn.edu.uet.cinema.business.showtime.SeatOccupancyReader;
 import vn.edu.uet.cinema.business.showtime.ShowtimeService;
+import vn.edu.uet.cinema.business.showtime.inventory.SeatInventory;
 import vn.edu.uet.cinema.config.OpenApiConfig;
 import vn.edu.uet.cinema.config.SecurityConfig;
 
@@ -99,7 +99,7 @@ class OpenApiContractTest {
 	@MockitoBean
 	ShowtimeService showtimes;
 	@MockitoBean
-	SeatOccupancyReader occupancy;
+	SeatInventory inventory;
 	@MockitoBean
 	BookingService bookings;
 

@@ -26,22 +26,22 @@ import vn.edu.uet.cinema.business.NotFoundException;
 import vn.edu.uet.cinema.business.account.AccountService;
 import vn.edu.uet.cinema.business.auditorium.Auditorium;
 import vn.edu.uet.cinema.business.auditorium.AuditoriumService;
-import vn.edu.uet.cinema.business.booking.AbandonOutcome;
-import vn.edu.uet.cinema.business.booking.BookedSeat;
-import vn.edu.uet.cinema.business.booking.Booking;
 import vn.edu.uet.cinema.business.booking.BookingRepository;
 import vn.edu.uet.cinema.business.booking.BookingService;
-import vn.edu.uet.cinema.business.booking.BookingStatus;
-import vn.edu.uet.cinema.business.booking.HoldOutcome;
-import vn.edu.uet.cinema.business.booking.PayOutcome;
 import vn.edu.uet.cinema.business.booking.SeatsTakenException;
 import vn.edu.uet.cinema.business.cinema.CinemaService;
 import vn.edu.uet.cinema.business.movie.AgeRating;
 import vn.edu.uet.cinema.business.movie.MovieService;
 import vn.edu.uet.cinema.business.showtime.CancellationReason;
-import vn.edu.uet.cinema.business.showtime.SeatOccupancyReader;
-import vn.edu.uet.cinema.business.showtime.SeatStatus;
 import vn.edu.uet.cinema.business.showtime.ShowtimeService;
+import vn.edu.uet.cinema.business.showtime.inventory.AbandonOutcome;
+import vn.edu.uet.cinema.business.showtime.inventory.BookedSeat;
+import vn.edu.uet.cinema.business.showtime.inventory.Booking;
+import vn.edu.uet.cinema.business.showtime.inventory.BookingStatus;
+import vn.edu.uet.cinema.business.showtime.inventory.HoldOutcome;
+import vn.edu.uet.cinema.business.showtime.inventory.PayOutcome;
+import vn.edu.uet.cinema.business.showtime.inventory.SeatInventory;
+import vn.edu.uet.cinema.business.showtime.inventory.SeatStatus;
 
 @SpringBootTest
 @Import(TestcontainersConfiguration.class)
@@ -49,7 +49,7 @@ class BookingPersistenceTest {
 
 	@Autowired BookingService bookings;
 	@Autowired BookingRepository repository;
-	@Autowired SeatOccupancyReader occupancy;
+	@Autowired SeatInventory inventory;
 	@Autowired AccountService accounts;
 	@Autowired MovieService movies;
 	@Autowired CinemaService cinemas;
@@ -95,7 +95,7 @@ class BookingPersistenceTest {
 		} finally {
 			pool.shutdownNow();
 		}
-		assertThat(occupancy.statuses(showtimeId, Instant.now()))
+		assertThat(inventory.statuses(showtimeId, Instant.now()))
 			.containsOnly(Map.entry(a, SeatStatus.HELD), Map.entry(b, SeatStatus.HELD));
 	}
 
@@ -108,7 +108,7 @@ class BookingPersistenceTest {
 		UUID lapsed = hall.seats().get(2).id();
 		UUID notRequested = hall.seats().get(3).id();
 		bookings.book(customer(), showtimeId, List.of(held), now);
-		assertThat(repository.saveNew(new Booking(UUID.randomUUID(), customer(), showtimeId, BookingStatus.CONFIRMED,
+		assertThat(inventory.hold(new Booking(UUID.randomUUID(), customer(), showtimeId, BookingStatus.CONFIRMED,
 			now.minus(1, ChronoUnit.HOURS), now.minus(50, ChronoUnit.MINUTES), List.of(new BookedSeat(sold, 100_000))),
 			now)).isInstanceOf(HoldOutcome.Held.class);
 		bookings.book(customer(), showtimeId, List.of(lapsed), now.minus(11, ChronoUnit.MINUTES));
@@ -141,13 +141,13 @@ class BookingPersistenceTest {
 		Instant elevenMinutesAgo = now.minus(11, ChronoUnit.MINUTES);
 		Booking lapsed = bookings.book(first, showtimeId, List.of(seatId), elevenMinutesAgo);
 
-		assertThat(occupancy.statuses(showtimeId, now)).isEmpty();
+		assertThat(inventory.statuses(showtimeId, now)).isEmpty();
 		bookings.book(customer(), showtimeId, List.of(seatId), now);
 
 		// Asked as of when it was still live: only a deleted Booking is missing then.
 		assertThat(repository.findLivePending(first, elevenMinutesAgo)).as("lapsed Booking %s", lapsed.id())
 			.isEmpty();
-		assertThat(occupancy.statuses(showtimeId, now)).containsExactly(Map.entry(seatId, SeatStatus.HELD));
+		assertThat(inventory.statuses(showtimeId, now)).containsExactly(Map.entry(seatId, SeatStatus.HELD));
 	}
 
 	@Test
@@ -171,11 +171,11 @@ class BookingPersistenceTest {
 		UUID held = hall.seats().get(0).id();
 		UUID sold = hall.seats().get(1).id();
 		bookings.book(customer(), showtimeId, List.of(held), now);
-		assertThat(repository.saveNew(new Booking(UUID.randomUUID(), customer(), showtimeId, BookingStatus.CONFIRMED,
+		assertThat(inventory.hold(new Booking(UUID.randomUUID(), customer(), showtimeId, BookingStatus.CONFIRMED,
 			now.minus(1, ChronoUnit.HOURS), now.minus(50, ChronoUnit.MINUTES), List.of(new BookedSeat(sold, 100_000))),
 			now)).isInstanceOf(HoldOutcome.Held.class);
 
-		assertThat(occupancy.statuses(showtimeId, now))
+		assertThat(inventory.statuses(showtimeId, now))
 			.containsOnly(Map.entry(held, SeatStatus.HELD), Map.entry(sold, SeatStatus.SOLD));
 	}
 
@@ -203,15 +203,15 @@ class BookingPersistenceTest {
 		UUID customerId = customer();
 		Booking lapsed = bookings.book(customerId, showtimeId, List.of(hall.seats().get(1).id()),
 			now.minus(11, ChronoUnit.MINUTES));
-		assertThat(repository.confirm(lapsed, now)).isEqualTo(new PayOutcome.NotPayable(BookingStatus.EXPIRED));
+		assertThat(inventory.pay(lapsed, now)).isEqualTo(new PayOutcome.NotPayable(BookingStatus.EXPIRED));
 
 		Booking live = bookings.book(customerId, showtimeId, List.of(seatId), now);
 
-		assertThat(repository.confirm(live, now)).isEqualTo(new PayOutcome.Paid(live.confirmed()));
-		assertThat(repository.confirm(live, now)).isEqualTo(new PayOutcome.AlreadyPaid(live.confirmed()));
-		assertThat(repository.deletePending(live)).isEqualTo(new AbandonOutcome.NotPending(BookingStatus.CONFIRMED));
+		assertThat(inventory.pay(live, now)).isEqualTo(new PayOutcome.Paid(live.confirmed()));
+		assertThat(inventory.pay(live, now)).isEqualTo(new PayOutcome.AlreadyPaid(live.confirmed()));
+		assertThat(inventory.abandon(live)).isEqualTo(new AbandonOutcome.NotPending(BookingStatus.CONFIRMED));
 		assertThat(repository.findById(live.id())).get().extracting(Booking::status).isEqualTo(BookingStatus.CONFIRMED);
-		assertThat(occupancy.statuses(showtimeId, now)).containsExactly(Map.entry(seatId, SeatStatus.SOLD));
+		assertThat(inventory.statuses(showtimeId, now)).containsExactly(Map.entry(seatId, SeatStatus.SOLD));
 	}
 
 	@Test
@@ -221,10 +221,10 @@ class BookingPersistenceTest {
 		UUID seatId = hall.seats().get(0).id();
 		Booking abandoned = bookings.book(customer(), showtimeId, List.of(seatId), now);
 
-		assertThat(repository.deletePending(abandoned)).isEqualTo(new AbandonOutcome.Abandoned());
+		assertThat(inventory.abandon(abandoned)).isEqualTo(new AbandonOutcome.Abandoned());
 
 		assertThat(repository.findById(abandoned.id())).isEmpty();
-		assertThat(occupancy.statuses(showtimeId, now)).isEmpty();
+		assertThat(inventory.statuses(showtimeId, now)).isEmpty();
 		bookings.book(customer(), showtimeId, List.of(seatId), now);
 	}
 
@@ -235,7 +235,7 @@ class BookingPersistenceTest {
 		UUID customerId = customer();
 		Instant earlier = now.minus(20, ChronoUnit.MINUTES);
 		Booking paid = bookings.book(customerId, showtimeId, List.of(hall.seats().get(0).id()), earlier);
-		repository.confirm(paid, earlier);
+		inventory.pay(paid, earlier);
 		Booking pending = bookings.book(customerId, showtimeId, List.of(hall.seats().get(1).id()), now);
 		bookings.book(customer(), showtimeId, List.of(hall.seats().get(2).id()), now);
 
@@ -255,7 +255,7 @@ class BookingPersistenceTest {
 
 		assertThat(repository.findById(live.id())).isEmpty();
 		assertThat(repository.findById(expired.id())).isEmpty();
-		assertThat(occupancy.statuses(showtimeId, now)).isEmpty();
+		assertThat(inventory.statuses(showtimeId, now)).isEmpty();
 	}
 
 	@Test
@@ -282,8 +282,8 @@ class BookingPersistenceTest {
 		Instant afterTheHold = paid.expiresAt();
 
 		// The same Seats the unique constraint still refuses to anyone else.
-		assertThat(occupancy.statuses(showtimeId, now)).containsExactly(Map.entry(seatId, SeatStatus.SOLD));
-		assertThat(occupancy.statuses(showtimeId, afterTheHold)).containsExactly(Map.entry(seatId, SeatStatus.SOLD));
+		assertThat(inventory.statuses(showtimeId, now)).containsExactly(Map.entry(seatId, SeatStatus.SOLD));
+		assertThat(inventory.statuses(showtimeId, afterTheHold)).containsExactly(Map.entry(seatId, SeatStatus.SOLD));
 		assertThat(jpa.findTakenSeats(showtimeId, List.of(seatId), afterTheHold)).containsExactly(seatId);
 	}
 
@@ -295,7 +295,7 @@ class BookingPersistenceTest {
 		Booking late = new Booking(UUID.randomUUID(), customer(), showtimeId, BookingStatus.PENDING, now,
 			now.plus(10, ChronoUnit.MINUTES), List.of(new BookedSeat(hall.seats().get(0).id(), 100_000)));
 
-		assertThat(repository.saveNew(late, now)).isEqualTo(new HoldOutcome.ShowtimeCancelled());
+		assertThat(inventory.hold(late, now)).isEqualTo(new HoldOutcome.ShowtimeCancelled());
 		assertThat(repository.findById(late.id())).isEmpty();
 	}
 

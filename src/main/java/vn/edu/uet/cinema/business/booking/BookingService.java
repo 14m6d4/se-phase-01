@@ -11,6 +11,13 @@ import vn.edu.uet.cinema.business.NotFoundException;
 import vn.edu.uet.cinema.business.showtime.PricedSeat;
 import vn.edu.uet.cinema.business.showtime.Showtime;
 import vn.edu.uet.cinema.business.showtime.ShowtimeService;
+import vn.edu.uet.cinema.business.showtime.inventory.AbandonOutcome;
+import vn.edu.uet.cinema.business.showtime.inventory.BookedSeat;
+import vn.edu.uet.cinema.business.showtime.inventory.Booking;
+import vn.edu.uet.cinema.business.showtime.inventory.BookingStatus;
+import vn.edu.uet.cinema.business.showtime.inventory.HoldOutcome;
+import vn.edu.uet.cinema.business.showtime.inventory.PayOutcome;
+import vn.edu.uet.cinema.business.showtime.inventory.SeatInventory;
 
 public class BookingService {
 
@@ -19,10 +26,12 @@ public class BookingService {
 
 	private final ShowtimeService showtimes;
 	private final BookingRepository bookings;
+	private final SeatInventory inventory;
 
-	public BookingService(ShowtimeService showtimes, BookingRepository bookings) {
+	public BookingService(ShowtimeService showtimes, BookingRepository bookings, SeatInventory inventory) {
 		this.showtimes = showtimes;
 		this.bookings = bookings;
+		this.inventory = inventory;
 	}
 
 	public Booking book(UUID customerId, UUID showtimeId, List<UUID> seatIds, Instant now) {
@@ -47,7 +56,7 @@ public class BookingService {
 		bookings.findLivePending(customerId, now).ifPresent(pending -> {
 			throw new ConflictException("Customer already has a Pending Booking " + pending.id());
 		});
-		HoldOutcome outcome = bookings.saveNew(new Booking(UUID.randomUUID(), customerId, showtimeId,
+		HoldOutcome outcome = inventory.hold(new Booking(UUID.randomUUID(), customerId, showtimeId,
 			BookingStatus.PENDING, now, now.plus(HOLD), booked), now);
 		return switch (outcome) {
 			case HoldOutcome.Held held -> held.booking();
@@ -76,7 +85,7 @@ public class BookingService {
 	public Booking pay(UUID customerId, UUID id, Instant now) {
 		// Not confirmed by us: it was already, or a concurrent payment just did, or the Hold has lapsed or the
 		// Booking was deleted meanwhile. The adapter tells which, in the transaction of its conditional update.
-		return switch (bookings.confirm(get(customerId, id), now)) {
+		return switch (inventory.pay(get(customerId, id), now)) {
 			case PayOutcome.Paid paid -> paid.confirmed();
 			case PayOutcome.AlreadyPaid already -> already.current();
 			case PayOutcome.NotPayable notPayable -> throw new ConflictException(
@@ -89,7 +98,7 @@ public class BookingService {
 	public void abandon(UUID customerId, UUID id) {
 		// Nothing deleted: it is Confirmed or Refunded, was paid just now, or is already gone (then this is 404).
 		// The adapter tells which, in the transaction of its conditional delete.
-		switch (bookings.deletePending(get(customerId, id))) {
+		switch (inventory.abandon(get(customerId, id))) {
 			case AbandonOutcome.Abandoned abandoned -> {
 			}
 			case AbandonOutcome.NotPending notPending -> throw new ConflictException(

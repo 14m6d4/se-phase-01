@@ -10,11 +10,7 @@ import java.util.UUID;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Repository;
 import org.springframework.transaction.annotation.Transactional;
-import org.springframework.transaction.support.TransactionOperations;
 import vn.edu.uet.cinema.business.ConflictException;
-import vn.edu.uet.cinema.business.showtime.CancelOutcome;
-import vn.edu.uet.cinema.business.showtime.Cancellation;
-import vn.edu.uet.cinema.business.showtime.DeleteOutcome;
 import vn.edu.uet.cinema.business.showtime.Showtime;
 import vn.edu.uet.cinema.business.showtime.ShowtimeRepository;
 
@@ -22,11 +18,9 @@ import vn.edu.uet.cinema.business.showtime.ShowtimeRepository;
 class JpaShowtimeRepository implements ShowtimeRepository {
 
 	private final ShowtimeEntityRepository jpa;
-	private final TransactionOperations transaction;
 
-	JpaShowtimeRepository(ShowtimeEntityRepository jpa, TransactionOperations transaction) {
+	JpaShowtimeRepository(ShowtimeEntityRepository jpa) {
 		this.jpa = jpa;
-		this.transaction = transaction;
 	}
 
 	@Override
@@ -51,36 +45,6 @@ class JpaShowtimeRepository implements ShowtimeRepository {
 	@Override
 	public Optional<Showtime> findById(UUID id) {
 		return jpa.findById(id).map(ShowtimeEntity::toShowtime);
-	}
-
-	/** Not {@code @Transactional}: the failed transaction is rolled back before the outcome is returned. */
-	@Override
-	public DeleteOutcome deleteById(UUID id, Instant now) {
-		try {
-			return transaction.execute(status -> {
-				jpa.deleteLapsedHolds(id, now);
-				jpa.deleteById(id);
-				jpa.flush();
-				return new DeleteOutcome.Deleted();
-			});
-		} catch (DataIntegrityViolationException e) {
-			if (hasConstraint(e, "fk_booking_showtime")) {
-				return new DeleteOutcome.HasBookings();
-			}
-			throw e;
-		}
-	}
-
-	@Override
-	@Transactional
-	public CancelOutcome cancel(UUID id, Cancellation cancellation, Instant now) {
-		if (jpa.cancel(id, cancellation.reason().name(), cancellation.note(), now) == 0) {
-			return new CancelOutcome.NotCancellable();
-		}
-		// Delete before refunding: a payment that commits in between is then refunded, never left Confirmed.
-		jpa.deletePendingBookings(id);
-		jpa.refundConfirmedBookings(id);
-		return new CancelOutcome.Cancelled();
 	}
 
 	@Override

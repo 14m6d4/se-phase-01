@@ -11,6 +11,10 @@ import vn.edu.uet.cinema.business.NotFoundException;
 import vn.edu.uet.cinema.business.auditorium.AuditoriumService;
 import vn.edu.uet.cinema.business.auditorium.Seat;
 import vn.edu.uet.cinema.business.movie.MovieService;
+import vn.edu.uet.cinema.business.showtime.inventory.CancelOutcome;
+import vn.edu.uet.cinema.business.showtime.inventory.DeleteOutcome;
+import vn.edu.uet.cinema.business.showtime.inventory.SeatInventory;
+import vn.edu.uet.cinema.business.showtime.inventory.SeatStatus;
 
 public class ShowtimeService {
 
@@ -19,15 +23,15 @@ public class ShowtimeService {
 	private final MovieService movies;
 	private final AuditoriumService auditoriums;
 	private final ShowtimeRepository showtimes;
-	private final SeatOccupancyReader occupancy;
+	private final SeatInventory inventory;
 	private final Map<UUID, List<Seat>> layouts = new ConcurrentHashMap<>();
 
 	public ShowtimeService(MovieService movies, AuditoriumService auditoriums, ShowtimeRepository showtimes,
-		SeatOccupancyReader occupancy) {
+		SeatInventory inventory) {
 		this.movies = movies;
 		this.auditoriums = auditoriums;
 		this.showtimes = showtimes;
-		this.occupancy = occupancy;
+		this.inventory = inventory;
 	}
 
 	public Showtime create(UUID movieId, UUID auditoriumId, Instant startsAt, long basePrice) {
@@ -81,7 +85,7 @@ public class ShowtimeService {
 	/** Every Seat of a Scheduled Showtime with its price and status at {@code now}. */
 	public List<SeatMapEntry> seatMap(UUID id, Instant now) {
 		Showtime showtime = getScheduled(id);
-		Map<UUID, SeatStatus> statuses = occupancy.statuses(id, now);
+		Map<UUID, SeatStatus> statuses = inventory.statuses(id, now);
 		return pricedSeats(showtime).values().stream().map(p -> new SeatMapEntry(p,
 			statuses.getOrDefault(p.seat().id(), SeatStatus.AVAILABLE))).toList();
 	}
@@ -101,7 +105,7 @@ public class ShowtimeService {
 		}
 		Showtime showtime = get(id);
 		Cancellation cancellation = new Cancellation(reason, given);
-		return switch (showtimes.cancel(id, cancellation, now)) {
+		return switch (inventory.cancel(id, cancellation, now)) {
 			case CancelOutcome.Cancelled cancelled -> new Showtime(showtime.id(), showtime.movieId(),
 				showtime.auditoriumId(), showtime.startsAt(), showtime.endsAt(), showtime.basePrice(),
 				ShowtimeStatus.CANCELLED, cancellation);
@@ -112,7 +116,7 @@ public class ShowtimeService {
 
 	public void delete(UUID id, Instant now) {
 		get(id);
-		switch (showtimes.deleteById(id, now)) {
+		switch (inventory.delete(id, now)) {
 			case DeleteOutcome.Deleted deleted -> {
 			}
 			case DeleteOutcome.HasBookings hasBookings -> throw new ConflictException("Showtime has Bookings");

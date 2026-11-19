@@ -9,18 +9,14 @@ import java.util.Optional;
 import java.util.UUID;
 import vn.edu.uet.cinema.business.auditorium.Auditorium;
 import vn.edu.uet.cinema.business.auditorium.InMemoryAuditoriums;
-import vn.edu.uet.cinema.business.booking.Booking;
-import vn.edu.uet.cinema.business.booking.BookingStatus;
 
 /**
- * In-memory {@link ShowtimeRepository} for business tests. It owns the Booking rows too, because cancelling and
- * deleting a Showtime change them in the database: the Booking adapter is built on top of this one.
+ * In-memory {@link ShowtimeRepository} for business tests. Cancelling and deleting a Showtime belong to the in-memory
+ * Seat Inventory, which changes the Showtime here through {@link #replace} and {@link #remove}.
  */
 public class InMemoryShowtimes implements ShowtimeRepository {
 
 	private final Map<UUID, Showtime> rows = new LinkedHashMap<>();
-	/** Booking rows by id, shared with the Booking adapter and the seat occupancy reader. */
-	public final Map<UUID, Booking> bookingRows = new LinkedHashMap<>();
 	private final InMemoryAuditoriums auditoriums;
 
 	public InMemoryShowtimes(InMemoryAuditoriums auditoriums) {
@@ -38,30 +34,16 @@ public class InMemoryShowtimes implements ShowtimeRepository {
 		return Optional.ofNullable(rows.get(id));
 	}
 
-	@Override
-	public DeleteOutcome deleteById(UUID id, Instant now) {
-		bookingRows.values().removeIf(b -> b.showtimeId().equals(id) && b.statusAt(now) == BookingStatus.EXPIRED);
-		if (bookingRows.values().stream().anyMatch(b -> b.showtimeId().equals(id))) {
-			return new DeleteOutcome.HasBookings();
+	/** Test helper for the in-memory Seat Inventory: a cancel changes the Showtime in the same step. */
+	public void replace(Showtime showtime) {
+		if (rows.replace(showtime.id(), showtime) == null) {
+			throw new IllegalStateException("No Showtime " + showtime.id());
 		}
-		rows.remove(id);
-		return new DeleteOutcome.Deleted();
 	}
 
-	@Override
-	public CancelOutcome cancel(UUID id, Cancellation cancellation, Instant now) {
-		Showtime s = rows.get(id);
-		if (s == null || s.status() != ShowtimeStatus.SCHEDULED || !s.endsAt().isAfter(now)) {
-			return new CancelOutcome.NotCancellable();
-		}
-		rows.put(id, new Showtime(id, s.movieId(), s.auditoriumId(), s.startsAt(), s.endsAt(), s.basePrice(),
-			ShowtimeStatus.CANCELLED, cancellation));
-		bookingRows.values().removeIf(b -> b.showtimeId().equals(id) && b.status() == BookingStatus.PENDING);
-		bookingRows.replaceAll((bookingId, b) -> b.showtimeId().equals(id) && b.status() == BookingStatus.CONFIRMED
-			? new Booking(b.id(), b.customerId(), b.showtimeId(), BookingStatus.REFUNDED, b.createdAt(), b.expiresAt(),
-				b.seats())
-			: b);
-		return new CancelOutcome.Cancelled();
+	/** Test helper for the in-memory Seat Inventory: a delete removes the Showtime in the same step. */
+	public void remove(UUID id) {
+		rows.remove(id);
 	}
 
 	@Override
