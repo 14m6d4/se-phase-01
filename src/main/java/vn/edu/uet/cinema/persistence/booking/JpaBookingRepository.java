@@ -7,7 +7,6 @@ import java.util.List;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
-import java.util.stream.Collectors;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.dao.PessimisticLockingFailureException;
 import org.springframework.stereotype.Repository;
@@ -78,9 +77,9 @@ class JpaBookingRepository implements BookingRepository {
 			if (hasConstraint(e, "uq_booked_seat_showtime_seat")) {
 				// Rolled back by now, so the winner's Seats are visible to a fresh read. If the winner was abandoned
 				// in between, the list is empty: the Seats are free again and the client can simply retry.
-				Set<UUID> occupied = jpa.findOccupiedSeats(booking.showtimeId(), now).stream()
-					.map(BookingEntityRepository.OccupiedSeat::getSeatId).collect(Collectors.toSet());
-				throw new SeatsTakenException(seatIds.stream().filter(occupied::contains).toList());
+				// Only the requested Seats are read: this runs once per lost race, so it must not scan the Showtime.
+				Set<UUID> taken = Set.copyOf(jpa.findTakenSeats(booking.showtimeId(), seatIds, now));
+				throw new SeatsTakenException(seatIds.stream().filter(taken::contains).toList());
 			}
 			if (hasConstraint(e, "uq_booking_customer_pending")) {
 				throw new ConflictException("Customer already has a Pending Booking");

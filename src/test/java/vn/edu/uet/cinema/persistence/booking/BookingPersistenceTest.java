@@ -52,6 +52,7 @@ class BookingPersistenceTest {
 	@Autowired CinemaService cinemas;
 	@Autowired AuditoriumService auditoriums;
 	@Autowired ShowtimeService showtimes;
+	@Autowired BookingEntityRepository jpa;
 
 	private final Instant now = Instant.now();
 
@@ -93,6 +94,39 @@ class BookingPersistenceTest {
 		}
 		assertThat(occupancy.statuses(showtimeId, Instant.now()))
 			.containsOnly(Map.entry(a, SeatStatus.HELD), Map.entry(b, SeatStatus.HELD));
+	}
+
+	@Test
+	void takenSeatsAreTheRequestedSeatsOfLiveHoldsAndConfirmedBookingsOnly() {
+		Auditorium hall = auditorium();
+		UUID showtimeId = showtime(hall);
+		UUID held = hall.seats().get(0).id();
+		UUID sold = hall.seats().get(1).id();
+		UUID lapsed = hall.seats().get(2).id();
+		UUID notRequested = hall.seats().get(3).id();
+		bookings.book(customer(), showtimeId, List.of(held), now);
+		repository.saveNew(new Booking(UUID.randomUUID(), customer(), showtimeId, BookingStatus.CONFIRMED,
+			now.minus(1, ChronoUnit.HOURS), now.minus(50, ChronoUnit.MINUTES), List.of(new BookedSeat(sold, 100_000))),
+			now);
+		bookings.book(customer(), showtimeId, List.of(lapsed), now.minus(11, ChronoUnit.MINUTES));
+		bookings.book(customer(), showtimeId, List.of(notRequested), now);
+
+		assertThat(jpa.findTakenSeats(showtimeId, List.of(held, sold, lapsed), now))
+			.containsExactlyInAnyOrder(held, sold);
+	}
+
+	@Test
+	void aSeatConflictNamesOnlyTheRequestedSeatsThatAreTaken() {
+		Auditorium hall = auditorium();
+		UUID showtimeId = showtime(hall);
+		UUID taken = hall.seats().get(0).id();
+		UUID free = hall.seats().get(1).id();
+		UUID heldButNotRequested = hall.seats().get(2).id();
+		bookings.book(customer(), showtimeId, List.of(taken), now);
+		bookings.book(customer(), showtimeId, List.of(heldButNotRequested), now);
+
+		assertThatThrownBy(() -> bookings.book(customer(), showtimeId, List.of(free, taken), now))
+			.isInstanceOfSatisfying(SeatsTakenException.class, e -> assertThat(e.seatIds()).containsExactly(taken));
 	}
 
 	@Test
