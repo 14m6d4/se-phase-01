@@ -8,6 +8,7 @@ import java.time.LocalDate;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.Test;
 import vn.edu.uet.cinema.business.ConflictException;
 import vn.edu.uet.cinema.business.NotFoundException;
@@ -48,6 +49,38 @@ class ShowtimeServiceTest {
 	void rejectsNonPositiveBasePrice() {
 		assertThatThrownBy(() -> service.create(UUID.randomUUID(), UUID.randomUUID(), Instant.now(), 0))
 			.isInstanceOf(InvalidShowtimeException.class);
+	}
+
+	@Test
+	void pricedSeatsReadEachAuditoriumsLayoutOnce() {
+		Showtime first = withSeats();
+		Showtime sameHall = repository.save(new Showtime(UUID.randomUUID(), UUID.randomUUID(), first.auditoriumId(),
+			STARTS_AT.plusSeconds(86_400), STARTS_AT.plusSeconds(86_400 + 8_100), 50_000L));
+		Seat other = new Seat(UUID.randomUUID(), "A", 1, SeatType.STANDARD);
+		Auditorium otherHall = auditoriumRows.save(new Auditorium(UUID.randomUUID(), UUID.randomUUID(), "Other", 1, 1,
+			List.of(other)));
+		Showtime elsewhere = repository.save(new Showtime(UUID.randomUUID(), UUID.randomUUID(), otherHall.id(),
+			STARTS_AT, STARTS_AT.plusSeconds(8_100), 100_000L));
+		AtomicInteger reads = new AtomicInteger();
+		AuditoriumService counting = new AuditoriumService(new CinemaService(new InMemoryCinemas(), auditoriumRows),
+			auditoriumRows, repository) {
+			@Override
+			public Auditorium get(UUID id) {
+				reads.incrementAndGet();
+				return super.get(id);
+			}
+		};
+		ShowtimeService cached = new ShowtimeService(movies, counting, repository,
+			new InMemorySeatOccupancy(new InMemoryBookings(repository)));
+
+		cached.pricedSeats(first);
+		Map<UUID, PricedSeat> again = cached.pricedSeats(sameHall);
+		Map<UUID, PricedSeat> otherPrices = cached.pricedSeats(elsewhere);
+
+		assertThat(again.keySet()).containsExactly(standard.id(), vip.id(), couple.id(), lapsed.id());
+		assertThat(again.get(standard.id()).price()).isEqualTo(50_000L);
+		assertThat(otherPrices).containsOnlyKeys(other.id());
+		assertThat(reads).hasValue(2);
 	}
 
 	@Test
