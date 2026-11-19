@@ -23,6 +23,8 @@ import vn.edu.uet.cinema.business.showtime.CancellationReason;
 import vn.edu.uet.cinema.business.showtime.Showtime;
 import vn.edu.uet.cinema.business.showtime.ShowtimeService;
 import vn.edu.uet.cinema.business.showtime.ShowtimeStatus;
+import vn.edu.uet.cinema.business.showtime.inventory.CancelOutcome;
+import vn.edu.uet.cinema.business.showtime.inventory.SeatInventory;
 
 @SpringBootTest
 @Import(TestcontainersConfiguration.class)
@@ -30,6 +32,7 @@ class ShowtimePersistenceTest {
 
 	@Autowired ShowtimeService showtimes;
 	@Autowired vn.edu.uet.cinema.business.showtime.ShowtimeRepository repository;
+	@Autowired SeatInventory inventory;
 	@Autowired MovieService movies;
 	@Autowired CinemaService cinemas;
 	@Autowired AuditoriumService auditoriums;
@@ -125,7 +128,8 @@ class ShowtimePersistenceTest {
 		Showtime showtime = showtimes.create(movieId, auditoriumId, start, 100_000);
 		Cancellation cancellation = new Cancellation(CancellationReason.OTHER, "Flooded auditorium");
 
-		assertThat(repository.cancel(showtime.id(), cancellation, start.minusSeconds(3_600))).isTrue();
+		assertThat(inventory.cancel(showtime.id(), cancellation, start.minusSeconds(3_600)))
+			.isEqualTo(new CancelOutcome.Cancelled());
 
 		Showtime cancelled = showtimes.get(showtime.id());
 		assertThat(cancelled.status()).isEqualTo(ShowtimeStatus.CANCELLED);
@@ -142,13 +146,14 @@ class ShowtimePersistenceTest {
 		Showtime running = showtimes.create(movieId, auditoriumId, ended.endsAt(), 100_000);
 		Cancellation powerCut = new Cancellation(CancellationReason.POWER_OUTAGE, null);
 
-		assertThat(repository.cancel(ended.id(), powerCut, ended.endsAt())).isFalse();
+		assertThat(inventory.cancel(ended.id(), powerCut, ended.endsAt()))
+			.isEqualTo(new CancelOutcome.NotCancellable());
 		assertThat(showtimes.get(ended.id()).status()).isEqualTo(ShowtimeStatus.SCHEDULED);
 
 		Instant midway = running.startsAt().plusSeconds(1_800);
-		assertThat(repository.cancel(running.id(), powerCut, midway)).isTrue();
-		assertThat(repository.cancel(running.id(), new Cancellation(CancellationReason.EMERGENCY, null), midway))
-			.isFalse();
+		assertThat(inventory.cancel(running.id(), powerCut, midway)).isEqualTo(new CancelOutcome.Cancelled());
+		assertThat(inventory.cancel(running.id(), new Cancellation(CancellationReason.EMERGENCY, null), midway))
+			.isEqualTo(new CancelOutcome.NotCancellable());
 		assertThat(showtimes.get(running.id()).cancellation()).isEqualTo(powerCut);
 	}
 
@@ -159,7 +164,7 @@ class ShowtimePersistenceTest {
 		UUID cinemaId = cinemas.create("Cinema " + UUID.randomUUID(), "Address").id();
 		UUID auditoriumId = auditoriums.create(cinemaId, "Hall", 1, 1, List.of(), List.of()).id();
 		Showtime cancelled = showtimes.create(movieId, auditoriumId, Instant.parse("2026-10-01T12:00:00Z"), 100_000);
-		repository.cancel(cancelled.id(), new Cancellation(CancellationReason.POWER_OUTAGE, null),
+		inventory.cancel(cancelled.id(), new Cancellation(CancellationReason.POWER_OUTAGE, null),
 			cancelled.startsAt());
 
 		Showtime replacement = repository.save(new Showtime(UUID.randomUUID(), movieId, auditoriumId,

@@ -1,4 +1,4 @@
-package vn.edu.uet.cinema.business.booking;
+package vn.edu.uet.cinema.business.showtime.inventory;
 
 import java.util.UUID;
 

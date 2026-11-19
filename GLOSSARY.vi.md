@@ -64,6 +64,10 @@ _Tránh dùng_: khóa ghế
 Đơn Confirmed có suất chiếu bị Cancelled; khách hàng được hoàn toàn bộ tiền. Đây là trạng thái cuối. Khách hàng không bao giờ tự kích hoạt trạng thái này, và cũng không ai kích hoạt thay cho khách hàng.
 _Tránh dùng_: Cancelled (khách hàng không bao giờ hủy đơn)
 
+**Seat Inventory**:
+Tình trạng các ghế của một suất chiếu (trống, đang được giữ hay đã bán) cùng mọi thay đổi lên tình trạng đó: tạo Hold, thanh toán, bỏ đơn, hủy hoặc xóa suất chiếu. Một module duy nhất sở hữu tất cả những việc này. Ghế của một đơn Confirmed hoặc Refunded là đã bán; ghế đang có một Hold chưa hết hạn là đang được giữ.
+_Tránh dùng_: sơ đồ ghế (chỉ là một cách nhìn vào nó), kho ghế
+
 ### Con người
 
 **Tài khoản**:

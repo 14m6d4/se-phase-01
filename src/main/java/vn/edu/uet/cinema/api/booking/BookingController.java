@@ -21,10 +21,10 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
-import vn.edu.uet.cinema.business.booking.BookedSeat;
-import vn.edu.uet.cinema.business.booking.Booking;
 import vn.edu.uet.cinema.business.booking.BookingService;
-import vn.edu.uet.cinema.business.booking.BookingStatus;
+import vn.edu.uet.cinema.business.showtime.inventory.BookedSeat;
+import vn.edu.uet.cinema.business.showtime.inventory.Booking;
+import vn.edu.uet.cinema.business.showtime.inventory.BookingStatus;
 import vn.edu.uet.cinema.config.OpenApiConfig;
 
 @RestController

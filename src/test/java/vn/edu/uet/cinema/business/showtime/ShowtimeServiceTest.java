@@ -17,17 +17,17 @@ import vn.edu.uet.cinema.business.auditorium.AuditoriumService;
 import vn.edu.uet.cinema.business.auditorium.InMemoryAuditoriums;
 import vn.edu.uet.cinema.business.auditorium.Seat;
 import vn.edu.uet.cinema.business.auditorium.SeatType;
-import vn.edu.uet.cinema.business.booking.BookedSeat;
-import vn.edu.uet.cinema.business.booking.Booking;
-import vn.edu.uet.cinema.business.booking.BookingStatus;
-import vn.edu.uet.cinema.business.booking.InMemoryBookings;
-import vn.edu.uet.cinema.business.booking.InMemorySeatOccupancy;
 import vn.edu.uet.cinema.business.cinema.CinemaService;
 import vn.edu.uet.cinema.business.cinema.InMemoryCinemas;
 import vn.edu.uet.cinema.business.movie.AgeRating;
 import vn.edu.uet.cinema.business.movie.InMemoryMovies;
 import vn.edu.uet.cinema.business.movie.Movie;
 import vn.edu.uet.cinema.business.movie.MovieService;
+import vn.edu.uet.cinema.business.showtime.inventory.BookedSeat;
+import vn.edu.uet.cinema.business.showtime.inventory.Booking;
+import vn.edu.uet.cinema.business.showtime.inventory.BookingStatus;
+import vn.edu.uet.cinema.business.showtime.inventory.InMemorySeatInventory;
+import vn.edu.uet.cinema.business.showtime.inventory.SeatStatus;
 
 class ShowtimeServiceTest {
 
@@ -35,12 +35,12 @@ class ShowtimeServiceTest {
 
 	private final InMemoryAuditoriums auditoriumRows = new InMemoryAuditoriums();
 	private final InMemoryShowtimes repository = new InMemoryShowtimes(auditoriumRows);
+	private final InMemorySeatInventory bookings = new InMemorySeatInventory(repository);
 	private final InMemoryMovies movieRows = new InMemoryMovies();
 	private final MovieService movies = new MovieService(movieRows, repository);
 	private final AuditoriumService auditoriums = new AuditoriumService(
 		new CinemaService(new InMemoryCinemas(), auditoriumRows), auditoriumRows, repository);
-	private final ShowtimeService service = new ShowtimeService(movies, auditoriums, repository,
-		new InMemorySeatOccupancy(new InMemoryBookings(repository)));
+	private final ShowtimeService service = new ShowtimeService(movies, auditoriums, repository, bookings);
 
 	private final UUID auditoriumId = auditoriumRows.save(new Auditorium(UUID.randomUUID(), UUID.randomUUID(), "Hall",
 		1, 1, List.of())).id();
@@ -80,8 +80,7 @@ class ShowtimeServiceTest {
 				return super.get(id);
 			}
 		};
-		ShowtimeService cached = new ShowtimeService(movies, counting, repository,
-			new InMemorySeatOccupancy(new InMemoryBookings(repository)));
+		ShowtimeService cached = new ShowtimeService(movies, counting, repository, bookings);
 
 		cached.pricedSeats(first);
 		Map<UUID, PricedSeat> again = cached.pricedSeats(sameHall);
@@ -138,8 +137,8 @@ class ShowtimeServiceTest {
 			scheduled.startsAt(), scheduled.endsAt(), scheduled.basePrice(), ShowtimeStatus.CANCELLED,
 			new Cancellation(CancellationReason.EMERGENCY, "Fire alarm")));
 		assertThat(service.get(scheduled.id())).isEqualTo(cancelled);
-		assertThat(repository.bookingRows).doesNotContainKey(pending.id());
-		assertThat(repository.bookingRows.get(confirmed.id()).status()).isEqualTo(BookingStatus.REFUNDED);
+		assertThat(bookings.rows()).doesNotContainKey(pending.id());
+		assertThat(bookings.rows().get(confirmed.id()).status()).isEqualTo(BookingStatus.REFUNDED);
 	}
 
 	@Test
@@ -196,7 +195,7 @@ class ShowtimeServiceTest {
 		service.delete(lapsedOnly.id(), now);
 
 		assertThatThrownBy(() -> service.get(lapsedOnly.id())).isInstanceOf(NotFoundException.class);
-		assertThat(repository.bookingRows).doesNotContainKey(lapsed.id());
+		assertThat(bookings.rows()).doesNotContainKey(lapsed.id());
 		assertThatThrownBy(() -> service.delete(held.id(), now)).isInstanceOf(ConflictException.class);
 		assertThat(service.get(held.id())).isEqualTo(held);
 	}
@@ -252,7 +251,7 @@ class ShowtimeServiceTest {
 	private void booking(Showtime showtime, BookingStatus status, Instant expiresAt, Seat seat) {
 		Booking booking = new Booking(UUID.randomUUID(), UUID.randomUUID(), showtime.id(), status,
 			expiresAt.minusSeconds(600), expiresAt, List.of(new BookedSeat(seat.id(), 100_000)));
-		repository.bookingRows.put(booking.id(), booking);
+		bookings.store(booking);
 	}
 
 	private UUID movie(int durationMinutes) {
@@ -268,7 +267,7 @@ class ShowtimeServiceTest {
 	private Booking booking(Showtime showtime, BookingStatus status, Instant expiresAt) {
 		Booking booking = new Booking(UUID.randomUUID(), UUID.randomUUID(), showtime.id(), status,
 			expiresAt.minusSeconds(600), expiresAt, List.of(new BookedSeat(UUID.randomUUID(), 100_000)));
-		repository.bookingRows.put(booking.id(), booking);
+		bookings.store(booking);
 		return booking;
 	}
 }
