@@ -1,4 +1,4 @@
-package vn.edu.uet.cinema.business.showtime;
+package vn.edu.uet.cinema.business.showtime.inventory;
 
 public enum CancellationReason {
 	EQUIPMENT_FAILURE, POWER_OUTAGE, EMERGENCY, OTHER

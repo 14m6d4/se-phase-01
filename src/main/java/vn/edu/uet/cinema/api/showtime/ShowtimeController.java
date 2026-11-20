@@ -25,12 +25,12 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
 import vn.edu.uet.cinema.business.auditorium.Seat;
-import vn.edu.uet.cinema.business.showtime.Cancellation;
-import vn.edu.uet.cinema.business.showtime.CancellationReason;
 import vn.edu.uet.cinema.business.showtime.SeatPricing;
 import vn.edu.uet.cinema.business.showtime.Showtime;
 import vn.edu.uet.cinema.business.showtime.ShowtimeService;
 import vn.edu.uet.cinema.business.showtime.ShowtimeStatus;
+import vn.edu.uet.cinema.business.showtime.inventory.Cancellation;
+import vn.edu.uet.cinema.business.showtime.inventory.CancellationReason;
 import vn.edu.uet.cinema.business.showtime.inventory.SeatStatus;
 import vn.edu.uet.cinema.config.OpenApiConfig;
 

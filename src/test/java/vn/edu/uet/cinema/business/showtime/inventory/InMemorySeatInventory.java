@@ -11,7 +11,6 @@ import java.util.Set;
 import java.util.UUID;
 import java.util.stream.Collectors;
 import vn.edu.uet.cinema.business.booking.BookingRepository;
-import vn.edu.uet.cinema.business.showtime.Cancellation;
 import vn.edu.uet.cinema.business.showtime.InMemoryShowtimes;
 import vn.edu.uet.cinema.business.showtime.Showtime;
 import vn.edu.uet.cinema.business.showtime.ShowtimeStatus;

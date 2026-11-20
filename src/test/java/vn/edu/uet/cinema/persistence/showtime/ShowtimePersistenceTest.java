@@ -18,12 +18,12 @@ import vn.edu.uet.cinema.business.auditorium.AuditoriumService;
 import vn.edu.uet.cinema.business.cinema.CinemaService;
 import vn.edu.uet.cinema.business.movie.AgeRating;
 import vn.edu.uet.cinema.business.movie.MovieService;
-import vn.edu.uet.cinema.business.showtime.Cancellation;
-import vn.edu.uet.cinema.business.showtime.CancellationReason;
 import vn.edu.uet.cinema.business.showtime.Showtime;
 import vn.edu.uet.cinema.business.showtime.ShowtimeService;
 import vn.edu.uet.cinema.business.showtime.ShowtimeStatus;
 import vn.edu.uet.cinema.business.showtime.inventory.CancelOutcome;
+import vn.edu.uet.cinema.business.showtime.inventory.Cancellation;
+import vn.edu.uet.cinema.business.showtime.inventory.CancellationReason;
 import vn.edu.uet.cinema.business.showtime.inventory.SeatInventory;
 
 @SpringBootTest

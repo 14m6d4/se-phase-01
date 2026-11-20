@@ -26,6 +26,8 @@ import vn.edu.uet.cinema.business.movie.MovieService;
 import vn.edu.uet.cinema.business.showtime.inventory.BookedSeat;
 import vn.edu.uet.cinema.business.showtime.inventory.Booking;
 import vn.edu.uet.cinema.business.showtime.inventory.BookingStatus;
+import vn.edu.uet.cinema.business.showtime.inventory.Cancellation;
+import vn.edu.uet.cinema.business.showtime.inventory.CancellationReason;
 import vn.edu.uet.cinema.business.showtime.inventory.InMemorySeatInventory;
 import vn.edu.uet.cinema.business.showtime.inventory.SeatStatus;
 

@@ -3,7 +3,6 @@ package vn.edu.uet.cinema.business.showtime.inventory;
 import java.time.Instant;
 import java.util.Map;
 import java.util.UUID;
-import vn.edu.uet.cinema.business.showtime.Cancellation;
 
 /**
  * Every change to a Showtime's Seats, and every reason one becomes free, goes through here (ADR 0009). Each method is

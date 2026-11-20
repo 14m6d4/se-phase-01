@@ -12,6 +12,8 @@ import vn.edu.uet.cinema.business.auditorium.AuditoriumService;
 import vn.edu.uet.cinema.business.auditorium.Seat;
 import vn.edu.uet.cinema.business.movie.MovieService;
 import vn.edu.uet.cinema.business.showtime.inventory.CancelOutcome;
+import vn.edu.uet.cinema.business.showtime.inventory.Cancellation;
+import vn.edu.uet.cinema.business.showtime.inventory.CancellationReason;
 import vn.edu.uet.cinema.business.showtime.inventory.DeleteOutcome;
 import vn.edu.uet.cinema.business.showtime.inventory.SeatInventory;
 import vn.edu.uet.cinema.business.showtime.inventory.SeatStatus;
