@@ -3,18 +3,17 @@ package vn.edu.uet.cinema.persistence.booking;
 import static vn.edu.uet.cinema.persistence.ConstraintViolations.hasConstraint;
 
 import java.time.Instant;
-import java.util.List;
 import java.util.Map;
-import java.util.Set;
 import java.util.UUID;
 import java.util.stream.Collectors;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.dao.PessimisticLockingFailureException;
 import org.springframework.stereotype.Repository;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionOperations;
 import vn.edu.uet.cinema.business.showtime.inventory.AbandonOutcome;
-import vn.edu.uet.cinema.business.showtime.inventory.BookedSeat;
 import vn.edu.uet.cinema.business.showtime.inventory.Booking;
 import vn.edu.uet.cinema.business.showtime.inventory.BookingStatus;
 import vn.edu.uet.cinema.business.showtime.inventory.CancelOutcome;
@@ -24,65 +23,65 @@ import vn.edu.uet.cinema.business.showtime.inventory.HoldOutcome;
 import vn.edu.uet.cinema.business.showtime.inventory.PayOutcome;
 import vn.edu.uet.cinema.business.showtime.inventory.SeatInventory;
 import vn.edu.uet.cinema.business.showtime.inventory.SeatStatus;
+import vn.edu.uet.cinema.config.SeatInventoryStrategy;
 
 /**
  * Every write to {@code booking} and {@code booked_seat}, and the Showtime writes that go with them, each in one
  * transaction (ADR 0009). The live-Hold rule is {@link HoldSql}'s.
  */
-@Repository
-class JpaSeatInventory implements SeatInventory {
+@Repository("jpaSeatInventory")
+public class JpaSeatInventory implements SeatInventory {
 
 	private final BookingEntityRepository jpa;
 	private final TransactionOperations transaction;
+	private final SeatInventoryStrategy strategy;
+	private final Claim claim;
 
-	JpaSeatInventory(BookingEntityRepository jpa, TransactionOperations transaction) {
+	@Autowired
+	public JpaSeatInventory(BookingEntityRepository jpa, TransactionOperations transaction,
+		@Value("${app.seat-inventory.strategy:unique}") String strategyValue) {
+		this(jpa, transaction, SeatInventoryStrategy.from(strategyValue));
+	}
+
+	public JpaSeatInventory(BookingEntityRepository jpa, TransactionOperations transaction,
+		SeatInventoryStrategy strategy) {
 		this.jpa = jpa;
 		this.transaction = transaction;
+		this.strategy = strategy;
+		this.claim = switch (strategy) {
+			case UNIQUE, SINGLE_WRITER -> new UniqueClaim(jpa, transaction);
+			case SHOWTIME_LOCK -> new ShowtimeLockClaim(jpa, transaction);
+			case SEAT_ROWS -> new SeatRowsClaim(jpa, transaction);
+		};
+	}
+
+	public JpaSeatInventory(BookingEntityRepository jpa, TransactionOperations transaction) {
+		this(jpa, transaction, SeatInventoryStrategy.UNIQUE);
+	}
+
+	public JpaSeatInventory(BookingEntityRepository jpa, TransactionOperations transaction, Claim claim) {
+		this.jpa = jpa;
+		this.transaction = transaction;
+		this.strategy = SeatInventoryStrategy.UNIQUE;
+		this.claim = claim;
+	}
+
+	public SeatInventoryStrategy strategy() {
+		return strategy;
 	}
 
 	/** Not {@code @Transactional}: each attempt runs in its own transaction, so a deadlock loser can retry. */
 	@Override
 	public HoldOutcome hold(Booking pending, Instant now) {
 		try {
-			return insert(pending, now);
+			return claim.hold(pending, now);
 		} catch (PessimisticLockingFailureException deadlock) {
 			// Overlapping lapsed-Hold deletes can deadlock even when the two Bookings want different Seats.
 			try {
-				return insert(pending, now);
+				return claim.hold(pending, now);
 			} catch (PessimisticLockingFailureException again) {
 				return new HoldOutcome.Busy();
 			}
-		}
-	}
-
-	private HoldOutcome insert(Booking booking, Instant now) {
-		List<UUID> seatIds = booking.seats().stream().map(BookedSeat::seatId).toList();
-		try {
-			return transaction.execute(status -> {
-				// First, always (ADR 0005): a cancel then waits for this Booking, or has committed and is seen here.
-				if ("CANCELLED".equals(jpa.lockShowtimeStatus(booking.showtimeId()))) {
-					status.setRollbackOnly();
-					return new HoldOutcome.ShowtimeCancelled();
-				}
-				jpa.deleteLapsedHolds(booking.customerId(), booking.showtimeId(), seatIds, now);
-				return new HoldOutcome.Held(jpa.saveAndFlush(BookingEntity.from(booking)).toBooking());
-			});
-		} catch (DataIntegrityViolationException e) {
-			// The insert that loses the race fails here (ADR 0004).
-			if (hasConstraint(e, "uq_booked_seat_showtime_seat")) {
-				// Rolled back by now, so the winner's Seats are visible to a fresh read. If the winner was abandoned
-				// in between, the list is empty: the Seats are free again and the client can simply retry.
-				// Only the requested Seats are read: this runs once per lost race, so it must not scan the Showtime.
-				Set<UUID> taken = Set.copyOf(jpa.findTakenSeats(booking.showtimeId(), seatIds, now));
-				return new HoldOutcome.SeatsTaken(seatIds.stream().filter(taken::contains).toList());
-			}
-			if (hasConstraint(e, "uq_booking_customer_pending")) {
-				return new HoldOutcome.CustomerHasPending();
-			}
-			if (hasConstraint(e, "fk_booking_showtime")) {
-				return new HoldOutcome.ShowtimeGone();
-			}
-			throw e;
 		}
 	}
 

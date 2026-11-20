@@ -3,6 +3,10 @@ package vn.edu.uet.cinema.persistence.booking;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import java.sql.Connection;
+import java.sql.PreparedStatement;
+import java.sql.ResultSet;
+import java.sql.Statement;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.temporal.ChronoUnit;
@@ -10,12 +14,15 @@ import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.Callable;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.ThreadLocalRandom;
+import java.util.concurrent.TimeUnit;
 import java.util.stream.IntStream;
+import javax.sql.DataSource;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -56,6 +63,7 @@ class BookingPersistenceTest {
 	@Autowired AuditoriumService auditoriums;
 	@Autowired ShowtimeService showtimes;
 	@Autowired BookingEntityRepository jpa;
+	@Autowired DataSource dataSource;
 
 	private final Instant now = Instant.now();
 
@@ -344,6 +352,151 @@ class BookingPersistenceTest {
 				.map(Booking::status).toList();
 			assertThat(left).as("round %d", round).doesNotContain(BookingStatus.PENDING, BookingStatus.CONFIRMED);
 		}
+	}
+
+	@Test
+	void deadlockOnLapsedHoldRetrySucceedsWhenContentionRollsBack() throws Exception {
+		Auditorium hall = auditorium();
+		UUID showtimeId = showtime(hall);
+		UUID seatId = hall.seats().get(0).id();
+		UUID customer1 = customer();
+		UUID customer2 = customer();
+
+		// 1. Create a lapsed hold booking P
+		Instant elevenMinutesAgo = now.minus(11, ChronoUnit.MINUTES);
+		Booking lapsed = bookings.book(customer1, showtimeId, List.of(seatId), elevenMinutesAgo);
+
+		// 2. Prepare fresh booking for customer2 requesting the same seat
+		Booking fresh = new Booking(UUID.randomUUID(), customer2, showtimeId, BookingStatus.PENDING,
+			now, now.plus(10, ChronoUnit.MINUTES), List.of(new BookedSeat(seatId, 100_000)));
+
+		try (Connection conn = dataSource.getConnection()) {
+			conn.setAutoCommit(false);
+			try (Statement s = conn.createStatement()) {
+				s.execute("SET deadlock_timeout = '10s'");
+			}
+
+			// 3. Transaction T locks lapsed booking P
+			try (PreparedStatement ps = conn.prepareStatement("SELECT id FROM booking WHERE id = ? FOR UPDATE")) {
+				ps.setObject(1, lapsed.id());
+				try (ResultSet rs = ps.executeQuery()) {
+					assertThat(rs.next()).isTrue();
+				}
+			}
+
+			// 4. Launch adapter hold H in background
+			CompletableFuture<HoldOutcome> holdFuture = CompletableFuture.supplyAsync(() -> inventory.hold(fresh, now));
+
+			// 5. Wait until H is blocked on deleting P
+			waitForBlockedLock(conn);
+
+			// 6. T runs UPDATE showtime, creating deadlock cycle
+			try (PreparedStatement ps = conn.prepareStatement("UPDATE showtime SET base_price = base_price WHERE id = ?")) {
+				ps.setObject(1, showtimeId);
+				ps.executeUpdate();
+			}
+
+			// 7. Deadlock victim (H) aborted 1st attempt and unblocked T. Now T rolls back.
+			conn.rollback();
+
+			// 8. H retries in second transaction and succeeds
+			HoldOutcome outcome = holdFuture.get(10, TimeUnit.SECONDS);
+			assertThat(outcome).isInstanceOf(HoldOutcome.Held.class);
+		}
+	}
+
+	@Test
+	void doubleDeadlockReturnsBusyOutcome() throws Exception {
+		Auditorium hall = auditorium();
+		UUID showtimeId = showtime(hall);
+		UUID seatA = hall.seats().get(0).id();
+		UUID seatB = hall.seats().get(1).id();
+		UUID customer1 = customer();
+		UUID customer2 = customer();
+		UUID customer3 = customer();
+
+		// 1. Create lapsed hold booking P1 on seatA and P2 on seatB
+		Instant elevenMinutesAgo = now.minus(11, ChronoUnit.MINUTES);
+		Booking lapsed1 = bookings.book(customer1, showtimeId, List.of(seatA), elevenMinutesAgo);
+		Booking lapsed2 = bookings.book(customer2, showtimeId, List.of(seatB), elevenMinutesAgo);
+
+		// 2. Prepare fresh booking for customer3 requesting both seats [seatA, seatB]
+		Booking fresh = new Booking(UUID.randomUUID(), customer3, showtimeId, BookingStatus.PENDING,
+			now, now.plus(10, ChronoUnit.MINUTES), List.of(new BookedSeat(seatA, 100_000), new BookedSeat(seatB, 100_000)));
+
+		try (Connection conn1 = dataSource.getConnection();
+			 Connection conn2 = dataSource.getConnection()) {
+			conn1.setAutoCommit(false);
+			conn2.setAutoCommit(false);
+
+			try (Statement s = conn1.createStatement()) {
+				s.execute("SET deadlock_timeout = '10s'");
+			}
+			try (Statement s = conn2.createStatement()) {
+				s.execute("SET deadlock_timeout = '10s'");
+			}
+
+			// 3. Transaction T1 locks lapsed booking P1
+			try (PreparedStatement ps = conn1.prepareStatement("SELECT id FROM booking WHERE id = ? FOR UPDATE")) {
+				ps.setObject(1, lapsed1.id());
+				try (ResultSet rs = ps.executeQuery()) {
+					assertThat(rs.next()).isTrue();
+				}
+			}
+
+			// 4. Transaction T2 locks lapsed booking P2
+			try (PreparedStatement ps = conn2.prepareStatement("SELECT id FROM booking WHERE id = ? FOR UPDATE")) {
+				ps.setObject(1, lapsed2.id());
+				try (ResultSet rs = ps.executeQuery()) {
+					assertThat(rs.next()).isTrue();
+				}
+			}
+
+			// 5. Launch adapter hold H in background
+			CompletableFuture<HoldOutcome> holdFuture = CompletableFuture.supplyAsync(() -> inventory.hold(fresh, now));
+
+			// 6. Wait until H is blocked on deleting P1
+			waitForBlockedLock(conn1);
+
+			// 7. T1 runs UPDATE showtime, creating Deadlock #1
+			try (PreparedStatement ps = conn1.prepareStatement("UPDATE showtime SET base_price = base_price WHERE id = ?")) {
+				ps.setObject(1, showtimeId);
+				ps.executeUpdate();
+			}
+
+			// Deadlock #1 occurs; H aborts 1st attempt. T1 rolls back, freeing P1.
+			conn1.rollback();
+
+			// 8. Wait until H retries and blocks on deleting P2 (held by T2)
+			waitForBlockedLock(conn2);
+
+			// 9. T2 runs UPDATE showtime, creating Deadlock #2
+			try (PreparedStatement ps = conn2.prepareStatement("UPDATE showtime SET base_price = base_price WHERE id = ?")) {
+				ps.setObject(1, showtimeId);
+				ps.executeUpdate();
+			}
+
+			// Deadlock #2 occurs; H aborts 2nd attempt and returns Busy. T2 rolls back.
+			conn2.rollback();
+
+			// 10. H caught second deadlock and returned Busy
+			HoldOutcome outcome = holdFuture.get(10, TimeUnit.SECONDS);
+			assertThat(outcome).isInstanceOf(HoldOutcome.Busy.class);
+		}
+	}
+
+	private void waitForBlockedLock(Connection conn) throws Exception {
+		long deadline = System.currentTimeMillis() + 5000;
+		while (System.currentTimeMillis() < deadline) {
+			try (Statement s = conn.createStatement();
+				 ResultSet rs = s.executeQuery("SELECT count(*) FROM pg_locks WHERE NOT granted")) {
+				if (rs.next() && rs.getInt(1) > 0) {
+					return;
+				}
+			}
+			Thread.sleep(20);
+		}
+		throw new AssertionError("Timed out waiting for lock contention in pg_locks");
 	}
 
 	private UUID customer() {

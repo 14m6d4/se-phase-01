@@ -37,6 +37,30 @@ interface BookingEntityRepository extends JpaRepository<BookingEntity, UUID> {
 	@Query(nativeQuery = true, value = "select status from showtime where id = :showtimeId for share")
 	String lockShowtimeStatus(UUID showtimeId);
 
+	/**
+	 * Locks the Showtime row exclusively for the duration of the hold transaction (ADR 0011).
+	 * Serializes hold operations per showtime and synchronizes with cancelShowtime.
+	 * Returns null if the Showtime does not exist.
+	 */
+	@Query(nativeQuery = true, value = "select status from showtime where id = :showtimeId for no key update")
+	String lockShowtimeStatusForUpdate(UUID showtimeId);
+
+	/**
+	 * Strategy 3 (seat-rows): Atomically claims seats in ascending order.
+	 * Returns the seat IDs that were successfully claimed (inserted or updated with booking_id).
+	 */
+	@Query(nativeQuery = true, value = """
+		insert into showtime_seat (showtime_id, seat_id, booking_id)
+		select :showtimeId, s, :bookingId
+		from unnest(cast(:seatIds as uuid[])) s
+		order by s
+		on conflict (showtime_id, seat_id) do update
+		  set booking_id = excluded.booking_id
+		  where showtime_seat.booking_id is null
+		returning seat_id
+		""")
+	List<UUID> claimSeats(UUID showtimeId, UUID[] seatIds, UUID bookingId);
+
 	/** Lapsed Holds on these Seats, and the Customer's own lapsed one. booked_seat rows go by ON DELETE CASCADE. */
 	@Modifying
 	@Query(nativeQuery = true, value = """

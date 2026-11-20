@@ -29,6 +29,8 @@ app:
     password: ${ADMIN_PASSWORD}
   jwt:
     secret: ${JWT_SECRET}
+  seat-inventory:
+    strategy: ${SEAT_INVENTORY_STRATEGY:unique}
 
 management:
   endpoints:

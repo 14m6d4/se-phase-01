@@ -17,6 +17,7 @@ services:
     environment:
       # Experiment knob: Hibernate logs every unique violation (a lost seat race, ADR 0004) at WARN.
       LOGGING_LEVEL_ORG_HIBERNATE_ORM_JDBC_ERROR: "${HIBERNATE_JDBC_ERROR_LEVEL:-WARN}"
+      SEAT_INVENTORY_STRATEGY: "${SEAT_INVENTORY_STRATEGY:-unique}"
     # Own port, so the stack can run beside anything else on 8080. Locust then needs BASE_URL.
     ports: !override
       - "127.0.0.1:${APP_PORT:-18080}:8080"
