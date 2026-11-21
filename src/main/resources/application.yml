@@ -17,6 +17,9 @@ spring:
       ddl-auto: validate
     properties:
       hibernate.jdbc.time_zone: UTC
+      hibernate.jdbc.batch_size: 20
+      hibernate.order_inserts: true
+      hibernate.order_updates: true
   mvc:
     problemdetails:
       enabled: true
@@ -37,6 +40,8 @@ app:
     secret: ${JWT_SECRET:super-secret-jwt-key-with-at-least-32-bytes-length-123456}
   seat-inventory:
     strategy: ${SEAT_INVENTORY_STRATEGY:unique}
+  anti-hoarding:
+    enabled: ${ANTI_HOARDING_ENABLED:false}
 
 management:
   endpoints:

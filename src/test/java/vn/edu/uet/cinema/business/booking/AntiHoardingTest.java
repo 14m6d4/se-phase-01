@@ -47,4 +47,14 @@ class AntiHoardingTest {
 		assertThatCode(() -> guard.checkHoldAllowed(customerId, NOW.plusSeconds(145)))
 			.doesNotThrowAnyException();
 	}
+
+	@Test
+	void disabledGuardPermitsContinuousHoldsAndAbandonsWithoutCooldown() {
+		AntiHoardingGuard disabled = new AntiHoardingGuard(false);
+		disabled.recordAbandon(customerId, NOW);
+		disabled.recordAbandon(customerId, NOW.plusSeconds(1));
+		disabled.recordAbandon(customerId, NOW.plusSeconds(2));
+
+		assertThatCode(() -> disabled.checkHoldAllowed(customerId, NOW.plusSeconds(3))).doesNotThrowAnyException();
+	}
 }

@@ -18,16 +18,30 @@ public class AntiHoardingGuard {
 	public static final int MAX_ABANDONS_IN_WINDOW = 3;
 	public static final Duration REPEATED_ABANDON_PENALTY = Duration.ofMinutes(2);
 
+	private final boolean enabled;
 	private final Duration cooldownAfterAbandon;
 	private final ConcurrentHashMap<UUID, Instant> cooldowns = new ConcurrentHashMap<>();
 	private final ConcurrentHashMap<UUID, List<Instant>> abandonHistory = new ConcurrentHashMap<>();
 
 	public AntiHoardingGuard() {
-		this(DEFAULT_COOLDOWN_AFTER_ABANDON);
+		this(true, DEFAULT_COOLDOWN_AFTER_ABANDON);
+	}
+
+	public AntiHoardingGuard(boolean enabled) {
+		this(enabled, DEFAULT_COOLDOWN_AFTER_ABANDON);
 	}
 
 	public AntiHoardingGuard(Duration cooldownAfterAbandon) {
+		this(true, cooldownAfterAbandon);
+	}
+
+	public AntiHoardingGuard(boolean enabled, Duration cooldownAfterAbandon) {
+		this.enabled = enabled;
 		this.cooldownAfterAbandon = cooldownAfterAbandon;
+	}
+
+	public boolean isEnabled() {
+		return enabled;
 	}
 
 	/**
@@ -36,6 +50,9 @@ public class AntiHoardingGuard {
 	 * @throws SeatHoardingException if the customer is in cooldown
 	 */
 	public void checkHoldAllowed(UUID customerId, Instant now) {
+		if (!enabled) {
+			return;
+		}
 		Instant cooldownUntil = cooldowns.get(customerId);
 		if (cooldownUntil != null && now.isBefore(cooldownUntil)) {
 			long remainingSeconds = Duration.between(now, cooldownUntil).toSeconds() + 1;
@@ -48,6 +65,9 @@ public class AntiHoardingGuard {
 	 * Records an explicit abandon by the customer, applying immediate cooldown and tracking repeated churn.
 	 */
 	public void recordAbandon(UUID customerId, Instant now) {
+		if (!enabled) {
+			return;
+		}
 		abandonHistory.compute(customerId, (id, history) -> {
 			List<Instant> updated = history == null ? new ArrayList<>() : new ArrayList<>(history);
 			Instant cutoff = now.minus(ABANDON_WINDOW);
