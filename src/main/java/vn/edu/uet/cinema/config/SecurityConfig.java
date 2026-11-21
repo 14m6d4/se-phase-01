@@ -22,9 +22,11 @@ import org.springframework.security.oauth2.jwt.JwtEncoder;
 import org.springframework.security.oauth2.jwt.NimbusJwtDecoder;
 import org.springframework.security.oauth2.jwt.NimbusJwtEncoder;
 import org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationConverter;
+import org.springframework.boot.web.servlet.FilterRegistrationBean;
 import org.springframework.security.oauth2.server.resource.authentication.JwtGrantedAuthoritiesConverter;
 import org.springframework.security.oauth2.server.resource.web.BearerTokenAuthenticationEntryPoint;
 import org.springframework.security.oauth2.server.resource.web.access.BearerTokenAccessDeniedHandler;
+import org.springframework.security.oauth2.server.resource.web.authentication.BearerTokenAuthenticationFilter;
 import org.springframework.security.web.AuthenticationEntryPoint;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.access.AccessDeniedHandler;
@@ -44,7 +46,7 @@ public class SecurityConfig {
 		"/api/showtimes/**"};
 
 	@Bean
-	SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
+	SecurityFilterChain securityFilterChain(HttpSecurity http, RateLimitingFilter rateLimitingFilter) throws Exception {
 		AuthenticationEntryPoint unauthorized = problemJson(new BearerTokenAuthenticationEntryPoint());
 		AccessDeniedHandler forbidden = problemJson(new BearerTokenAccessDeniedHandler());
 		return http
@@ -63,7 +65,28 @@ public class SecurityConfig {
 				.jwt(jwt -> jwt.jwtAuthenticationConverter(rolesClaimConverter()))
 				.authenticationEntryPoint(unauthorized)
 				.accessDeniedHandler(forbidden))
+			.addFilterAfter(rateLimitingFilter, BearerTokenAuthenticationFilter.class)
 			.build();
+	}
+
+	@Bean
+	RateLimitingFilter rateLimitingFilter(
+		@Value("${app.rate-limit.enabled:true}") boolean enabled,
+		@Value("${app.rate-limit.auth.capacity:100}") long authCapacity,
+		@Value("${app.rate-limit.auth.refill-tokens:100}") long authRefillTokens,
+		@Value("${app.rate-limit.auth.refill-duration-seconds:60}") long authDurationSeconds,
+		@Value("${app.rate-limit.api.capacity:500}") long apiCapacity,
+		@Value("${app.rate-limit.api.refill-tokens:500}") long apiRefillTokens,
+		@Value("${app.rate-limit.api.refill-duration-seconds:60}") long apiDurationSeconds) {
+		return new RateLimitingFilter(enabled, authCapacity, authRefillTokens, authDurationSeconds,
+			apiCapacity, apiRefillTokens, apiDurationSeconds);
+	}
+
+	@Bean
+	FilterRegistrationBean<RateLimitingFilter> rateLimitingFilterRegistration(RateLimitingFilter filter) {
+		FilterRegistrationBean<RateLimitingFilter> registration = new FilterRegistrationBean<>(filter);
+		registration.setEnabled(false);
+		return registration;
 	}
 
 	@Bean
