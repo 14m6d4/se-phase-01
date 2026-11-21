@@ -9,6 +9,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
+import java.util.stream.Collectors;
 import vn.edu.uet.cinema.business.PageQuery;
 import vn.edu.uet.cinema.business.PageSlice;
 import vn.edu.uet.cinema.business.booking.BookingRepository;
