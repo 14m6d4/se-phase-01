@@ -2,10 +2,12 @@ package vn.edu.uet.cinema.api.booking;
 
 import static org.hamcrest.Matchers.contains;
 import static org.hamcrest.Matchers.containsString;
+import static org.hamcrest.Matchers.hasSize;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -240,6 +242,73 @@ class BookingApiTest {
 			.andExpect(jsonPath("$.paths['/api/bookings/{id}'].get.security[0].bearerAuth").exists())
 			.andExpect(jsonPath("$.paths['/api/bookings/{id}'].delete.security[0].bearerAuth").exists())
 			.andExpect(jsonPath("$.paths['/api/bookings/{id}/payment'].post.security[0].bearerAuth").exists());
+	}
+
+	@Test
+	void listsCustomersBookingsWithPaginationNewestFirst() throws Exception {
+		Auditorium hall = auditorium();
+		UUID showtimeId = showtime(hall);
+		String token = customer();
+		UUID customerId = UUID.fromString(JsonPath.read(mvc.perform(get("/api/me")
+			.header("Authorization", "Bearer " + token)).andReturn().getResponse().getContentAsString(), "$.id"));
+
+		Instant t1 = Instant.now().minus(5, ChronoUnit.MINUTES);
+		UUID b1 = bookings.book(customerId, showtimeId, List.of(hall.seats().get(0).id()), t1).id();
+		bookings.pay(customerId, b1, t1);
+		Instant t2 = t1.plusSeconds(30);
+		UUID b2 = bookings.book(customerId, showtimeId, List.of(hall.seats().get(1).id()), t2).id();
+		bookings.pay(customerId, b2, t2);
+		Instant t3 = t2.plusSeconds(30);
+		UUID b3 = bookings.book(customerId, showtimeId, List.of(hall.seats().get(2).id()), t3).id();
+
+		mvc.perform(get("/api/bookings").header("Authorization", "Bearer " + token))
+			.andExpect(status().isOk())
+			.andExpect(header().string("X-Total-Count", "3"))
+			.andExpect(header().string("X-Page", "0"))
+			.andExpect(header().string("X-Page-Size", "20"))
+			.andExpect(header().string("X-Total-Pages", "1"))
+			.andExpect(jsonPath("$[*].id").value(contains(b3.toString(), b2.toString(), b1.toString())));
+
+		mvc.perform(get("/api/bookings").header("Authorization", "Bearer " + token).param("page", "0").param("size", "2"))
+			.andExpect(status().isOk())
+			.andExpect(header().string("X-Total-Count", "3"))
+			.andExpect(header().string("X-Page", "0"))
+			.andExpect(header().string("X-Page-Size", "2"))
+			.andExpect(header().string("X-Total-Pages", "2"))
+			.andExpect(jsonPath("$[*].id").value(contains(b3.toString(), b2.toString())));
+
+		mvc.perform(get("/api/bookings").header("Authorization", "Bearer " + token).param("page", "1").param("size", "2"))
+			.andExpect(status().isOk())
+			.andExpect(header().string("X-Total-Count", "3"))
+			.andExpect(header().string("X-Page", "1"))
+			.andExpect(header().string("X-Page-Size", "2"))
+			.andExpect(header().string("X-Total-Pages", "2"))
+			.andExpect(jsonPath("$[*].id").value(contains(b1.toString())));
+
+		mvc.perform(get("/api/bookings").header("Authorization", "Bearer " + token).param("page", "2").param("size", "2"))
+			.andExpect(status().isOk())
+			.andExpect(header().string("X-Total-Count", "3"))
+			.andExpect(header().string("X-Page", "2"))
+			.andExpect(header().string("X-Page-Size", "2"))
+			.andExpect(header().string("X-Total-Pages", "2"))
+			.andExpect(jsonPath("$", hasSize(0)));
+	}
+
+	@Test
+	void rejectsInvalidPaginationParametersOnBookings() throws Exception {
+		String token = customer();
+		for (String[] params : List.of(
+			new String[] {"page", "-1", "page"},
+			new String[] {"page", "100001", "page"},
+			new String[] {"size", "0", "size"},
+			new String[] {"size", "101", "size"},
+			new String[] {"page", "abc", "page"},
+			new String[] {"size", "abc", "size"})) {
+			mvc.perform(get("/api/bookings").header("Authorization", "Bearer " + token).param(params[0], params[1]))
+				.andExpect(status().isBadRequest())
+				.andExpect(content().contentType(MediaType.APPLICATION_PROBLEM_JSON))
+				.andExpect(jsonPath("$.errors[0].field").value(params[2]));
+		}
 	}
 
 	private Auditorium auditorium() {

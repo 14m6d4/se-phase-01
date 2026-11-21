@@ -1,16 +1,20 @@
 package vn.edu.uet.cinema.api.movie;
 
-import static org.hamcrest.Matchers.hasItem;
+import static org.hamcrest.Matchers.hasSize;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import com.jayway.jsonpath.JsonPath;
+import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 import static org.assertj.core.api.Assertions.assertThat;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -43,7 +47,11 @@ class MovieApiTest {
 
 		mvc.perform(get("/api/movies"))
 			.andExpect(status().isOk())
-			.andExpect(jsonPath("$[*].id").value(hasItem(id)));
+			.andExpect(header().exists("X-Total-Count"))
+			.andExpect(header().string("X-Page", "0"))
+			.andExpect(header().string("X-Page-Size", "20"))
+			.andExpect(header().exists("X-Total-Pages"));
+		assertThat(allMovieIds()).contains(id);
 		mvc.perform(get("/api/movies/" + id))
 			.andExpect(status().isOk())
 			.andExpect(jsonPath("$.description").value("A first description"));
@@ -127,6 +135,74 @@ class MovieApiTest {
 				.contentType(MediaType.APPLICATION_JSON).content(movieJson("Customer movie", "P")))
 			.andExpect(status().isForbidden())
 			.andExpect(content().contentType(MediaType.APPLICATION_PROBLEM_JSON));
+	}
+
+	@Test
+	void listsMoviesWithPaginationAndHeaders() throws Exception {
+		String admin = token();
+		for (String title : List.of("000-Page-A", "000-Page-B", "000-Page-C")) {
+			mvc.perform(post("/api/movies").header("Authorization", "Bearer " + admin)
+					.contentType(MediaType.APPLICATION_JSON).content(movieJson(title, "P")))
+				.andExpect(status().isCreated());
+		}
+
+		String page0 = mvc.perform(get("/api/movies").param("page", "0").param("size", "2"))
+			.andExpect(status().isOk())
+			.andExpect(header().string("X-Page", "0"))
+			.andExpect(header().string("X-Page-Size", "2"))
+			.andExpect(jsonPath("$", hasSize(2)))
+			.andReturn().getResponse().getContentAsString();
+		String page1 = mvc.perform(get("/api/movies").param("page", "1").param("size", "2"))
+			.andExpect(status().isOk())
+			.andExpect(header().string("X-Page", "1"))
+			.andExpect(header().string("X-Page-Size", "2"))
+			.andReturn().getResponse().getContentAsString();
+
+		List<String> ids0 = JsonPath.read(page0, "$[*].id");
+		List<String> ids1 = JsonPath.read(page1, "$[*].id");
+		Set<String> distinct = new HashSet<>(ids0);
+		distinct.addAll(ids1);
+		assertThat(distinct).hasSize(ids0.size() + ids1.size());
+		List<String> titles0 = JsonPath.read(page0, "$[*].title");
+		assertThat(titles0).isSorted();
+
+		long total = Long.parseLong(mvc.perform(get("/api/movies").param("page", "9999").param("size", "20"))
+			.andExpect(status().isOk())
+			.andExpect(header().string("X-Page", "9999"))
+			.andExpect(header().string("X-Page-Size", "20"))
+			.andExpect(jsonPath("$", hasSize(0)))
+			.andReturn().getResponse().getHeader("X-Total-Count"));
+		assertThat(total).isGreaterThanOrEqualTo(3L);
+	}
+
+	@Test
+	void rejectsInvalidPaginationParameters() throws Exception {
+		for (String[] params : List.of(
+			new String[] {"page", "-1", "page"},
+			new String[] {"page", "100001", "page"},
+			new String[] {"size", "0", "size"},
+			new String[] {"size", "101", "size"},
+			new String[] {"page", "abc", "page"},
+			new String[] {"size", "abc", "size"})) {
+			mvc.perform(get("/api/movies").param(params[0], params[1]))
+				.andExpect(status().isBadRequest())
+				.andExpect(content().contentType(MediaType.APPLICATION_PROBLEM_JSON))
+				.andExpect(jsonPath("$.errors[0].field").value(params[2]));
+		}
+	}
+
+	private List<String> allMovieIds() throws Exception {
+		List<String> ids = new ArrayList<>();
+		int page = 0;
+		int totalPages;
+		do {
+			var result = mvc.perform(get("/api/movies").param("page", Integer.toString(page)).param("size", "100"))
+				.andExpect(status().isOk()).andReturn().getResponse();
+			ids.addAll(JsonPath.read(result.getContentAsString(), "$[*].id"));
+			totalPages = Integer.parseInt(result.getHeader("X-Total-Pages"));
+			page++;
+		} while (page < totalPages);
+		return ids;
 	}
 
 	private String token() throws Exception {

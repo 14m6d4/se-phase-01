@@ -16,6 +16,7 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 import java.util.UUID;
+import org.hibernate.annotations.BatchSize;
 import vn.edu.uet.cinema.business.booking.BookedSeat;
 import vn.edu.uet.cinema.business.booking.Booking;
 import vn.edu.uet.cinema.business.booking.BookingStatus;
@@ -37,6 +38,7 @@ class BookingEntity {
 	@Column(name = "expires_at")
 	private Instant expiresAt;
 	@ElementCollection
+	@BatchSize(size = 50)
 	@CollectionTable(name = "booked_seat", joinColumns = @JoinColumn(name = "booking_id"))
 	private List<BookedSeatEmbeddable> seats = new ArrayList<>();
 

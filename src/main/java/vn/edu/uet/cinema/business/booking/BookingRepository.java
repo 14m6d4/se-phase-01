@@ -4,6 +4,8 @@ import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
+import vn.edu.uet.cinema.business.PageQuery;
+import vn.edu.uet.cinema.business.PageSlice;
 
 public interface BookingRepository {
 
@@ -11,6 +13,9 @@ public interface BookingRepository {
 
 	/** Newest first. */
 	List<Booking> findByCustomer(UUID customerId);
+
+	/** Newest first, paginated. */
+	PageSlice<Booking> findByCustomer(UUID customerId, PageQuery query);
 
 	/** The Customer's Pending Booking whose Hold is still running at {@code now}. */
 	Optional<Booking> findLivePending(UUID customerId, Instant now);

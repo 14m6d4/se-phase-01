@@ -10,10 +10,14 @@ import java.util.UUID;
 import java.util.stream.Collectors;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.dao.PessimisticLockingFailureException;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Repository;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionOperations;
 import vn.edu.uet.cinema.business.ConflictException;
+import vn.edu.uet.cinema.business.PageQuery;
+import vn.edu.uet.cinema.business.PageSlice;
 import vn.edu.uet.cinema.business.booking.BookedSeat;
 import vn.edu.uet.cinema.business.booking.Booking;
 import vn.edu.uet.cinema.business.booking.BookingRepository;
@@ -40,6 +44,15 @@ class JpaBookingRepository implements BookingRepository {
 	@Transactional(readOnly = true)
 	public List<Booking> findByCustomer(UUID customerId) {
 		return jpa.findByCustomerIdOrderByCreatedAtDesc(customerId).stream().map(BookingEntity::toBooking).toList();
+	}
+
+	@Override
+	@Transactional(readOnly = true)
+	public PageSlice<Booking> findByCustomer(UUID customerId, PageQuery query) {
+		Page<BookingEntity> page = jpa.findByCustomerIdOrderByCreatedAtDescIdDesc(
+			customerId, PageRequest.of(query.page(), query.size()));
+		return new PageSlice<>(page.getContent().stream().map(BookingEntity::toBooking).toList(),
+			query.page(), query.size(), page.getTotalElements());
 	}
 
 	@Override

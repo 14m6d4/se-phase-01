@@ -9,6 +9,8 @@ import java.util.Set;
 import java.util.UUID;
 import java.util.stream.Collectors;
 import vn.edu.uet.cinema.business.ConflictException;
+import vn.edu.uet.cinema.business.PageQuery;
+import vn.edu.uet.cinema.business.PageSlice;
 import vn.edu.uet.cinema.business.showtime.InMemoryShowtimes;
 import vn.edu.uet.cinema.business.showtime.ShowtimeStatus;
 
@@ -35,6 +37,18 @@ public class InMemoryBookings implements BookingRepository {
 	public List<Booking> findByCustomer(UUID customerId) {
 		return rows.values().stream().filter(b -> b.customerId().equals(customerId))
 			.sorted(Comparator.comparing(Booking::createdAt).reversed()).toList();
+	}
+
+	@Override
+	public PageSlice<Booking> findByCustomer(UUID customerId, PageQuery query) {
+		List<Booking> sorted = rows.values().stream()
+			.filter(b -> b.customerId().equals(customerId))
+			.sorted(Comparator.comparing(Booking::createdAt).reversed()
+				.thenComparing(Comparator.comparing(Booking::id).reversed()))
+			.toList();
+		int from = Math.min(query.offset(), sorted.size());
+		int to = Math.min(from + query.size(), sorted.size());
+		return new PageSlice<>(sorted.subList(from, to), query.page(), query.size(), sorted.size());
 	}
 
 	@Override

@@ -195,6 +195,9 @@ class ApiExceptionHandler extends ResponseEntityExceptionHandler {
 		if (targetType == OffsetDateTime.class) {
 			return "Must be an ISO-8601 date-time with an offset.";
 		}
+		if (targetType == int.class || targetType == Integer.class) {
+			return "Must be an integer.";
+		}
 		return "Invalid value.";
 	}
 
