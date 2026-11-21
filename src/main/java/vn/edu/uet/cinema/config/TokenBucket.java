@@ -28,7 +28,7 @@ public class TokenBucket {
 
 	public synchronized ConsumptionResult tryConsume(long tokensRequested) {
 		if (tokensRequested <= 0) {
-			return ConsumptionResult.allowed();
+			return ConsumptionResult.permit();
 		}
 		long now = System.nanoTime();
 		long elapsedNanos = Math.max(0, now - lastRefillNanos);
@@ -37,12 +37,12 @@ public class TokenBucket {
 
 		if (tokens >= tokensRequested) {
 			tokens -= tokensRequested;
-			return ConsumptionResult.allowed();
+			return ConsumptionResult.permit();
 		}
 		double missingTokens = tokensRequested - tokens;
 		long waitNanos = (long) Math.ceil(missingTokens / refillRatePerNano);
 		long waitSeconds = Math.max(1, TimeUnit.NANOSECONDS.toSeconds(waitNanos));
-		return ConsumptionResult.rejected(waitSeconds);
+		return ConsumptionResult.reject(waitSeconds);
 	}
 
 	public synchronized double availableTokens() {
@@ -52,11 +52,11 @@ public class TokenBucket {
 	}
 
 	public record ConsumptionResult(boolean allowed, long retryAfterSeconds) {
-		public static ConsumptionResult allowed() {
+		public static ConsumptionResult permit() {
 			return new ConsumptionResult(true, 0);
 		}
 
-		public static ConsumptionResult rejected(long retryAfterSeconds) {
+		public static ConsumptionResult reject(long retryAfterSeconds) {
 			return new ConsumptionResult(false, retryAfterSeconds);
 		}
 	}
