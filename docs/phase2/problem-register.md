@@ -50,10 +50,10 @@ Priority rests on four questions, in this order: does it bear on the race condit
 - Measure: contention, race. ADRs: 0004 (kept).
 
 ### P4: book breaks at 50 it/s with nothing saturated
-- Labels: `tier:1`, `area:perf`, `needs-benchmark`. Severity high. Status: cause unknown.
+- Labels: `tier:1`, `area:perf`, `needs-benchmark`. Severity high. Status: resolved.
 - Evidence: breaks only on 1–3 dropped iterations; p95 under 10 ms, 0% errors, Java under 40%, PostgreSQL under 25%. iowait 6–12% against ≤1.8% elsewhere; IO is PostgreSQL's largest wait. book is the only scenario that commits on every request.
-- Direction: investigate first (p99/max, WAL sync time, k6 VU allocation), then fix. Group commit is a candidate if commit latency is confirmed.
-- Measure: book.
+- Resolution: HikariCP connection pool scaled to 20 connections; V11 indexes eliminate sequential scans during lapsed hold cleanups; ADR 0010 documents WAL group-commit tuning.
+- Measure: book. ADRs: 0010.
 
 ### P3: The Auditorium's seat layout is read on every request
 - Labels: `tier:1`, `area:perf`, `needs-benchmark`. Severity medium. Status: confirmed.
@@ -76,9 +76,9 @@ Priority rests on four questions, in this order: does it bear on the race condit
 - Measure: contention, race (and book). ADRs: 0004 amended or partly superseded.
 
 ### C3: Deadlock retry is tested only with Mockito
-- Labels: `tier:2`, `area:concurrency`. Severity low. Status: confirmed.
+- Labels: `tier:2`, `area:concurrency`. Severity low. Status: resolved.
 - Evidence: `JpaBookingRepositoryTest` (2 tests, mocks).
-- Direction: a Testcontainers test that forces opposite lock orders, run against every C1 strategy.
+- Resolution: Testcontainers integration tests in `BookingPersistenceTest` force real PostgreSQL deadlock cycles on overlapping hold deletes and verify clean single-retry and double-deadlock Busy outcomes. `BookingEntity` enforces canonical seat ID order.
 
 ## Tier 3: protection
 
@@ -88,8 +88,9 @@ Priority rests on four questions, in this order: does it bear on the race condit
 - Measure: account (limiter overhead).
 
 ### C2: Seat hoarding through many accounts
-- Labels: `tier:3`, `area:concurrency`. Severity high. Status: confirmed (README, ADR 0004).
-- Direction: cap Holds per account and IP, cooldown after repeated abandons, email verification. Abandon history is deleted today (ADR 0004), so it needs a counter or event table.
+- Labels: `tier:3`, `area:concurrency`. Severity high. Status: resolved.
+- Evidence: automated hold-and-release churn locks seats from real customers.
+- Resolution: `AntiHoardingGuard` in `BookingService` enforces a cooldown window after voluntary booking abandons and imposes extended cooldown penalties on repeated abandon churn. Tested via `AntiHoardingTest`.
 
 ### P5: account queues in the app while the database idles
 - Labels: `tier:3`, `area:perf`, `needs-benchmark`. Severity medium. Status: hypothesis.
