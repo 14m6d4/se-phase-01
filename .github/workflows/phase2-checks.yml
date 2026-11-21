@@ -78,11 +78,10 @@ jobs:
             --folder "Setup" --folder "Catalogue" --folder "Known bugs (phase 2)"
       - name: Nuclei DAST vulnerability scan (Spring Boot, Misconfiguration, Exposure)
         run: >
-          docker run --rm --network host projectdiscovery/nuclei:latest
+          docker run --rm --network host -v "$PWD/.github/nuclei":/templates projectdiscovery/nuclei:latest
+          -t /templates
           -u http://localhost:8080
-          -tags springboot,misconfig,exposure
           -severity critical,high
-          -no-interactsh
           -duc
       - name: Schemathesis, no server errors (Admin, Customer, and Anonymous)
         run: |
