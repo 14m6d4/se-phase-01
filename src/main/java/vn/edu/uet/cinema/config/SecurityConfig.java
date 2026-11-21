@@ -6,6 +6,8 @@ import com.nimbusds.jose.jwk.source.ImmutableSecret;
 import jakarta.servlet.http.HttpServletResponse;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
+import java.time.Instant;
+import java.util.concurrent.ConcurrentHashMap;
 import javax.crypto.SecretKey;
 import javax.crypto.spec.SecretKeySpec;
 import org.springframework.beans.factory.annotation.Value;
@@ -17,6 +19,7 @@ import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.http.SessionCreationPolicy;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.oauth2.jose.jws.MacAlgorithm;
+import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.security.oauth2.jwt.JwtDecoder;
 import org.springframework.security.oauth2.jwt.JwtEncoder;
 import org.springframework.security.oauth2.jwt.NimbusJwtDecoder;
@@ -82,7 +85,28 @@ public class SecurityConfig {
 
 	@Bean
 	JwtDecoder jwtDecoder(SecretKey jwtKey) {
-		return NimbusJwtDecoder.withSecretKey(jwtKey).macAlgorithm(MacAlgorithm.HS256).build();
+		NimbusJwtDecoder delegate = NimbusJwtDecoder.withSecretKey(jwtKey).macAlgorithm(MacAlgorithm.HS256).build();
+		ConcurrentHashMap<String, Jwt> cache = new ConcurrentHashMap<>(2048);
+		return token -> {
+			Jwt cached = cache.get(token);
+			Instant now = Instant.now();
+			if (cached != null) {
+				Instant expiresAt = cached.getExpiresAt();
+				if (expiresAt == null || expiresAt.isAfter(now)) {
+					return cached;
+				}
+				cache.remove(token, cached);
+			}
+			Jwt decoded = delegate.decode(token);
+			Instant expiresAt = decoded.getExpiresAt();
+			if (expiresAt == null || expiresAt.isAfter(now)) {
+				if (cache.size() >= 4096) {
+					cache.clear();
+				}
+				cache.putIfAbsent(token, decoded);
+			}
+			return decoded;
+		};
 	}
 
 	@Bean

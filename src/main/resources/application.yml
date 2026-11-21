@@ -1,10 +1,16 @@
 spring:
   application:
     name: cinema
+  threads:
+    virtual:
+      enabled: ${VIRTUAL_THREADS_ENABLED:false}
   datasource:
     url: ${DB_URL:jdbc:postgresql://localhost:5432/cinema}
     username: ${DB_USERNAME:cinema}
     password: ${DB_PASSWORD}
+    hikari:
+      maximum-pool-size: ${HIKARI_MAX_POOL_SIZE:40}
+      minimum-idle: ${HIKARI_MIN_IDLE:40}
   jpa:
     open-in-view: false
     hibernate:
@@ -14,6 +20,15 @@ spring:
   mvc:
     problemdetails:
       enabled: true
+
+server:
+  tomcat:
+    threads:
+      max: ${TOMCAT_MAX_THREADS:40}
+      min-spare: ${TOMCAT_MIN_SPARE_THREADS:40}
+    accept-count: ${TOMCAT_ACCEPT_COUNT:2000}
+    max-connections: ${TOMCAT_MAX_CONNECTIONS:8192}
+    max-keep-alive-requests: -1
 
 # Only non-secret values have defaults. DB_PASSWORD, ADMIN_PASSWORD and JWT_SECRET must be set:
 # without the last two the app refuses to start, without DB_PASSWORD it fails to connect to the database.
