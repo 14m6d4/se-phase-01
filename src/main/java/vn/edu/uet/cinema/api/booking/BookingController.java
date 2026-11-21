@@ -7,11 +7,14 @@ import io.swagger.v3.oas.annotations.media.Schema;
 import io.swagger.v3.oas.annotations.security.SecurityRequirement;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
+import jakarta.validation.constraints.Max;
+import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotNull;
 import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.web.bind.annotation.DeleteMapping;
@@ -19,8 +22,11 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
+import vn.edu.uet.cinema.api.PaginationHeaders;
+import vn.edu.uet.cinema.business.PageQuery;
 import vn.edu.uet.cinema.business.booking.BookingService;
 import vn.edu.uet.cinema.business.showtime.inventory.BookedSeat;
 import vn.edu.uet.cinema.business.showtime.inventory.Booking;
@@ -50,12 +56,22 @@ class BookingController {
 	}
 
 	@GetMapping("/api/bookings")
-	@Operation(summary = "List my bookings", description = "Returns only the authenticated customer's bookings, newest first. "
-		+ "Requires CUSTOMER.")
+	@Operation(summary = "List my bookings", description = "Returns a page of the authenticated customer's bookings, newest first. "
+		+ "Defaults to page=0 and size=20 (max 100); totals are returned in X-Total-Count, X-Page, X-Page-Size, and "
+		+ "X-Total-Pages headers. Requires CUSTOMER.")
 	@SecurityRequirement(name = OpenApiConfig.BEARER_AUTH)
-	List<BookingResponse> list(@AuthenticationPrincipal Jwt jwt) {
+	ResponseEntity<List<BookingResponse>> list(@AuthenticationPrincipal Jwt jwt,
+		@Parameter(description = "Zero-based page index.", example = "0",
+			schema = @Schema(minimum = "0", maximum = "100000", defaultValue = "0"))
+		@RequestParam(defaultValue = "0") @Min(value = 0, message = "Page must be 0 or greater")
+		@Max(value = PageQuery.MAX_PAGE, message = "Page must be at most 100000") int page,
+		@Parameter(description = "Maximum number of items per page (1–100).", example = "20",
+			schema = @Schema(minimum = "1", maximum = "100", defaultValue = "20"))
+		@RequestParam(defaultValue = "20") @Min(value = 1, message = "Size must be at least 1")
+		@Max(value = PageQuery.MAX_SIZE, message = "Size must be at most 100") int size) {
 		Instant now = Instant.now();
-		return bookings.list(customerId(jwt)).stream().map(booking -> BookingResponse.from(booking, now)).toList();
+		return PaginationHeaders.ok(bookings.list(customerId(jwt), new PageQuery(page, size)),
+			booking -> BookingResponse.from(booking, now));
 	}
 
 	@GetMapping("/api/bookings/{id}")

@@ -8,6 +8,8 @@ import java.util.Set;
 import java.util.UUID;
 import vn.edu.uet.cinema.business.ConflictException;
 import vn.edu.uet.cinema.business.NotFoundException;
+import vn.edu.uet.cinema.business.PageQuery;
+import vn.edu.uet.cinema.business.PageSlice;
 import vn.edu.uet.cinema.business.showtime.PricedSeat;
 import vn.edu.uet.cinema.business.showtime.Showtime;
 import vn.edu.uet.cinema.business.showtime.ShowtimeService;
@@ -73,6 +75,11 @@ public class BookingService {
 	/** The Customer's own Bookings, newest first. */
 	public List<Booking> list(UUID customerId) {
 		return bookings.findByCustomer(customerId);
+	}
+
+	/** A page of the Customer's own Bookings, newest first. */
+	public PageSlice<Booking> list(UUID customerId, PageQuery query) {
+		return bookings.findByCustomer(customerId, query);
 	}
 
 	/** Someone else's Booking is reported as not found. */

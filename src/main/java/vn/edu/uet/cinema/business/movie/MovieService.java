@@ -5,6 +5,8 @@ import java.util.List;
 import java.util.UUID;
 import vn.edu.uet.cinema.business.ConflictException;
 import vn.edu.uet.cinema.business.NotFoundException;
+import vn.edu.uet.cinema.business.PageQuery;
+import vn.edu.uet.cinema.business.PageSlice;
 import vn.edu.uet.cinema.business.showtime.ShowtimeRepository;
 
 public class MovieService {
@@ -25,6 +27,10 @@ public class MovieService {
 
 	public List<Movie> list() {
 		return movies.findAll();
+	}
+
+	public PageSlice<Movie> list(PageQuery query) {
+		return movies.findAll(query);
 	}
 
 	public Movie get(UUID id) {

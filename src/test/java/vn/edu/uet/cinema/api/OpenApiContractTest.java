@@ -1,6 +1,7 @@
 package vn.edu.uet.cinema.api;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -27,6 +28,8 @@ import org.springframework.http.MediaType;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 import vn.edu.uet.cinema.CinemaApplication;
+import vn.edu.uet.cinema.business.PageQuery;
+import vn.edu.uet.cinema.business.PageSlice;
 import vn.edu.uet.cinema.business.account.AccountService;
 import vn.edu.uet.cinema.business.auditorium.AuditoriumService;
 import vn.edu.uet.cinema.business.booking.BookingService;
@@ -60,7 +63,7 @@ class OpenApiContractTest {
 		Map.entry("POST /api/auth/login", Set.of("400", "401")),
 		Map.entry("GET /api/me", Set.of("401", "404")),
 		Map.entry("POST /api/cinemas", Set.of("400", "401", "403")),
-		Map.entry("GET /api/cinemas", Set.of("401")),
+		Map.entry("GET /api/cinemas", Set.of("400", "401")),
 		Map.entry("GET /api/cinemas/{id}", Set.of("400", "401", "404")),
 		Map.entry("PUT /api/cinemas/{id}", Set.of("400", "401", "403", "404")),
 		Map.entry("DELETE /api/cinemas/{id}", Set.of("400", "401", "403", "404", "409")),
@@ -69,7 +72,7 @@ class OpenApiContractTest {
 		Map.entry("GET /api/auditoriums/{id}", Set.of("400", "401", "404")),
 		Map.entry("DELETE /api/auditoriums/{id}", Set.of("400", "401", "403", "404", "409")),
 		Map.entry("POST /api/movies", Set.of("400", "401", "403")),
-		Map.entry("GET /api/movies", Set.of("401")),
+		Map.entry("GET /api/movies", Set.of("400", "401")),
 		Map.entry("GET /api/movies/{id}", Set.of("400", "401", "404")),
 		Map.entry("PUT /api/movies/{id}", Set.of("400", "401", "403", "404")),
 		Map.entry("DELETE /api/movies/{id}", Set.of("400", "401", "403", "404", "409")),
@@ -80,7 +83,7 @@ class OpenApiContractTest {
 		Map.entry("POST /api/showtimes/{id}/cancellation", Set.of("400", "401", "403", "404", "409")),
 		Map.entry("DELETE /api/showtimes/{id}", Set.of("400", "401", "403", "404", "409")),
 		Map.entry("POST /api/bookings", Set.of("400", "401", "403", "404", "409")),
-		Map.entry("GET /api/bookings", Set.of("401", "403")),
+		Map.entry("GET /api/bookings", Set.of("400", "401", "403")),
 		Map.entry("GET /api/bookings/{id}", Set.of("400", "401", "403", "404")),
 		Map.entry("POST /api/bookings/{id}/payment", Set.of("400", "401", "403", "404", "409")),
 		Map.entry("DELETE /api/bookings/{id}", Set.of("400", "401", "403", "404", "409")));
@@ -245,8 +248,16 @@ class OpenApiContractTest {
 			.andExpect(status().isBadRequest())
 			.andExpect(content().contentType(MediaType.APPLICATION_PROBLEM_JSON))
 			.andReturn().getResponse().getContentAsString();
+		String invalidPage = mvc.perform(get("/api/movies").param("page", "-1"))
+			.andExpect(status().isBadRequest())
+			.andExpect(content().contentType(MediaType.APPLICATION_PROBLEM_JSON))
+			.andReturn().getResponse().getContentAsString();
+		String invalidPageType = mvc.perform(get("/api/movies").param("size", "not-a-number"))
+			.andExpect(status().isBadRequest())
+			.andExpect(content().contentType(MediaType.APPLICATION_PROBLEM_JSON))
+			.andReturn().getResponse().getContentAsString();
 
-		for (String body : List.of(registration, invalidUuid, invalidDate)) {
+		for (String body : List.of(registration, invalidUuid, invalidDate, invalidPage, invalidPageType)) {
 			Map<String, Object> problem = JsonPath.read(body, "$");
 			assertThat(problem.keySet()).containsAll(required);
 			assertThat(problem.get("status")).isEqualTo(400);
@@ -268,6 +279,10 @@ class OpenApiContractTest {
 		assertThat(dateProblem.get("detail")).isEqualTo("A request value has an invalid type.");
 		assertThat(dateErrors).containsExactly(
 			Map.of("field", "date", "message", "Must be an ISO-8601 date (yyyy-MM-dd)."));
+		List<Map<String, Object>> pageErrors = JsonPath.read(invalidPage, "$.errors");
+		assertThat(pageErrors).containsExactly(Map.of("field", "page", "message", "Page must be 0 or greater"));
+		List<Map<String, Object>> pageTypeErrors = JsonPath.read(invalidPageType, "$.errors");
+		assertThat(pageTypeErrors).containsExactly(Map.of("field", "size", "message", "Must be an integer."));
 	}
 
 	@Test
@@ -278,7 +293,7 @@ class OpenApiContractTest {
 
 	@Test
 	void publicCatalogueAllowsAnonymousRequestsButRejectsAnInvalidBearerToken() throws Exception {
-		when(cinemas.list()).thenReturn(List.of());
+		when(cinemas.list(any(PageQuery.class))).thenReturn(new PageSlice<>(List.of(), 0, 20, 0));
 		mvc.perform(get("/api/cinemas")).andExpect(status().isOk());
 		mvc.perform(get("/api/cinemas").header("Authorization", "Bearer invalid"))
 			.andExpect(status().isUnauthorized())

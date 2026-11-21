@@ -9,7 +9,8 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
-import java.util.stream.Collectors;
+import vn.edu.uet.cinema.business.PageQuery;
+import vn.edu.uet.cinema.business.PageSlice;
 import vn.edu.uet.cinema.business.booking.BookingRepository;
 import vn.edu.uet.cinema.business.showtime.InMemoryShowtimes;
 import vn.edu.uet.cinema.business.showtime.Showtime;
@@ -49,6 +50,15 @@ public class InMemorySeatInventory implements SeatInventory, BookingRepository {
 	public synchronized List<Booking> findByCustomer(UUID customerId) {
 		return rows.values().stream().filter(b -> b.customerId().equals(customerId))
 			.sorted(Comparator.comparing(Booking::createdAt).reversed()).toList();
+	}
+
+	@Override
+	public synchronized PageSlice<Booking> findByCustomer(UUID customerId, PageQuery query) {
+		List<Booking> matching = rows.values().stream().filter(b -> b.customerId().equals(customerId))
+			.sorted(Comparator.comparing(Booking::createdAt).reversed()).toList();
+		int fromIndex = Math.min(query.offset(), matching.size());
+		int toIndex = Math.min(fromIndex + query.size(), matching.size());
+		return new PageSlice<>(matching.subList(fromIndex, toIndex), query.page(), query.size(), matching.size());
 	}
 
 	@Override
