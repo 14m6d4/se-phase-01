@@ -24,9 +24,12 @@ import java.util.concurrent.TimeUnit;
 import java.util.stream.IntStream;
 import javax.sql.DataSource;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.EnumSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.context.annotation.Import;
+import org.springframework.transaction.support.TransactionOperations;
 import vn.edu.uet.cinema.TestcontainersConfiguration;
 import vn.edu.uet.cinema.business.ConflictException;
 import vn.edu.uet.cinema.business.NotFoundException;
@@ -49,6 +52,7 @@ import vn.edu.uet.cinema.business.showtime.inventory.HoldOutcome;
 import vn.edu.uet.cinema.business.showtime.inventory.PayOutcome;
 import vn.edu.uet.cinema.business.showtime.inventory.SeatInventory;
 import vn.edu.uet.cinema.business.showtime.inventory.SeatStatus;
+import vn.edu.uet.cinema.config.SeatInventoryStrategy;
 
 @SpringBootTest
 @Import(TestcontainersConfiguration.class)
@@ -63,6 +67,7 @@ class BookingPersistenceTest {
 	@Autowired AuditoriumService auditoriums;
 	@Autowired ShowtimeService showtimes;
 	@Autowired BookingEntityRepository jpa;
+	@Autowired TransactionOperations transaction;
 	@Autowired DataSource dataSource;
 
 	private final Instant now = Instant.now();
@@ -170,6 +175,39 @@ class BookingPersistenceTest {
 		assertThat(repository.findLivePending(customerId, now)).contains(fresh);
 		assertThatThrownBy(() -> bookings.book(customerId, showtimeId, List.of(hall.seats().get(2).id()), now))
 			.isInstanceOf(ConflictException.class).hasMessageContaining(fresh.id().toString());
+	}
+
+	@ParameterizedTest
+	@EnumSource(value = SeatInventoryStrategy.class, names = {"UNIQUE", "SHOWTIME_LOCK", "SEAT_ROWS"})
+	void whenBothCustomerHasPendingAndSeatsTaken_customerHasPendingIsReported(SeatInventoryStrategy strategy) {
+		JpaSeatInventory testInventory = new JpaSeatInventory(jpa, transaction, strategy);
+		Auditorium hall = auditorium();
+		UUID showtimeId = showtime(hall);
+		UUID seat1 = hall.seats().get(0).id();
+		UUID seat2 = hall.seats().get(1).id();
+		UUID customerA = customer();
+		UUID customerB = customer();
+
+		// Customer B holds seat1
+		Booking holdB = new Booking(UUID.randomUUID(), customerB, showtimeId, BookingStatus.PENDING,
+			now, now.plusSeconds(600), List.of(new BookedSeat(seat1, 100_000)));
+		assertThat(testInventory.hold(holdB, now)).isInstanceOf(HoldOutcome.Held.class);
+
+		// Customer A holds seat2
+		Booking holdA1 = new Booking(UUID.randomUUID(), customerA, showtimeId, BookingStatus.PENDING,
+			now, now.plusSeconds(600), List.of(new BookedSeat(seat2, 100_000)));
+		assertThat(testInventory.hold(holdA1, now)).isInstanceOf(HoldOutcome.Held.class);
+
+		// Customer A attempts to hold seat1 (seat1 is taken by B, AND customer A has active pending hold A1)
+		Booking holdA2 = new Booking(UUID.randomUUID(), customerA, showtimeId, BookingStatus.PENDING,
+			now, now.plusSeconds(600), List.of(new BookedSeat(seat1, 100_000)));
+		HoldOutcome outcome = testInventory.hold(holdA2, now);
+		assertThat(outcome).isInstanceOf(HoldOutcome.CustomerHasPending.class);
+
+		// Customer A also attempts to hold their own already-held seat2
+		Booking holdA3 = new Booking(UUID.randomUUID(), customerA, showtimeId, BookingStatus.PENDING,
+			now, now.plusSeconds(600), List.of(new BookedSeat(seat2, 100_000)));
+		assertThat(testInventory.hold(holdA3, now)).isInstanceOf(HoldOutcome.CustomerHasPending.class);
 	}
 
 	@Test
