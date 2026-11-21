@@ -3,6 +3,10 @@ package vn.edu.uet.cinema.persistence.booking;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import java.sql.Connection;
+import java.sql.PreparedStatement;
+import java.sql.ResultSet;
+import java.sql.Statement;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.temporal.ChronoUnit;
@@ -10,12 +14,15 @@ import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.Callable;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.ThreadLocalRandom;
+import java.util.concurrent.TimeUnit;
 import java.util.stream.IntStream;
+import javax.sql.DataSource;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -26,19 +33,22 @@ import vn.edu.uet.cinema.business.NotFoundException;
 import vn.edu.uet.cinema.business.account.AccountService;
 import vn.edu.uet.cinema.business.auditorium.Auditorium;
 import vn.edu.uet.cinema.business.auditorium.AuditoriumService;
-import vn.edu.uet.cinema.business.booking.BookedSeat;
-import vn.edu.uet.cinema.business.booking.Booking;
 import vn.edu.uet.cinema.business.booking.BookingRepository;
 import vn.edu.uet.cinema.business.booking.BookingService;
-import vn.edu.uet.cinema.business.booking.BookingStatus;
 import vn.edu.uet.cinema.business.booking.SeatsTakenException;
 import vn.edu.uet.cinema.business.cinema.CinemaService;
 import vn.edu.uet.cinema.business.movie.AgeRating;
 import vn.edu.uet.cinema.business.movie.MovieService;
-import vn.edu.uet.cinema.business.showtime.CancellationReason;
-import vn.edu.uet.cinema.business.showtime.SeatOccupancyReader;
-import vn.edu.uet.cinema.business.showtime.SeatStatus;
 import vn.edu.uet.cinema.business.showtime.ShowtimeService;
+import vn.edu.uet.cinema.business.showtime.inventory.AbandonOutcome;
+import vn.edu.uet.cinema.business.showtime.inventory.BookedSeat;
+import vn.edu.uet.cinema.business.showtime.inventory.Booking;
+import vn.edu.uet.cinema.business.showtime.inventory.BookingStatus;
+import vn.edu.uet.cinema.business.showtime.inventory.CancellationReason;
+import vn.edu.uet.cinema.business.showtime.inventory.HoldOutcome;
+import vn.edu.uet.cinema.business.showtime.inventory.PayOutcome;
+import vn.edu.uet.cinema.business.showtime.inventory.SeatInventory;
+import vn.edu.uet.cinema.business.showtime.inventory.SeatStatus;
 
 @SpringBootTest
 @Import(TestcontainersConfiguration.class)
@@ -46,12 +56,14 @@ class BookingPersistenceTest {
 
 	@Autowired BookingService bookings;
 	@Autowired BookingRepository repository;
-	@Autowired SeatOccupancyReader occupancy;
+	@Autowired SeatInventory inventory;
 	@Autowired AccountService accounts;
 	@Autowired MovieService movies;
 	@Autowired CinemaService cinemas;
 	@Autowired AuditoriumService auditoriums;
 	@Autowired ShowtimeService showtimes;
+	@Autowired BookingEntityRepository jpa;
+	@Autowired DataSource dataSource;
 
 	private final Instant now = Instant.now();
 
@@ -91,8 +103,41 @@ class BookingPersistenceTest {
 		} finally {
 			pool.shutdownNow();
 		}
-		assertThat(occupancy.statuses(showtimeId, Instant.now()))
+		assertThat(inventory.statuses(showtimeId, Instant.now()))
 			.containsOnly(Map.entry(a, SeatStatus.HELD), Map.entry(b, SeatStatus.HELD));
+	}
+
+	@Test
+	void takenSeatsAreTheRequestedSeatsOfLiveHoldsAndConfirmedBookingsOnly() {
+		Auditorium hall = auditorium();
+		UUID showtimeId = showtime(hall);
+		UUID held = hall.seats().get(0).id();
+		UUID sold = hall.seats().get(1).id();
+		UUID lapsed = hall.seats().get(2).id();
+		UUID notRequested = hall.seats().get(3).id();
+		bookings.book(customer(), showtimeId, List.of(held), now);
+		assertThat(inventory.hold(new Booking(UUID.randomUUID(), customer(), showtimeId, BookingStatus.CONFIRMED,
+			now.minus(1, ChronoUnit.HOURS), now.minus(50, ChronoUnit.MINUTES), List.of(new BookedSeat(sold, 100_000))),
+			now)).isInstanceOf(HoldOutcome.Held.class);
+		bookings.book(customer(), showtimeId, List.of(lapsed), now.minus(11, ChronoUnit.MINUTES));
+		bookings.book(customer(), showtimeId, List.of(notRequested), now);
+
+		assertThat(jpa.findTakenSeats(showtimeId, List.of(held, sold, lapsed), now))
+			.containsExactlyInAnyOrder(held, sold);
+	}
+
+	@Test
+	void aSeatConflictNamesOnlyTheRequestedSeatsThatAreTaken() {
+		Auditorium hall = auditorium();
+		UUID showtimeId = showtime(hall);
+		UUID taken = hall.seats().get(0).id();
+		UUID free = hall.seats().get(1).id();
+		UUID heldButNotRequested = hall.seats().get(2).id();
+		bookings.book(customer(), showtimeId, List.of(taken), now);
+		bookings.book(customer(), showtimeId, List.of(heldButNotRequested), now);
+
+		assertThatThrownBy(() -> bookings.book(customer(), showtimeId, List.of(free, taken), now))
+			.isInstanceOfSatisfying(SeatsTakenException.class, e -> assertThat(e.seatIds()).containsExactly(taken));
 	}
 
 	@Test
@@ -104,13 +149,13 @@ class BookingPersistenceTest {
 		Instant elevenMinutesAgo = now.minus(11, ChronoUnit.MINUTES);
 		Booking lapsed = bookings.book(first, showtimeId, List.of(seatId), elevenMinutesAgo);
 
-		assertThat(occupancy.statuses(showtimeId, now)).isEmpty();
+		assertThat(inventory.statuses(showtimeId, now)).isEmpty();
 		bookings.book(customer(), showtimeId, List.of(seatId), now);
 
 		// Asked as of when it was still live: only a deleted Booking is missing then.
 		assertThat(repository.findLivePending(first, elevenMinutesAgo)).as("lapsed Booking %s", lapsed.id())
 			.isEmpty();
-		assertThat(occupancy.statuses(showtimeId, now)).containsExactly(Map.entry(seatId, SeatStatus.HELD));
+		assertThat(inventory.statuses(showtimeId, now)).containsExactly(Map.entry(seatId, SeatStatus.HELD));
 	}
 
 	@Test
@@ -134,11 +179,11 @@ class BookingPersistenceTest {
 		UUID held = hall.seats().get(0).id();
 		UUID sold = hall.seats().get(1).id();
 		bookings.book(customer(), showtimeId, List.of(held), now);
-		repository.saveNew(new Booking(UUID.randomUUID(), customer(), showtimeId, BookingStatus.CONFIRMED,
+		assertThat(inventory.hold(new Booking(UUID.randomUUID(), customer(), showtimeId, BookingStatus.CONFIRMED,
 			now.minus(1, ChronoUnit.HOURS), now.minus(50, ChronoUnit.MINUTES), List.of(new BookedSeat(sold, 100_000))),
-			now);
+			now)).isInstanceOf(HoldOutcome.Held.class);
 
-		assertThat(occupancy.statuses(showtimeId, now))
+		assertThat(inventory.statuses(showtimeId, now))
 			.containsOnly(Map.entry(held, SeatStatus.HELD), Map.entry(sold, SeatStatus.SOLD));
 	}
 
@@ -166,15 +211,15 @@ class BookingPersistenceTest {
 		UUID customerId = customer();
 		Booking lapsed = bookings.book(customerId, showtimeId, List.of(hall.seats().get(1).id()),
 			now.minus(11, ChronoUnit.MINUTES));
-		assertThat(repository.confirm(lapsed.id(), now)).isFalse();
+		assertThat(inventory.pay(lapsed, now)).isEqualTo(new PayOutcome.NotPayable(BookingStatus.EXPIRED));
 
 		Booking live = bookings.book(customerId, showtimeId, List.of(seatId), now);
 
-		assertThat(repository.confirm(live.id(), now)).isTrue();
-		assertThat(repository.confirm(live.id(), now)).isFalse();
-		assertThat(repository.deletePending(live.id())).isFalse();
+		assertThat(inventory.pay(live, now)).isEqualTo(new PayOutcome.Paid(live.confirmed()));
+		assertThat(inventory.pay(live, now)).isEqualTo(new PayOutcome.AlreadyPaid(live.confirmed()));
+		assertThat(inventory.abandon(live)).isEqualTo(new AbandonOutcome.NotPending(BookingStatus.CONFIRMED));
 		assertThat(repository.findById(live.id())).get().extracting(Booking::status).isEqualTo(BookingStatus.CONFIRMED);
-		assertThat(occupancy.statuses(showtimeId, now)).containsExactly(Map.entry(seatId, SeatStatus.SOLD));
+		assertThat(inventory.statuses(showtimeId, now)).containsExactly(Map.entry(seatId, SeatStatus.SOLD));
 	}
 
 	@Test
@@ -184,10 +229,10 @@ class BookingPersistenceTest {
 		UUID seatId = hall.seats().get(0).id();
 		Booking abandoned = bookings.book(customer(), showtimeId, List.of(seatId), now);
 
-		assertThat(repository.deletePending(abandoned.id())).isTrue();
+		assertThat(inventory.abandon(abandoned)).isEqualTo(new AbandonOutcome.Abandoned());
 
 		assertThat(repository.findById(abandoned.id())).isEmpty();
-		assertThat(occupancy.statuses(showtimeId, now)).isEmpty();
+		assertThat(inventory.statuses(showtimeId, now)).isEmpty();
 		bookings.book(customer(), showtimeId, List.of(seatId), now);
 	}
 
@@ -198,7 +243,7 @@ class BookingPersistenceTest {
 		UUID customerId = customer();
 		Instant earlier = now.minus(20, ChronoUnit.MINUTES);
 		Booking paid = bookings.book(customerId, showtimeId, List.of(hall.seats().get(0).id()), earlier);
-		repository.confirm(paid.id(), earlier);
+		inventory.pay(paid, earlier);
 		Booking pending = bookings.book(customerId, showtimeId, List.of(hall.seats().get(1).id()), now);
 		bookings.book(customer(), showtimeId, List.of(hall.seats().get(2).id()), now);
 
@@ -218,7 +263,7 @@ class BookingPersistenceTest {
 
 		assertThat(repository.findById(live.id())).isEmpty();
 		assertThat(repository.findById(expired.id())).isEmpty();
-		assertThat(occupancy.statuses(showtimeId, now)).isEmpty();
+		assertThat(inventory.statuses(showtimeId, now)).isEmpty();
 	}
 
 	@Test
@@ -235,6 +280,22 @@ class BookingPersistenceTest {
 	}
 
 	@Test
+	void seatsOfARefundedBookingStaySoldWhetherOrNotItsHoldHasLapsed() {
+		Auditorium hall = auditorium();
+		UUID showtimeId = showtime(hall);
+		UUID seatId = hall.seats().get(0).id();
+		Booking paid = bookings.book(customer(), showtimeId, List.of(seatId), now);
+		bookings.pay(paid.customerId(), paid.id(), now);
+		showtimes.cancel(showtimeId, CancellationReason.EQUIPMENT_FAILURE, null, now);
+		Instant afterTheHold = paid.expiresAt();
+
+		// The same Seats the unique constraint still refuses to anyone else.
+		assertThat(inventory.statuses(showtimeId, now)).containsExactly(Map.entry(seatId, SeatStatus.SOLD));
+		assertThat(inventory.statuses(showtimeId, afterTheHold)).containsExactly(Map.entry(seatId, SeatStatus.SOLD));
+		assertThat(jpa.findTakenSeats(showtimeId, List.of(seatId), afterTheHold)).containsExactly(seatId);
+	}
+
+	@Test
 	void persistenceRefusesABookingOnACancelledShowtimeEvenWhenServiceGuardWasBypassed() {
 		Auditorium hall = auditorium();
 		UUID showtimeId = showtime(hall);
@@ -242,7 +303,7 @@ class BookingPersistenceTest {
 		Booking late = new Booking(UUID.randomUUID(), customer(), showtimeId, BookingStatus.PENDING, now,
 			now.plus(10, ChronoUnit.MINUTES), List.of(new BookedSeat(hall.seats().get(0).id(), 100_000)));
 
-		assertThatThrownBy(() -> repository.saveNew(late, now)).isInstanceOf(ConflictException.class);
+		assertThat(inventory.hold(late, now)).isEqualTo(new HoldOutcome.ShowtimeCancelled());
 		assertThat(repository.findById(late.id())).isEmpty();
 	}
 
@@ -291,6 +352,151 @@ class BookingPersistenceTest {
 				.map(Booking::status).toList();
 			assertThat(left).as("round %d", round).doesNotContain(BookingStatus.PENDING, BookingStatus.CONFIRMED);
 		}
+	}
+
+	@Test
+	void deadlockOnLapsedHoldRetrySucceedsWhenContentionRollsBack() throws Exception {
+		Auditorium hall = auditorium();
+		UUID showtimeId = showtime(hall);
+		UUID seatId = hall.seats().get(0).id();
+		UUID customer1 = customer();
+		UUID customer2 = customer();
+
+		// 1. Create a lapsed hold booking P
+		Instant elevenMinutesAgo = now.minus(11, ChronoUnit.MINUTES);
+		Booking lapsed = bookings.book(customer1, showtimeId, List.of(seatId), elevenMinutesAgo);
+
+		// 2. Prepare fresh booking for customer2 requesting the same seat
+		Booking fresh = new Booking(UUID.randomUUID(), customer2, showtimeId, BookingStatus.PENDING,
+			now, now.plus(10, ChronoUnit.MINUTES), List.of(new BookedSeat(seatId, 100_000)));
+
+		try (Connection conn = dataSource.getConnection()) {
+			conn.setAutoCommit(false);
+			try (Statement s = conn.createStatement()) {
+				s.execute("SET deadlock_timeout = '10s'");
+			}
+
+			// 3. Transaction T locks lapsed booking P
+			try (PreparedStatement ps = conn.prepareStatement("SELECT id FROM booking WHERE id = ? FOR UPDATE")) {
+				ps.setObject(1, lapsed.id());
+				try (ResultSet rs = ps.executeQuery()) {
+					assertThat(rs.next()).isTrue();
+				}
+			}
+
+			// 4. Launch adapter hold H in background
+			CompletableFuture<HoldOutcome> holdFuture = CompletableFuture.supplyAsync(() -> inventory.hold(fresh, now));
+
+			// 5. Wait until H is blocked on deleting P
+			waitForBlockedLock(conn);
+
+			// 6. T runs UPDATE showtime, creating deadlock cycle
+			try (PreparedStatement ps = conn.prepareStatement("UPDATE showtime SET base_price = base_price WHERE id = ?")) {
+				ps.setObject(1, showtimeId);
+				ps.executeUpdate();
+			}
+
+			// 7. Deadlock victim (H) aborted 1st attempt and unblocked T. Now T rolls back.
+			conn.rollback();
+
+			// 8. H retries in second transaction and succeeds
+			HoldOutcome outcome = holdFuture.get(10, TimeUnit.SECONDS);
+			assertThat(outcome).isInstanceOf(HoldOutcome.Held.class);
+		}
+	}
+
+	@Test
+	void doubleDeadlockReturnsBusyOutcome() throws Exception {
+		Auditorium hall = auditorium();
+		UUID showtimeId = showtime(hall);
+		UUID seatA = hall.seats().get(0).id();
+		UUID seatB = hall.seats().get(1).id();
+		UUID customer1 = customer();
+		UUID customer2 = customer();
+		UUID customer3 = customer();
+
+		// 1. Create lapsed hold booking P1 on seatA and P2 on seatB
+		Instant elevenMinutesAgo = now.minus(11, ChronoUnit.MINUTES);
+		Booking lapsed1 = bookings.book(customer1, showtimeId, List.of(seatA), elevenMinutesAgo);
+		Booking lapsed2 = bookings.book(customer2, showtimeId, List.of(seatB), elevenMinutesAgo);
+
+		// 2. Prepare fresh booking for customer3 requesting both seats [seatA, seatB]
+		Booking fresh = new Booking(UUID.randomUUID(), customer3, showtimeId, BookingStatus.PENDING,
+			now, now.plus(10, ChronoUnit.MINUTES), List.of(new BookedSeat(seatA, 100_000), new BookedSeat(seatB, 100_000)));
+
+		try (Connection conn1 = dataSource.getConnection();
+			 Connection conn2 = dataSource.getConnection()) {
+			conn1.setAutoCommit(false);
+			conn2.setAutoCommit(false);
+
+			try (Statement s = conn1.createStatement()) {
+				s.execute("SET deadlock_timeout = '10s'");
+			}
+			try (Statement s = conn2.createStatement()) {
+				s.execute("SET deadlock_timeout = '10s'");
+			}
+
+			// 3. Transaction T1 locks lapsed booking P1
+			try (PreparedStatement ps = conn1.prepareStatement("SELECT id FROM booking WHERE id = ? FOR UPDATE")) {
+				ps.setObject(1, lapsed1.id());
+				try (ResultSet rs = ps.executeQuery()) {
+					assertThat(rs.next()).isTrue();
+				}
+			}
+
+			// 4. Transaction T2 locks lapsed booking P2
+			try (PreparedStatement ps = conn2.prepareStatement("SELECT id FROM booking WHERE id = ? FOR UPDATE")) {
+				ps.setObject(1, lapsed2.id());
+				try (ResultSet rs = ps.executeQuery()) {
+					assertThat(rs.next()).isTrue();
+				}
+			}
+
+			// 5. Launch adapter hold H in background
+			CompletableFuture<HoldOutcome> holdFuture = CompletableFuture.supplyAsync(() -> inventory.hold(fresh, now));
+
+			// 6. Wait until H is blocked on deleting P1
+			waitForBlockedLock(conn1);
+
+			// 7. T1 runs UPDATE showtime, creating Deadlock #1
+			try (PreparedStatement ps = conn1.prepareStatement("UPDATE showtime SET base_price = base_price WHERE id = ?")) {
+				ps.setObject(1, showtimeId);
+				ps.executeUpdate();
+			}
+
+			// Deadlock #1 occurs; H aborts 1st attempt. T1 rolls back, freeing P1.
+			conn1.rollback();
+
+			// 8. Wait until H retries and blocks on deleting P2 (held by T2)
+			waitForBlockedLock(conn2);
+
+			// 9. T2 runs UPDATE showtime, creating Deadlock #2
+			try (PreparedStatement ps = conn2.prepareStatement("UPDATE showtime SET base_price = base_price WHERE id = ?")) {
+				ps.setObject(1, showtimeId);
+				ps.executeUpdate();
+			}
+
+			// Deadlock #2 occurs; H aborts 2nd attempt and returns Busy. T2 rolls back.
+			conn2.rollback();
+
+			// 10. H caught second deadlock and returned Busy
+			HoldOutcome outcome = holdFuture.get(10, TimeUnit.SECONDS);
+			assertThat(outcome).isInstanceOf(HoldOutcome.Busy.class);
+		}
+	}
+
+	private void waitForBlockedLock(Connection conn) throws Exception {
+		long deadline = System.currentTimeMillis() + 5000;
+		while (System.currentTimeMillis() < deadline) {
+			try (Statement s = conn.createStatement();
+				 ResultSet rs = s.executeQuery("SELECT count(*) FROM pg_locks WHERE NOT granted")) {
+				if (rs.next() && rs.getInt(1) > 0) {
+					return;
+				}
+			}
+			Thread.sleep(20);
+		}
+		throw new AssertionError("Timed out waiting for lock contention in pg_locks");
 	}
 
 	private UUID customer() {

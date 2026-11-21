@@ -1,9 +1,13 @@
 package vn.edu.uet.cinema.config;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.ApplicationRunner;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.context.annotation.Primary;
 import vn.edu.uet.cinema.business.account.AccountRepository;
 import vn.edu.uet.cinema.business.account.AccountService;
 import vn.edu.uet.cinema.business.account.PasswordHasher;
@@ -15,13 +19,16 @@ import vn.edu.uet.cinema.business.cinema.CinemaRepository;
 import vn.edu.uet.cinema.business.cinema.CinemaService;
 import vn.edu.uet.cinema.business.movie.MovieRepository;
 import vn.edu.uet.cinema.business.movie.MovieService;
-import vn.edu.uet.cinema.business.showtime.SeatOccupancyReader;
 import vn.edu.uet.cinema.business.showtime.ShowtimeRepository;
 import vn.edu.uet.cinema.business.showtime.ShowtimeService;
+import vn.edu.uet.cinema.business.showtime.inventory.SeatInventory;
+import vn.edu.uet.cinema.business.showtime.inventory.SingleWriterSeatInventory;
 
 /** Business services carry no Spring annotations (ADR 0001), so they are wired here. */
 @Configuration
 class BusinessConfig {
+
+	private static final Logger log = LoggerFactory.getLogger(BusinessConfig.class);
 
 	@Bean
 	AccountService accountService(AccountRepository accounts, PasswordHasher passwordHasher) {
@@ -45,14 +52,26 @@ class BusinessConfig {
 	}
 
 	@Bean
-	ShowtimeService showtimeService(MovieService movies, AuditoriumService auditoriums, ShowtimeRepository showtimes,
-		SeatOccupancyReader occupancy) {
-		return new ShowtimeService(movies, auditoriums, showtimes, occupancy);
+	@Primary
+	SeatInventory seatInventory(@Qualifier("jpaSeatInventory") SeatInventory databaseInventory,
+		@Value("${app.seat-inventory.strategy:unique}") String strategyValue) {
+		SeatInventoryStrategy strategy = SeatInventoryStrategy.from(strategyValue);
+		log.info("Configured seat inventory strategy: {}", strategy.value());
+		if (strategy == SeatInventoryStrategy.SINGLE_WRITER) {
+			return new SingleWriterSeatInventory(databaseInventory);
+		}
+		return databaseInventory;
 	}
 
 	@Bean
-	BookingService bookingService(ShowtimeService showtimes, BookingRepository bookings) {
-		return new BookingService(showtimes, bookings);
+	ShowtimeService showtimeService(MovieService movies, AuditoriumService auditoriums, ShowtimeRepository showtimes,
+		SeatInventory inventory) {
+		return new ShowtimeService(movies, auditoriums, showtimes, inventory);
+	}
+
+	@Bean
+	BookingService bookingService(ShowtimeService showtimes, BookingRepository bookings, SeatInventory inventory) {
+		return new BookingService(showtimes, bookings, inventory);
 	}
 
 	/** Admins are never self-registered: the one Admin comes from ADMIN_EMAIL / ADMIN_PASSWORD. */

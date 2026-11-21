@@ -2,6 +2,8 @@
 
 [English](0005-showtime-cancellation-in-one-adapter-transaction.md) | Tiếng Việt
 
+Được sửa đổi bởi [ADR 0009](0009-seat-inventory-as-one-module.vi.md): transaction giờ nằm trong `SeatInventory.cancel`, vẫn các câu lệnh đó và đúng thứ tự đó.
+
 Hủy một suất chiếu làm thay đổi cả suất chiếu lẫn mọi đơn đặt vé của nó: các đơn Pending bị xóa, các đơn Confirmed chuyển sang Refunded. Việc này phá quy tắc mỗi use case chỉ lưu đúng một aggregate, và chúng tôi cố ý làm vậy: nếu một suất chiếu đã Cancelled mà vẫn còn một đơn Confirmed, nghĩa là có khách hàng đã trả tiền cho một suất chiếu sẽ không diễn ra và chưa bao giờ được hoàn tiền. Vì vậy `ShowtimeRepository.cancel` làm tất cả trong một transaction ở persistence adapter, giống cách `deleteById` đã làm khi xóa các Hold hết hạn. Business layer vẫn không có transaction nào: service kiểm tra điều kiện, rồi gọi đúng một method của repository.
 
 Các câu lệnh chạy theo thứ tự sau, và chính thứ tự này khiến việc thanh toán đồng thời được an toàn:

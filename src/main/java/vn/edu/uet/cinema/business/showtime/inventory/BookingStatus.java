@@ -1,4 +1,4 @@
-package vn.edu.uet.cinema.business.booking;
+package vn.edu.uet.cinema.business.showtime.inventory;
 
 /**
  * PENDING, CONFIRMED and REFUNDED are stored. EXPIRED is a PENDING Booking past its {@code expiresAt}, never stored.

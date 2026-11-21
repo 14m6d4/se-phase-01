@@ -65,6 +65,10 @@ A paid Booking. The Customer can never cancel it or get a refund; a Customer who
 A Confirmed Booking whose Showtime was Cancelled; its full price is returned. Final. Never triggered by, or on behalf of, a Customer.
 _Avoid_: Cancelled (a Customer never cancels a Booking)
 
+**Seat Inventory**:
+Which Seats of a Showtime are free, held or sold, and every change to that: taking a Hold, paying, abandoning, and cancelling or deleting the Showtime. One module owns all of it. A Seat of a Confirmed or Refunded Booking is sold; a Seat under a Hold that has not lapsed is held.
+_Avoid_: Seat map (one view of it), stock
+
 ### People
 
 **Account**:

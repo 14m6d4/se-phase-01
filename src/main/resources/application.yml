@@ -14,6 +14,11 @@ spring:
   mvc:
     problemdetails:
       enabled: true
+  # No endpoint accepts uploads. Left on, the multipart resolver parses any multipart/* request before a controller
+  # runs and a missing boundary surfaces as a 500 (B5).
+  servlet:
+    multipart:
+      enabled: false
 
 # Only non-secret values have defaults. DB_PASSWORD, ADMIN_PASSWORD and JWT_SECRET must be set:
 # without the last two the app refuses to start, without DB_PASSWORD it fails to connect to the database.
@@ -24,6 +29,8 @@ app:
     password: ${ADMIN_PASSWORD}
   jwt:
     secret: ${JWT_SECRET}
+  seat-inventory:
+    strategy: ${SEAT_INVENTORY_STRATEGY:unique}
 
 management:
   endpoints:

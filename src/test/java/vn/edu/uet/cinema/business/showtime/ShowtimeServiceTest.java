@@ -8,6 +8,7 @@ import java.time.LocalDate;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.Test;
 import vn.edu.uet.cinema.business.ConflictException;
 import vn.edu.uet.cinema.business.NotFoundException;
@@ -16,17 +17,19 @@ import vn.edu.uet.cinema.business.auditorium.AuditoriumService;
 import vn.edu.uet.cinema.business.auditorium.InMemoryAuditoriums;
 import vn.edu.uet.cinema.business.auditorium.Seat;
 import vn.edu.uet.cinema.business.auditorium.SeatType;
-import vn.edu.uet.cinema.business.booking.BookedSeat;
-import vn.edu.uet.cinema.business.booking.Booking;
-import vn.edu.uet.cinema.business.booking.BookingStatus;
-import vn.edu.uet.cinema.business.booking.InMemoryBookings;
-import vn.edu.uet.cinema.business.booking.InMemorySeatOccupancy;
 import vn.edu.uet.cinema.business.cinema.CinemaService;
 import vn.edu.uet.cinema.business.cinema.InMemoryCinemas;
 import vn.edu.uet.cinema.business.movie.AgeRating;
 import vn.edu.uet.cinema.business.movie.InMemoryMovies;
 import vn.edu.uet.cinema.business.movie.Movie;
 import vn.edu.uet.cinema.business.movie.MovieService;
+import vn.edu.uet.cinema.business.showtime.inventory.BookedSeat;
+import vn.edu.uet.cinema.business.showtime.inventory.Booking;
+import vn.edu.uet.cinema.business.showtime.inventory.BookingStatus;
+import vn.edu.uet.cinema.business.showtime.inventory.Cancellation;
+import vn.edu.uet.cinema.business.showtime.inventory.CancellationReason;
+import vn.edu.uet.cinema.business.showtime.inventory.InMemorySeatInventory;
+import vn.edu.uet.cinema.business.showtime.inventory.SeatStatus;
 
 class ShowtimeServiceTest {
 
@@ -34,12 +37,12 @@ class ShowtimeServiceTest {
 
 	private final InMemoryAuditoriums auditoriumRows = new InMemoryAuditoriums();
 	private final InMemoryShowtimes repository = new InMemoryShowtimes(auditoriumRows);
+	private final InMemorySeatInventory bookings = new InMemorySeatInventory(repository);
 	private final InMemoryMovies movieRows = new InMemoryMovies();
 	private final MovieService movies = new MovieService(movieRows, repository);
 	private final AuditoriumService auditoriums = new AuditoriumService(
 		new CinemaService(new InMemoryCinemas(), auditoriumRows), auditoriumRows, repository);
-	private final ShowtimeService service = new ShowtimeService(movies, auditoriums, repository,
-		new InMemorySeatOccupancy(new InMemoryBookings(repository)));
+	private final ShowtimeService service = new ShowtimeService(movies, auditoriums, repository, bookings);
 
 	private final UUID auditoriumId = auditoriumRows.save(new Auditorium(UUID.randomUUID(), UUID.randomUUID(), "Hall",
 		1, 1, List.of())).id();
@@ -48,6 +51,47 @@ class ShowtimeServiceTest {
 	void rejectsNonPositiveBasePrice() {
 		assertThatThrownBy(() -> service.create(UUID.randomUUID(), UUID.randomUUID(), Instant.now(), 0))
 			.isInstanceOf(InvalidShowtimeException.class);
+	}
+
+	@Test
+	void rejectsBasePriceAboveTheMaximumAndAcceptsTheMaximum() {
+		UUID movieId = movie(120);
+
+		assertThatThrownBy(() -> service.create(movieId, auditoriumId, STARTS_AT, SeatPricing.MAX_BASE_PRICE + 1))
+			.isInstanceOf(InvalidShowtimeException.class);
+		assertThat(service.create(movieId, auditoriumId, STARTS_AT, SeatPricing.MAX_BASE_PRICE).basePrice())
+			.isEqualTo(SeatPricing.MAX_BASE_PRICE);
+	}
+
+	@Test
+	void pricedSeatsReadEachAuditoriumsLayoutOnce() {
+		Showtime first = withSeats();
+		Showtime sameHall = repository.save(new Showtime(UUID.randomUUID(), UUID.randomUUID(), first.auditoriumId(),
+			STARTS_AT.plusSeconds(86_400), STARTS_AT.plusSeconds(86_400 + 8_100), 50_000L));
+		Seat other = new Seat(UUID.randomUUID(), "A", 1, SeatType.STANDARD);
+		Auditorium otherHall = auditoriumRows.save(new Auditorium(UUID.randomUUID(), UUID.randomUUID(), "Other", 1, 1,
+			List.of(other)));
+		Showtime elsewhere = repository.save(new Showtime(UUID.randomUUID(), UUID.randomUUID(), otherHall.id(),
+			STARTS_AT, STARTS_AT.plusSeconds(8_100), 100_000L));
+		AtomicInteger reads = new AtomicInteger();
+		AuditoriumService counting = new AuditoriumService(new CinemaService(new InMemoryCinemas(), auditoriumRows),
+			auditoriumRows, repository) {
+			@Override
+			public Auditorium get(UUID id) {
+				reads.incrementAndGet();
+				return super.get(id);
+			}
+		};
+		ShowtimeService cached = new ShowtimeService(movies, counting, repository, bookings);
+
+		cached.pricedSeats(first);
+		Map<UUID, PricedSeat> again = cached.pricedSeats(sameHall);
+		Map<UUID, PricedSeat> otherPrices = cached.pricedSeats(elsewhere);
+
+		assertThat(again.keySet()).containsExactly(standard.id(), vip.id(), couple.id(), lapsed.id());
+		assertThat(again.get(standard.id()).price()).isEqualTo(50_000L);
+		assertThat(otherPrices).containsOnlyKeys(other.id());
+		assertThat(reads).hasValue(2);
 	}
 
 	@Test
@@ -95,8 +139,8 @@ class ShowtimeServiceTest {
 			scheduled.startsAt(), scheduled.endsAt(), scheduled.basePrice(), ShowtimeStatus.CANCELLED,
 			new Cancellation(CancellationReason.EMERGENCY, "Fire alarm")));
 		assertThat(service.get(scheduled.id())).isEqualTo(cancelled);
-		assertThat(repository.bookingRows).doesNotContainKey(pending.id());
-		assertThat(repository.bookingRows.get(confirmed.id()).status()).isEqualTo(BookingStatus.REFUNDED);
+		assertThat(bookings.rows()).doesNotContainKey(pending.id());
+		assertThat(bookings.rows().get(confirmed.id()).status()).isEqualTo(BookingStatus.REFUNDED);
 	}
 
 	@Test
@@ -153,7 +197,7 @@ class ShowtimeServiceTest {
 		service.delete(lapsedOnly.id(), now);
 
 		assertThatThrownBy(() -> service.get(lapsedOnly.id())).isInstanceOf(NotFoundException.class);
-		assertThat(repository.bookingRows).doesNotContainKey(lapsed.id());
+		assertThat(bookings.rows()).doesNotContainKey(lapsed.id());
 		assertThatThrownBy(() -> service.delete(held.id(), now)).isInstanceOf(ConflictException.class);
 		assertThat(service.get(held.id())).isEqualTo(held);
 	}
@@ -209,7 +253,7 @@ class ShowtimeServiceTest {
 	private void booking(Showtime showtime, BookingStatus status, Instant expiresAt, Seat seat) {
 		Booking booking = new Booking(UUID.randomUUID(), UUID.randomUUID(), showtime.id(), status,
 			expiresAt.minusSeconds(600), expiresAt, List.of(new BookedSeat(seat.id(), 100_000)));
-		repository.bookingRows.put(booking.id(), booking);
+		bookings.store(booking);
 	}
 
 	private UUID movie(int durationMinutes) {
@@ -225,7 +269,7 @@ class ShowtimeServiceTest {
 	private Booking booking(Showtime showtime, BookingStatus status, Instant expiresAt) {
 		Booking booking = new Booking(UUID.randomUUID(), UUID.randomUUID(), showtime.id(), status,
 			expiresAt.minusSeconds(600), expiresAt, List.of(new BookedSeat(UUID.randomUUID(), 100_000)));
-		repository.bookingRows.put(booking.id(), booking);
+		bookings.store(booking);
 		return booking;
 	}
 }

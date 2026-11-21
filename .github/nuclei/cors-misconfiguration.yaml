@@ -1,0 +1,19 @@
+id: cors-origin-reflection
+info:
+  name: CORS Arbitrary Origin Reflection
+  author: security-ci
+  severity: high
+  description: Checks if the server reflects arbitrary origin in Access-Control-Allow-Origin with credentials.
+http:
+  - method: GET
+    path:
+      - "{{BaseURL}}/api/movies"
+    headers:
+      Origin: "https://evil-attacker.example.com"
+    matchers-condition: and
+    matchers:
+      - type: word
+        part: header
+        words:
+          - "Access-Control-Allow-Origin: https://evil-attacker.example.com"
+          - "Access-Control-Allow-Credentials: true"

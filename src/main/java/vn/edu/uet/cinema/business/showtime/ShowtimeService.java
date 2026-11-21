@@ -5,10 +5,18 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
 import vn.edu.uet.cinema.business.ConflictException;
 import vn.edu.uet.cinema.business.NotFoundException;
 import vn.edu.uet.cinema.business.auditorium.AuditoriumService;
+import vn.edu.uet.cinema.business.auditorium.Seat;
 import vn.edu.uet.cinema.business.movie.MovieService;
+import vn.edu.uet.cinema.business.showtime.inventory.CancelOutcome;
+import vn.edu.uet.cinema.business.showtime.inventory.Cancellation;
+import vn.edu.uet.cinema.business.showtime.inventory.CancellationReason;
+import vn.edu.uet.cinema.business.showtime.inventory.DeleteOutcome;
+import vn.edu.uet.cinema.business.showtime.inventory.SeatInventory;
+import vn.edu.uet.cinema.business.showtime.inventory.SeatStatus;
 
 public class ShowtimeService {
 
@@ -17,19 +25,23 @@ public class ShowtimeService {
 	private final MovieService movies;
 	private final AuditoriumService auditoriums;
 	private final ShowtimeRepository showtimes;
-	private final SeatOccupancyReader occupancy;
+	private final SeatInventory inventory;
+	private final Map<UUID, List<Seat>> layouts = new ConcurrentHashMap<>();
 
 	public ShowtimeService(MovieService movies, AuditoriumService auditoriums, ShowtimeRepository showtimes,
-		SeatOccupancyReader occupancy) {
+		SeatInventory inventory) {
 		this.movies = movies;
 		this.auditoriums = auditoriums;
 		this.showtimes = showtimes;
-		this.occupancy = occupancy;
+		this.inventory = inventory;
 	}
 
 	public Showtime create(UUID movieId, UUID auditoriumId, Instant startsAt, long basePrice) {
 		if (basePrice <= 0) {
 			throw new InvalidShowtimeException("Base price must be positive");
+		}
+		if (basePrice > SeatPricing.MAX_BASE_PRICE) {
+			throw new InvalidShowtimeException("Base price must be at most " + SeatPricing.MAX_BASE_PRICE);
 		}
 		int durationMinutes = movies.get(movieId).durationMinutes();
 		auditoriums.get(auditoriumId);
@@ -56,15 +68,26 @@ public class ShowtimeService {
 	/** The Seats of the Showtime's Auditorium in layout order, each priced from its Seat Type, keyed by Seat id. */
 	public Map<UUID, PricedSeat> pricedSeats(Showtime showtime) {
 		Map<UUID, PricedSeat> priced = new LinkedHashMap<>();
-		auditoriums.get(showtime.auditoriumId()).seats().forEach(seat -> priced.put(seat.id(),
+		layout(showtime.auditoriumId()).forEach(seat -> priced.put(seat.id(),
 			new PricedSeat(seat, SeatPricing.price(seat.type(), showtime.basePrice()))));
 		return priced;
+	}
+
+	/**
+	 * An Auditorium's Seats, read once (ADR 0008). Auditoriums are not edited, and one with a Showtime cannot be
+	 * deleted (ADR 0006), so the layout behind a Showtime is fixed on every instance. A change that lets an
+	 * Auditorium's Seats change must evict it here.
+	 */
+	private List<Seat> layout(UUID auditoriumId) {
+		// get() never locks; computeIfAbsent() can lock its bin even for a key that is already there.
+		List<Seat> seats = layouts.get(auditoriumId);
+		return seats != null ? seats : layouts.computeIfAbsent(auditoriumId, id -> auditoriums.get(id).seats());
 	}
 
 	/** Every Seat of a Scheduled Showtime with its price and status at {@code now}. */
 	public List<SeatMapEntry> seatMap(UUID id, Instant now) {
 		Showtime showtime = getScheduled(id);
-		Map<UUID, SeatStatus> statuses = occupancy.statuses(id, now);
+		Map<UUID, SeatStatus> statuses = inventory.statuses(id, now);
 		return pricedSeats(showtime).values().stream().map(p -> new SeatMapEntry(p,
 			statuses.getOrDefault(p.seat().id(), SeatStatus.AVAILABLE))).toList();
 	}
@@ -82,15 +105,23 @@ public class ShowtimeService {
 		if (given != null && given.length() > MAX_NOTE_LENGTH) {
 			throw new InvalidShowtimeException("A cancellation note has at most " + MAX_NOTE_LENGTH + " characters");
 		}
-		get(id);
-		if (!showtimes.cancel(id, new Cancellation(reason, given), now)) {
-			throw new ConflictException("Showtime is already Cancelled or has ended");
-		}
-		return get(id);
+		Showtime showtime = get(id);
+		Cancellation cancellation = new Cancellation(reason, given);
+		return switch (inventory.cancel(id, cancellation, now)) {
+			case CancelOutcome.Cancelled cancelled -> new Showtime(showtime.id(), showtime.movieId(),
+				showtime.auditoriumId(), showtime.startsAt(), showtime.endsAt(), showtime.basePrice(),
+				ShowtimeStatus.CANCELLED, cancellation);
+			case CancelOutcome.NotCancellable notCancellable ->
+				throw new ConflictException("Showtime is already Cancelled or has ended");
+		};
 	}
 
 	public void delete(UUID id, Instant now) {
 		get(id);
-		showtimes.deleteById(id, now);
+		switch (inventory.delete(id, now)) {
+			case DeleteOutcome.Deleted deleted -> {
+			}
+			case DeleteOutcome.HasBookings hasBookings -> throw new ConflictException("Showtime has Bookings");
+		}
 	}
 }
