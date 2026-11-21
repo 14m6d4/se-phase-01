@@ -40,6 +40,10 @@ class SeatRowsClaim implements Claim {
 				// 2. Delete lapsed holds on requested seats and customer's own pending booking
 				jpa.deleteLapsedHolds(booking.customerId(), booking.showtimeId(), seatIds, now);
 
+				if (jpa.findLivePending(booking.customerId(), now).isPresent()) {
+					return new HoldOutcome.CustomerHasPending();
+				}
+
 				// 3. Execute atomic upsert claim in ascending seat_id order
 				List<UUID> claimed = jpa.claimSeats(booking.showtimeId(), seatIdsArray, booking.id());
 
@@ -57,12 +61,12 @@ class SeatRowsClaim implements Claim {
 		} catch (DataIntegrityViolationException e) {
 			// Drift fallback: if seats were booked under another strategy and have no showtime_seat row,
 			// the claim succeeds but booked_seat UNIQUE constraint catches the conflict.
+			if (hasConstraint(e, "uq_booking_customer_pending")) {
+				return new HoldOutcome.CustomerHasPending();
+			}
 			if (hasConstraint(e, "uq_booked_seat_showtime_seat")) {
 				Set<UUID> taken = Set.copyOf(jpa.findTakenSeats(booking.showtimeId(), seatIds, now));
 				return new HoldOutcome.SeatsTaken(seatIds.stream().filter(taken::contains).toList());
-			}
-			if (hasConstraint(e, "uq_booking_customer_pending")) {
-				return new HoldOutcome.CustomerHasPending();
 			}
 			if (hasConstraint(e, "fk_booking_showtime")) {
 				return new HoldOutcome.ShowtimeGone();
