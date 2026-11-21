@@ -70,7 +70,9 @@ class RateLimitingFilterTest {
 			.contains("\"title\":\"Too Many Requests\"");
 
 		// Verify chain was only invoked for the first 2 allowed requests
-		verify(chain, times(2)).doFilter(req1, res1);
+		verify(chain, times(1)).doFilter(req1, res1);
+		verify(chain, times(1)).doFilter(req2, res2);
+		verify(chain, never()).doFilter(req3, res3);
 	}
 
 	@Test
