@@ -115,6 +115,19 @@ class MovieApiTest {
 	}
 
 	@Test
+	void nulCharacterInATextFieldIsBadRequestNotServerError() throws Exception {
+		String admin = token();
+		// PostgreSQL stores no NUL in text, so it must be refused before the insert (B8).
+		String problem = mvc.perform(post("/api/movies").header("Authorization", "Bearer " + admin)
+				.contentType(MediaType.APPLICATION_JSON)
+				.content(movieJson("NUL in poster", "P").replace("https://example.com/movie.jpg", "\\u0000x")))
+			.andExpect(status().isBadRequest())
+			.andExpect(content().contentType(MediaType.APPLICATION_PROBLEM_JSON))
+			.andReturn().getResponse().getContentAsString();
+		assertThat((String) JsonPath.read(problem, "$.errors[0].field")).isEqualTo("posterUrl");
+	}
+
+	@Test
 	void movieWritesRequireAuthenticationAndAdminRole() throws Exception {
 		mvc.perform(post("/api/movies").contentType(MediaType.APPLICATION_JSON)
 				.content(movieJson("Unauthenticated movie", "P")))

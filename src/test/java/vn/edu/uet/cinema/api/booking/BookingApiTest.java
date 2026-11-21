@@ -31,8 +31,8 @@ import vn.edu.uet.cinema.business.booking.BookingService;
 import vn.edu.uet.cinema.business.cinema.CinemaService;
 import vn.edu.uet.cinema.business.movie.AgeRating;
 import vn.edu.uet.cinema.business.movie.MovieService;
-import vn.edu.uet.cinema.business.showtime.CancellationReason;
 import vn.edu.uet.cinema.business.showtime.ShowtimeService;
+import vn.edu.uet.cinema.business.showtime.inventory.CancellationReason;
 
 @SpringBootTest
 @AutoConfigureMockMvc

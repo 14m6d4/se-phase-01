@@ -11,7 +11,6 @@ import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Repository;
 import org.springframework.transaction.annotation.Transactional;
 import vn.edu.uet.cinema.business.ConflictException;
-import vn.edu.uet.cinema.business.showtime.Cancellation;
 import vn.edu.uet.cinema.business.showtime.Showtime;
 import vn.edu.uet.cinema.business.showtime.ShowtimeRepository;
 
@@ -46,33 +45,6 @@ class JpaShowtimeRepository implements ShowtimeRepository {
 	@Override
 	public Optional<Showtime> findById(UUID id) {
 		return jpa.findById(id).map(ShowtimeEntity::toShowtime);
-	}
-
-	@Override
-	@Transactional
-	public void deleteById(UUID id, Instant now) {
-		try {
-			jpa.deleteLapsedHolds(id, now);
-			jpa.deleteById(id);
-			jpa.flush();
-		} catch (DataIntegrityViolationException e) {
-			if (hasConstraint(e, "fk_booking_showtime")) {
-				throw new ConflictException("Showtime has Bookings");
-			}
-			throw e;
-		}
-	}
-
-	@Override
-	@Transactional
-	public boolean cancel(UUID id, Cancellation cancellation, Instant now) {
-		if (jpa.cancel(id, cancellation.reason().name(), cancellation.note(), now) == 0) {
-			return false;
-		}
-		// Delete before refunding: a payment that commits in between is then refunded, never left Confirmed.
-		jpa.deletePendingBookings(id);
-		jpa.refundConfirmedBookings(id);
-		return true;
 	}
 
 	@Override

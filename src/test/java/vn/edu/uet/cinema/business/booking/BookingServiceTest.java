@@ -20,11 +20,19 @@ import vn.edu.uet.cinema.business.cinema.CinemaService;
 import vn.edu.uet.cinema.business.cinema.InMemoryCinemas;
 import vn.edu.uet.cinema.business.movie.InMemoryMovies;
 import vn.edu.uet.cinema.business.movie.MovieService;
-import vn.edu.uet.cinema.business.showtime.CancellationReason;
 import vn.edu.uet.cinema.business.showtime.InMemoryShowtimes;
-import vn.edu.uet.cinema.business.showtime.SeatStatus;
 import vn.edu.uet.cinema.business.showtime.Showtime;
 import vn.edu.uet.cinema.business.showtime.ShowtimeService;
+import vn.edu.uet.cinema.business.showtime.inventory.AbandonOutcome;
+import vn.edu.uet.cinema.business.showtime.inventory.BookedSeat;
+import vn.edu.uet.cinema.business.showtime.inventory.Booking;
+import vn.edu.uet.cinema.business.showtime.inventory.BookingStatus;
+import vn.edu.uet.cinema.business.showtime.inventory.CancellationReason;
+import vn.edu.uet.cinema.business.showtime.inventory.HoldOutcome;
+import vn.edu.uet.cinema.business.showtime.inventory.InMemorySeatInventory;
+import vn.edu.uet.cinema.business.showtime.inventory.PayOutcome;
+import vn.edu.uet.cinema.business.showtime.inventory.SeatInventory;
+import vn.edu.uet.cinema.business.showtime.inventory.SeatStatus;
 
 class BookingServiceTest {
 
@@ -32,12 +40,12 @@ class BookingServiceTest {
 
 	private final InMemoryAuditoriums auditoriumRows = new InMemoryAuditoriums();
 	private final InMemoryShowtimes showtimeRows = new InMemoryShowtimes(auditoriumRows);
-	private final InMemoryBookings repository = new InMemoryBookings(showtimeRows);
+	private final InMemorySeatInventory repository = new InMemorySeatInventory(showtimeRows);
 	private final AuditoriumService auditoriums = new AuditoriumService(
 		new CinemaService(new InMemoryCinemas(), auditoriumRows), auditoriumRows, showtimeRows);
 	private final ShowtimeService showtimes = new ShowtimeService(new MovieService(new InMemoryMovies(), showtimeRows),
-		auditoriums, showtimeRows, new InMemorySeatOccupancy(repository));
-	private final BookingService service = new BookingService(showtimes, repository);
+		auditoriums, showtimeRows, repository);
+	private final BookingService service = new BookingService(showtimes, repository, repository);
 
 	private final UUID customerId = UUID.randomUUID();
 	private final Seat standard = new Seat(UUID.randomUUID(), "A", 1, SeatType.STANDARD);
@@ -153,7 +161,7 @@ class BookingServiceTest {
 		Booking held = service.book(UUID.randomUUID(), showtime.id(), List.of(standard.id()), NOW);
 		Booking sold = service.book(UUID.randomUUID(), showtime.id(), List.of(vip.id()), NOW);
 		service.pay(sold.customerId(), sold.id(), NOW);
-		InMemorySeatOccupancy occupancy = new InMemorySeatOccupancy(repository);
+		SeatInventory occupancy = repository;
 
 		assertThat(occupancy.statuses(showtime.id(), NOW))
 			.isEqualTo(Map.of(standard.id(), SeatStatus.HELD, vip.id(), SeatStatus.SOLD));
@@ -177,6 +185,24 @@ class BookingServiceTest {
 		assertThat(booking.statusAt(NOW.minusSeconds(1))).isEqualTo(BookingStatus.PENDING);
 		assertThat(booking.statusAt(NOW)).isEqualTo(BookingStatus.EXPIRED);
 		assertThat(stored(BookingStatus.CONFIRMED, NOW).statusAt(NOW)).isEqualTo(BookingStatus.CONFIRMED);
+	}
+
+	@Test
+	void liveHoldsConfirmedAndRefundedBookingsOccupyTheirSeatsButLapsedHoldsDoNot() {
+		assertThat(stored(BookingStatus.PENDING, NOW.plusSeconds(1)).occupiesSeatsAt(NOW)).isTrue();
+		assertThat(stored(BookingStatus.PENDING, NOW).occupiesSeatsAt(NOW)).isFalse();
+		assertThat(stored(BookingStatus.CONFIRMED, NOW).occupiesSeatsAt(NOW)).isTrue();
+		assertThat(stored(BookingStatus.REFUNDED, NOW).occupiesSeatsAt(NOW)).isTrue();
+	}
+
+	@Test
+	void seatsOfARefundedBookingStaySold() {
+		Booking refunded = stored(BookingStatus.REFUNDED, NOW.plusSeconds(60));
+		SeatInventory occupancy = repository;
+
+		assertThat(occupancy.statuses(showtime.id(), NOW)).isEqualTo(Map.of(standard.id(), SeatStatus.SOLD));
+		assertThat(occupancy.statuses(showtime.id(), refunded.expiresAt()))
+			.isEqualTo(Map.of(standard.id(), SeatStatus.SOLD));
 	}
 
 	@Test
@@ -209,16 +235,18 @@ class BookingServiceTest {
 	@Test
 	void paymentOfABookingWhoseHoldLapsesDuringPaymentIsConflict() {
 		Booking pending = stored(BookingStatus.PENDING, NOW.plusSeconds(60));
-		InMemoryBookings lapsing = new InMemoryBookings(showtimeRows) {
+		// The adapter finds the Hold lapsed when it pays: its outcome is mapped, not re-read.
+		InMemorySeatInventory lapsing = new InMemorySeatInventory(showtimeRows) {
 			@Override
-			public boolean confirm(UUID id, Instant now) {
-				return super.confirm(id, pending.expiresAt());
+			public PayOutcome pay(Booking booking, Instant now) {
+				return new PayOutcome.NotPayable(BookingStatus.EXPIRED);
 			}
 		};
-		BookingService racing = new BookingService(showtimes, lapsing);
+		BookingService racing = new BookingService(showtimes, repository, lapsing);
 
 		assertThatThrownBy(() -> racing.pay(customerId, pending.id(), pending.expiresAt().minusSeconds(1)))
-			.isInstanceOf(ConflictException.class);
+			.isInstanceOf(ConflictException.class)
+			.hasMessage("Booking is EXPIRED, only a Pending Booking can be paid");
 	}
 
 	@Test
@@ -232,15 +260,14 @@ class BookingServiceTest {
 	void payingTwiceAtOnceReturnsTheConfirmedBookingToTheLoserToo() {
 		Booking pending = stored(BookingStatus.PENDING, NOW.plusSeconds(60));
 		// The other payment confirms it between our read and our conditional update.
-		InMemoryBookings racing = new InMemoryBookings(showtimeRows) {
+		InMemorySeatInventory racing = new InMemorySeatInventory(showtimeRows) {
 			@Override
-			public boolean confirm(UUID id, Instant now) {
-				super.confirm(id, now);
-				return false;
+			public PayOutcome pay(Booking booking, Instant now) {
+				return new PayOutcome.AlreadyPaid(pending.confirmed());
 			}
 		};
 
-		assertThat(new BookingService(showtimes, racing).pay(customerId, pending.id(), NOW))
+		assertThat(new BookingService(showtimes, repository, racing).pay(customerId, pending.id(), NOW))
 			.isEqualTo(pending.confirmed());
 	}
 
@@ -269,22 +296,70 @@ class BookingServiceTest {
 	void abandoningABookingThatVanishedMeanwhileIsNotFound() {
 		Booking pending = stored(BookingStatus.PENDING, NOW.plusSeconds(60));
 		// Someone else deletes it between our read and our delete.
-		InMemoryBookings racing = new InMemoryBookings(showtimeRows) {
+		InMemorySeatInventory racing = new InMemorySeatInventory(showtimeRows) {
 			@Override
-			public boolean deletePending(UUID id) {
-				super.deletePending(id);
-				return false;
+			public AbandonOutcome abandon(Booking booking) {
+				return new AbandonOutcome.Gone();
 			}
 		};
 
-		assertThatThrownBy(() -> new BookingService(showtimes, racing).abandon(customerId, pending.id()))
+		assertThatThrownBy(() -> new BookingService(showtimes, repository, racing).abandon(customerId, pending.id()))
 			.isInstanceOf(NotFoundException.class);
+	}
+
+	@Test
+	void eachHoldOutcomeIsTheConflictTheClientsClassify() {
+		UUID seatId = standard.id();
+		Map<HoldOutcome, String> messages = Map.of(
+			new HoldOutcome.SeatsTaken(List.of(seatId)), "Seat already taken: [" + seatId + "]",
+			new HoldOutcome.SeatsTaken(List.of()), "Seat already taken: []",
+			new HoldOutcome.ShowtimeCancelled(), "Showtime is Cancelled",
+			new HoldOutcome.ShowtimeGone(), "Showtime no longer exists",
+			new HoldOutcome.CustomerHasPending(), "Customer already has a Pending Booking",
+			new HoldOutcome.Busy(), "Seats are being booked by others right now, try again");
+		messages.forEach((outcome, message) -> {
+			InMemorySeatInventory answering = new InMemorySeatInventory(showtimeRows) {
+				@Override
+				public HoldOutcome hold(Booking pending, Instant now) {
+					return outcome;
+				}
+			};
+
+			BookingService answered = new BookingService(showtimes, repository, answering);
+
+			assertThatThrownBy(() -> answered.book(customerId, showtime.id(), List.of(seatId), NOW))
+				.as("%s", outcome).isInstanceOf(ConflictException.class).hasMessage(message);
+		});
+		InMemorySeatInventory taken = new InMemorySeatInventory(showtimeRows) {
+			@Override
+			public HoldOutcome hold(Booking pending, Instant now) {
+				return new HoldOutcome.SeatsTaken(List.of(seatId));
+			}
+		};
+		BookingService refused = new BookingService(showtimes, repository, taken);
+		assertThatThrownBy(() -> refused.book(customerId, showtime.id(), List.of(seatId), NOW))
+			.isInstanceOfSatisfying(SeatsTakenException.class, e -> assertThat(e.seatIds()).containsExactly(seatId));
+	}
+
+	@Test
+	void abandoningABookingPaidMeanwhileIsConflictNamingItsStatus() {
+		Booking pending = stored(BookingStatus.PENDING, NOW.plusSeconds(60));
+		InMemorySeatInventory racing = new InMemorySeatInventory(showtimeRows) {
+			@Override
+			public AbandonOutcome abandon(Booking booking) {
+				return new AbandonOutcome.NotPending(BookingStatus.CONFIRMED);
+			}
+		};
+
+		assertThatThrownBy(() -> new BookingService(showtimes, repository, racing).abandon(customerId, pending.id()))
+			.isInstanceOf(ConflictException.class)
+			.hasMessage("Booking is CONFIRMED, only a Pending Booking can be abandoned");
 	}
 
 	private Booking stored(BookingStatus status, Instant expiresAt) {
 		Booking booking = new Booking(UUID.randomUUID(), customerId, showtime.id(), status, expiresAt.minusSeconds(600),
 			expiresAt, List.of(new BookedSeat(standard.id(), 100_000)));
-		repository.rows.put(booking.id(), booking);
+		repository.store(booking);
 		return booking;
 	}
 

@@ -88,6 +88,15 @@ class ApiExceptionHandlerTest {
 			.andExpect(jsonPath("$.errors[0].message").value("Email must be valid"));
 	}
 
+	@Test
+	void dataIntegrityViolationReturnsConflictProblemDetail() {
+		ApiExceptionHandler handler = new ApiExceptionHandler();
+		org.springframework.http.ProblemDetail problem = handler.dataIntegrityViolation(
+			new org.springframework.dao.DataIntegrityViolationException("raw database error"));
+		assertThat(problem.getStatus()).isEqualTo(org.springframework.http.HttpStatus.CONFLICT.value());
+		assertThat(problem.getDetail()).isEqualTo("Data integrity constraint violated.");
+	}
+
 	@RestController
 	static class ValidationController {
 

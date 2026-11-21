@@ -16,6 +16,13 @@ class SeatPricingTest {
 	}
 
 	@Test
+	void theLargestBookingAtTheMaximumBasePriceStaysWithinLong() {
+		long couple = SeatPricing.price(SeatType.COUPLE, SeatPricing.MAX_BASE_PRICE);
+
+		assertThat(Math.multiplyExact(8L, couple)).isEqualTo(8L * (2 * SeatPricing.MAX_BASE_PRICE + 10_000L));
+	}
+
+	@Test
 	void rejectsPricingOverflow() {
 		assertThatThrownBy(() -> SeatPricing.price(SeatType.VIP, Long.MAX_VALUE))
 			.isInstanceOf(ArithmeticException.class);

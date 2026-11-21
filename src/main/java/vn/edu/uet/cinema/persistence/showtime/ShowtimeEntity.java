@@ -8,8 +8,8 @@ import jakarta.persistence.Id;
 import jakarta.persistence.Table;
 import java.time.Instant;
 import java.util.UUID;
-import vn.edu.uet.cinema.business.showtime.Cancellation;
-import vn.edu.uet.cinema.business.showtime.CancellationReason;
+import vn.edu.uet.cinema.business.showtime.inventory.Cancellation;
+import vn.edu.uet.cinema.business.showtime.inventory.CancellationReason;
 import vn.edu.uet.cinema.business.showtime.Showtime;
 import vn.edu.uet.cinema.business.showtime.ShowtimeStatus;
 

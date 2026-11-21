@@ -1,5 +1,7 @@
 package vn.edu.uet.cinema.persistence.account;
 
+import static vn.edu.uet.cinema.persistence.ConstraintViolations.hasConstraint;
+
 import java.util.Optional;
 import java.util.UUID;
 import org.springframework.dao.DataIntegrityViolationException;
@@ -38,7 +40,10 @@ class JpaAccountRepository implements AccountRepository {
 			return jpa.saveAndFlush(AccountEntity.from(account)).toAccount();
 		} catch (DataIntegrityViolationException e) {
 			// Two registrations with the same email raced past existsByEmail; the unique constraint decides.
-			throw new EmailTakenException();
+			if (hasConstraint(e, "account_email_key")) {
+				throw new EmailTakenException();
+			}
+			throw e;
 		}
 	}
 }

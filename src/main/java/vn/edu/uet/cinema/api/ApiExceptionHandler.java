@@ -9,6 +9,7 @@ import java.util.UUID;
 import org.springframework.beans.TypeMismatchException;
 import org.springframework.context.MessageSourceResolvable;
 import org.springframework.core.annotation.Order;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.HttpStatusCode;
@@ -221,6 +222,11 @@ class ApiExceptionHandler extends ResponseEntityExceptionHandler {
 		ProblemDetail problem = conflict(e);
 		problem.setProperty("seatIds", e.seatIds());
 		return problem;
+	}
+
+	@ExceptionHandler
+	ProblemDetail dataIntegrityViolation(DataIntegrityViolationException e) {
+		return ProblemDetail.forStatusAndDetail(HttpStatus.CONFLICT, "Data integrity constraint violated.");
 	}
 
 	@ExceptionHandler

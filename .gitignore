@@ -41,3 +41,6 @@ loadtest/results/
 
 ### Archify diagrams ###
 .archify/
+
+### Python ###
+__pycache__/

@@ -1,0 +1,24 @@
+id: springboot-actuator-leak
+info:
+  name: Sensitive Spring Boot Actuator Endpoints Leak
+  author: security-ci
+  severity: high
+  description: Verifies that sensitive actuator endpoints are not publicly accessible without authentication.
+http:
+  - method: GET
+    path:
+      - "{{BaseURL}}/actuator/env"
+      - "{{BaseURL}}/actuator/heapdump"
+      - "{{BaseURL}}/actuator/configprops"
+      - "{{BaseURL}}/actuator/mappings"
+    matchers-condition: and
+    matchers:
+      - type: status
+        status:
+          - 200
+      - type: word
+        words:
+          - "propertySources"
+          - "contexts"
+          - "dispatcherServlets"
+        condition: or

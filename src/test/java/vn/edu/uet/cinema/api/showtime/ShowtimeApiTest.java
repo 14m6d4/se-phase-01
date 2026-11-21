@@ -156,6 +156,16 @@ class ShowtimeApiTest {
 	}
 
 	@Test
+	void basePriceAboveTheMaximumIsBadRequest() throws Exception {
+		String admin = token("admin@cinema.local", "admin12345");
+		mvc.perform(post("/api/showtimes").header("Authorization", "Bearer " + admin)
+				.contentType(MediaType.APPLICATION_JSON)
+				.content(showtimeJson(movieId(), auditoriumId(), "2030-01-01T20:00:00+07:00", 100_000_001L)))
+			.andExpect(status().isBadRequest())
+			.andExpect(content().contentType(MediaType.APPLICATION_PROBLEM_JSON));
+	}
+
+	@Test
 	void invalidCancellationIsBadRequestAndCancellingTwiceIsConflict() throws Exception {
 		String admin = token("admin@cinema.local", "admin12345");
 		UUID id = schedule(movieId(), auditoriumId(), Instant.now().plusSeconds(86_400));
