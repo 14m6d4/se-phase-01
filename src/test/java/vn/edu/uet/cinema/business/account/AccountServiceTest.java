@@ -3,6 +3,7 @@ package vn.edu.uet.cinema.business.account;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import java.util.UUID;
 import org.junit.jupiter.api.Test;
 import vn.edu.uet.cinema.business.ConflictException;
 
@@ -57,6 +58,65 @@ class AccountServiceTest {
 
 		assertThatThrownBy(() -> service.ensureAdmin("boss@example.com", "admin-pass"))
 			.isInstanceOf(IllegalStateException.class);
+	}
+
+	@Test
+	void inMemoryAccountsEnforcesUniqueEmailOnSave() {
+		Account first = new Account(UUID.randomUUID(), "user@cinema.local", "hash1", "User 1", Role.CUSTOMER);
+		accounts.save(first);
+
+		// Updating the same account is allowed
+		Account updated = new Account(first.id(), "user@cinema.local", "hash_new", "User Updated", Role.CUSTOMER);
+		assertThat(accounts.save(updated).fullName()).isEqualTo("User Updated");
+
+		// Saving a different account with the same email throws EmailTakenException
+		Account duplicate = new Account(UUID.randomUUID(), "USER@CINEMA.LOCAL", "hash2", "User 2", Role.CUSTOMER);
+		assertThatThrownBy(() -> accounts.save(duplicate))
+			.isInstanceOf(EmailTakenException.class);
+	}
+
+	@Test
+	void inMemoryAccountsEnforcesNotNullFieldsOnSave() {
+		UUID id = UUID.randomUUID();
+		assertThatThrownBy(() -> accounts.save(null)).isInstanceOf(NullPointerException.class);
+		assertThatThrownBy(() -> accounts.save(new Account(null, "e@c.l", "h", "fn", Role.CUSTOMER))).isInstanceOf(NullPointerException.class);
+		assertThatThrownBy(() -> accounts.save(new Account(id, null, "h", "fn", Role.CUSTOMER))).isInstanceOf(NullPointerException.class);
+		assertThatThrownBy(() -> accounts.save(new Account(id, "e@c.l", null, "fn", Role.CUSTOMER))).isInstanceOf(NullPointerException.class);
+		assertThatThrownBy(() -> accounts.save(new Account(id, "e@c.l", "h", null, Role.CUSTOMER))).isInstanceOf(NullPointerException.class);
+		assertThatThrownBy(() -> accounts.save(new Account(id, "e@c.l", "h", "fn", null))).isInstanceOf(NullPointerException.class);
+	}
+
+	@Test
+	void inMemoryAccountsSupportsCaseInsensitiveLookup() {
+		Account account = new Account(UUID.randomUUID(), "alice@cinema.local", "hash", "Alice", Role.CUSTOMER);
+		accounts.save(account);
+
+		assertThat(accounts.findByEmail("ALICE@CINEMA.LOCAL")).contains(account);
+		assertThat(accounts.existsByEmail("Alice@Cinema.Local")).isTrue();
+		assertThat(accounts.findByEmail(null)).isEmpty();
+	}
+
+	@Test
+	void ensureAdminHandlesConcurrentCreationRace() {
+		// Mock a repository where findByEmail returns empty (both instances find nothing initially),
+		// but save() fails with EmailTakenException for the losing instance.
+		AccountRepository racingAccounts = new AccountRepository() {
+			private boolean first = true;
+			@Override public java.util.Optional<Account> findById(UUID id) { return java.util.Optional.empty(); }
+			@Override public java.util.Optional<Account> findByEmail(String email) { return java.util.Optional.empty(); }
+			@Override public boolean existsByEmail(String email) { return false; }
+			@Override public Account save(Account account) {
+				if (!first) {
+					throw new EmailTakenException();
+				}
+				first = false;
+				return account;
+			}
+		};
+
+		AccountService racingService = new AccountService(racingAccounts, new PrefixHasher());
+		racingService.ensureAdmin("admin@cinema.local", "pass"); // First succeeds
+		racingService.ensureAdmin("admin@cinema.local", "pass"); // Second catches EmailTakenException and finishes cleanly
 	}
 
 	@Test
