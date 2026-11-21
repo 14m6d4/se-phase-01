@@ -27,14 +27,22 @@ public class BookingService {
 	private final ShowtimeService showtimes;
 	private final BookingRepository bookings;
 	private final SeatInventory inventory;
+	private final AntiHoardingGuard antiHoarding;
 
 	public BookingService(ShowtimeService showtimes, BookingRepository bookings, SeatInventory inventory) {
+		this(showtimes, bookings, inventory, new AntiHoardingGuard());
+	}
+
+	public BookingService(ShowtimeService showtimes, BookingRepository bookings, SeatInventory inventory,
+		AntiHoardingGuard antiHoarding) {
 		this.showtimes = showtimes;
 		this.bookings = bookings;
 		this.inventory = inventory;
+		this.antiHoarding = antiHoarding;
 	}
 
 	public Booking book(UUID customerId, UUID showtimeId, List<UUID> seatIds, Instant now) {
+		antiHoarding.checkHoldAllowed(customerId, now);
 		if (seatIds.isEmpty() || seatIds.size() > MAX_SEATS) {
 			throw new InvalidBookingException("A Booking has 1 to " + MAX_SEATS + " Seats");
 		}
@@ -96,11 +104,14 @@ public class BookingService {
 
 	/** An Expired Booking can be abandoned too: it is removed like any lapsed Hold. */
 	public void abandon(UUID customerId, UUID id) {
+		abandon(customerId, id, Instant.now());
+	}
+
+	public void abandon(UUID customerId, UUID id, Instant now) {
 		// Nothing deleted: it is Confirmed or Refunded, was paid just now, or is already gone (then this is 404).
 		// The adapter tells which, in the transaction of its conditional delete.
 		switch (inventory.abandon(get(customerId, id))) {
-			case AbandonOutcome.Abandoned abandoned -> {
-			}
+			case AbandonOutcome.Abandoned abandoned -> antiHoarding.recordAbandon(customerId, now);
 			case AbandonOutcome.NotPending notPending -> throw new ConflictException(
 				"Booking is " + notPending.status() + ", only a Pending Booking can be abandoned");
 			case AbandonOutcome.Gone gone -> throw new NotFoundException("Booking not found");
