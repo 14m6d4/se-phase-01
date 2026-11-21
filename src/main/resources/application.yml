@@ -34,12 +34,12 @@ app:
   rate-limit:
     enabled: ${RATE_LIMIT_ENABLED:true}
     auth:
-      capacity: ${RATE_LIMIT_AUTH_CAPACITY:100}
-      refill-tokens: ${RATE_LIMIT_AUTH_REFILL_TOKENS:100}
+      capacity: ${RATE_LIMIT_AUTH_CAPACITY:200}
+      refill-tokens: ${RATE_LIMIT_AUTH_REFILL_TOKENS:200}
       refill-duration-seconds: ${RATE_LIMIT_AUTH_DURATION:60}
     api:
-      capacity: ${RATE_LIMIT_API_CAPACITY:500}
-      refill-tokens: ${RATE_LIMIT_API_REFILL_TOKENS:500}
+      capacity: ${RATE_LIMIT_API_CAPACITY:3000}
+      refill-tokens: ${RATE_LIMIT_API_REFILL_TOKENS:3000}
       refill-duration-seconds: ${RATE_LIMIT_API_DURATION:60}
 
 management:

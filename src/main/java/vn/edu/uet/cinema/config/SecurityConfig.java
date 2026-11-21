@@ -72,11 +72,11 @@ public class SecurityConfig {
 	@Bean
 	RateLimitingFilter rateLimitingFilter(
 		@Value("${app.rate-limit.enabled:true}") boolean enabled,
-		@Value("${app.rate-limit.auth.capacity:100}") long authCapacity,
-		@Value("${app.rate-limit.auth.refill-tokens:100}") long authRefillTokens,
+		@Value("${app.rate-limit.auth.capacity:200}") long authCapacity,
+		@Value("${app.rate-limit.auth.refill-tokens:200}") long authRefillTokens,
 		@Value("${app.rate-limit.auth.refill-duration-seconds:60}") long authDurationSeconds,
-		@Value("${app.rate-limit.api.capacity:500}") long apiCapacity,
-		@Value("${app.rate-limit.api.refill-tokens:500}") long apiRefillTokens,
+		@Value("${app.rate-limit.api.capacity:3000}") long apiCapacity,
+		@Value("${app.rate-limit.api.refill-tokens:3000}") long apiRefillTokens,
 		@Value("${app.rate-limit.api.refill-duration-seconds:60}") long apiDurationSeconds) {
 		return new RateLimitingFilter(enabled, authCapacity, authRefillTokens, authDurationSeconds,
 			apiCapacity, apiRefillTokens, apiDurationSeconds);
