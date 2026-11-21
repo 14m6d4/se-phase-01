@@ -76,7 +76,15 @@ jobs:
           npx --yes newman@6.2.3 run apitest/booking-flow.postman_collection.json \
             --env-var baseUrl=http://localhost:8080 --env-var adminEmail="$ADMIN_EMAIL" --env-var adminPassword="$ADMIN_PASSWORD" \
             --folder "Setup" --folder "Catalogue" --folder "Known bugs (phase 2)"
-      - name: Schemathesis, no server errors (Admin and Customer)
+      - name: Nuclei DAST vulnerability scan (Spring Boot, Misconfiguration, Exposure)
+        run: >
+          docker run --rm --network host projectdiscovery/nuclei:latest
+          -u http://localhost:8080
+          -tags springboot,misconfig,exposure
+          -severity critical,high
+          -no-interactsh
+          -duc
+      - name: Schemathesis, no server errors (Admin, Customer, and Anonymous)
         run: |
           set -a; . ./.env; set +a
           login() { curl -s -X POST localhost:8080/api/auth/login -H 'Content-Type: application/json' -d "$1" | jq -r .accessToken; }
@@ -84,9 +92,11 @@ jobs:
           curl -s -o /dev/null -X POST localhost:8080/api/auth/register -H 'Content-Type: application/json' \
             -d '{"email":"ci-customer@example.com","password":"password123","fullName":"CI"}'
           CUSTOMER=$(login '{"email":"ci-customer@example.com","password":"password123"}')
+          pipx run schemathesis==4.33.4 run docs/openapi.json --url http://localhost:8080 \
+            --checks not_a_server_error -n 50 --no-color
           for token in "$ADMIN" "$CUSTOMER"; do
             pipx run schemathesis==4.33.4 run docs/openapi.json --url http://localhost:8080 \
-              -H "Authorization: Bearer $token" --checks not_a_server_error -n 20 --no-color
+              -H "Authorization: Bearer $token" --checks not_a_server_error -n 100 --no-color
           done
       - name: Schemathesis, every check (report only)
         continue-on-error: true
@@ -95,7 +105,7 @@ jobs:
           ADMIN=$(jq -n --arg e "$ADMIN_EMAIL" --arg p "$ADMIN_PASSWORD" '{email:$e,password:$p}' |
             curl -s -X POST localhost:8080/api/auth/login -H 'Content-Type: application/json' -d @- | jq -r .accessToken)
           pipx run schemathesis==4.33.4 run docs/openapi.json --url http://localhost:8080 \
-            -H "Authorization: Bearer $ADMIN" --checks all -n 20 --no-color
+            -H "Authorization: Bearer $ADMIN" --checks all -n 50 --no-color
       - name: Service log on failure
         if: failure()
         run: docker compose logs app | tail -100
@@ -117,16 +127,17 @@ jobs:
           for i in $(seq 1 60); do curl -sf localhost:18080/actuator/health && break; sleep 3; done
           $COMPOSE exec -T db psql -v ON_ERROR_STOP=1 -U cinema -d cinema -q < loadtest/seed.sql
       - run: pip install locust==2.47.0
-      - name: Each scenario for 20 s at 20 users, no failed request
+      - name: Each scenario for 20 s at 25 users, SLA p95 < 600ms, no failed request
         run: |
           mkdir -p loadtest/results
           for scenario in Account Browse Book Contention Race; do
-            CUSTOMERS=20 STEP=0 RESULTS=loadtest/results/smoke-$scenario.json \
-              locust -f loadtest/locust/locustfile.py --headless --only-summary --loglevel WARNING -u 20 -r 20 -t 20s $scenario
-            jq -e '.requests > 0 and .failures == 0' loadtest/results/smoke-$scenario.json \
-              || { echo "$scenario failed"; cat loadtest/results/smoke-$scenario.json; exit 1; }
+            CUSTOMERS=25 STEP=0 RESULTS=loadtest/results/smoke-$scenario.json \
+              locust -f loadtest/locust/locustfile.py --headless --only-summary --loglevel WARNING -u 25 -r 25 -t 20s $scenario
+            jq -r '"[\(.scenario)] requests: \(.requests), failures: \(.failures), p50: \(.p50_ms | round)ms, p95: \(.p95_ms | round)ms, p99: \(.p99_ms | round)ms"' loadtest/results/smoke-$scenario.json
+            jq -e '.requests > 0 and .failures == 0 and .p95_ms < 600' loadtest/results/smoke-$scenario.json \
+              || { echo "$scenario failed or exceeded p95 SLA (600ms)"; cat loadtest/results/smoke-$scenario.json; exit 1; }
           done
-      - name: No Seat booked twice
+      - name: No Seat booked twice (Zero duplicate seats)
         run: |
           duplicates=$($COMPOSE exec -T db psql -U cinema -d cinema -tAc \
             "select count(*) from (select showtime_id, seat_id from booked_seat group by 1, 2 having count(*) > 1) d")
