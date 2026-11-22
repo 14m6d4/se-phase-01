@@ -92,7 +92,7 @@ public class BookingService {
 	public Booking pay(UUID customerId, UUID id, Instant now) {
 		// Not confirmed by us: it was already, or a concurrent payment just did, or the Hold has lapsed or the
 		// Booking was deleted meanwhile. The adapter tells which, in the transaction of its conditional update.
-		return switch (inventory.pay(get(customerId, id), now)) {
+		return switch (inventory.pay(customerId, id, now)) {
 			case PayOutcome.Paid paid -> paid.confirmed();
 			case PayOutcome.AlreadyPaid already -> already.current();
 			case PayOutcome.NotPayable notPayable -> throw new ConflictException(
@@ -105,7 +105,7 @@ public class BookingService {
 	public void abandon(UUID customerId, UUID id) {
 		// Nothing deleted: it is Confirmed or Refunded, was paid just now, or is already gone (then this is 404).
 		// The adapter tells which, in the transaction of its conditional delete.
-		switch (inventory.abandon(get(customerId, id))) {
+		switch (inventory.abandon(customerId, id)) {
 			case AbandonOutcome.Abandoned abandoned -> {
 			}
 			case AbandonOutcome.NotPending notPending -> throw new ConflictException(

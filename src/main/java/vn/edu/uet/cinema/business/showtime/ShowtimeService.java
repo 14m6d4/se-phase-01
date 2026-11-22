@@ -105,23 +105,27 @@ public class ShowtimeService {
 		if (given != null && given.length() > MAX_NOTE_LENGTH) {
 			throw new InvalidShowtimeException("A cancellation note has at most " + MAX_NOTE_LENGTH + " characters");
 		}
-		Showtime showtime = get(id);
 		Cancellation cancellation = new Cancellation(reason, given);
 		return switch (inventory.cancel(id, cancellation, now)) {
-			case CancelOutcome.Cancelled cancelled -> new Showtime(showtime.id(), showtime.movieId(),
-				showtime.auditoriumId(), showtime.startsAt(), showtime.endsAt(), showtime.basePrice(),
-				ShowtimeStatus.CANCELLED, cancellation);
+			case CancelOutcome.Cancelled cancelled -> {
+				Showtime showtime = get(id);
+				yield new Showtime(showtime.id(), showtime.movieId(),
+					showtime.auditoriumId(), showtime.startsAt(), showtime.endsAt(), showtime.basePrice(),
+					ShowtimeStatus.CANCELLED, cancellation);
+			}
 			case CancelOutcome.NotCancellable notCancellable ->
 				throw new ConflictException("Showtime is already Cancelled or has ended");
+			case CancelOutcome.NotFound notFound ->
+				throw new NotFoundException("Showtime not found");
 		};
 	}
 
 	public void delete(UUID id, Instant now) {
-		get(id);
 		switch (inventory.delete(id, now)) {
 			case DeleteOutcome.Deleted deleted -> {
 			}
 			case DeleteOutcome.HasBookings hasBookings -> throw new ConflictException("Showtime has Bookings");
+			case DeleteOutcome.NotFound notFound -> throw new NotFoundException("Showtime not found");
 		}
 	}
 }
