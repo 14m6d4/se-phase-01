@@ -77,9 +77,10 @@ public class InMemorySeatInventory implements SeatInventory, BookingRepository {
 		List<UUID> seatIds = pending.seats().stream().map(BookedSeat::seatId).toList();
 		rows.values().removeIf(b -> b.statusAt(now) == BookingStatus.EXPIRED && (b.customerId().equals(pending.customerId())
 			|| b.showtimeId().equals(pending.showtimeId()) && b.seats().stream().anyMatch(s -> seatIds.contains(s.seatId()))));
-		if (rows.values().stream().anyMatch(b -> b.customerId().equals(pending.customerId())
-			&& b.status() == BookingStatus.PENDING)) {
-			return new HoldOutcome.CustomerHasPending();
+		Optional<Booking> livePending = rows.values().stream().filter(b -> b.customerId().equals(pending.customerId())
+			&& b.status() == BookingStatus.PENDING).findFirst();
+		if (livePending.isPresent()) {
+			return new HoldOutcome.CustomerHasPending(livePending.get().id());
 		}
 		// Every remaining row of the Showtime counts, as for UNIQUE(showtime_id, seat_id).
 		Set<UUID> taken = rows.values().stream().filter(b -> b.showtimeId().equals(pending.showtimeId()))
@@ -93,24 +94,30 @@ public class InMemorySeatInventory implements SeatInventory, BookingRepository {
 	}
 
 	@Override
-	public synchronized PayOutcome pay(Booking booking, Instant now) {
-		Booking current = rows.get(booking.id());
-		if (current == null) {
+	public synchronized PayOutcome pay(UUID customerId, UUID bookingId, Instant now) {
+		Booking current = rows.get(bookingId);
+		if (current == null || !current.customerId().equals(customerId)) {
 			return new PayOutcome.Gone();
 		}
 		BookingStatus status = current.statusAt(now);
 		if (status == BookingStatus.PENDING) {
-			rows.put(current.id(), current.confirmed());
-			return new PayOutcome.Paid(booking.confirmed());
+			Booking confirmed = current.confirmed();
+			rows.put(current.id(), confirmed);
+			return new PayOutcome.Paid(confirmed);
 		}
 		return status == BookingStatus.CONFIRMED ? new PayOutcome.AlreadyPaid(current)
 			: new PayOutcome.NotPayable(status);
 	}
 
 	@Override
-	public synchronized AbandonOutcome abandon(Booking booking) {
-		Booking current = rows.get(booking.id());
-		if (current == null) {
+	public synchronized PayOutcome pay(Booking booking, Instant now) {
+		return pay(booking.customerId(), booking.id(), now);
+	}
+
+	@Override
+	public synchronized AbandonOutcome abandon(UUID customerId, UUID bookingId) {
+		Booking current = rows.get(bookingId);
+		if (current == null || !current.customerId().equals(customerId)) {
 			return new AbandonOutcome.Gone();
 		}
 		if (current.status() != BookingStatus.PENDING) {
@@ -118,6 +125,11 @@ public class InMemorySeatInventory implements SeatInventory, BookingRepository {
 		}
 		rows.remove(current.id());
 		return new AbandonOutcome.Abandoned();
+	}
+
+	@Override
+	public synchronized AbandonOutcome abandon(Booking booking) {
+		return abandon(booking.customerId(), booking.id());
 	}
 
 	@Override
@@ -135,7 +147,10 @@ public class InMemorySeatInventory implements SeatInventory, BookingRepository {
 	@Override
 	public synchronized CancelOutcome cancel(UUID showtimeId, Cancellation cancellation, Instant now) {
 		Showtime s = showtimes.findById(showtimeId).orElse(null);
-		if (s == null || s.status() != ShowtimeStatus.SCHEDULED || !s.endsAt().isAfter(now)) {
+		if (s == null) {
+			return new CancelOutcome.NotFound();
+		}
+		if (s.status() != ShowtimeStatus.SCHEDULED || !s.endsAt().isAfter(now)) {
 			return new CancelOutcome.NotCancellable();
 		}
 		showtimes.replace(new Showtime(s.id(), s.movieId(), s.auditoriumId(), s.startsAt(), s.endsAt(), s.basePrice(),
@@ -150,6 +165,9 @@ public class InMemorySeatInventory implements SeatInventory, BookingRepository {
 
 	@Override
 	public synchronized DeleteOutcome delete(UUID showtimeId, Instant now) {
+		if (showtimes.findById(showtimeId).isEmpty()) {
+			return new DeleteOutcome.NotFound();
+		}
 		rows.values().removeIf(b -> b.showtimeId().equals(showtimeId) && b.statusAt(now) == BookingStatus.EXPIRED);
 		// fk_booking_showtime is ON DELETE RESTRICT.
 		if (rows.values().stream().anyMatch(b -> b.showtimeId().equals(showtimeId))) {

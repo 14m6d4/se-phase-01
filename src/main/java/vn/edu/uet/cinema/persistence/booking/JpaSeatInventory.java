@@ -92,11 +92,31 @@ public class JpaSeatInventory implements SeatInventory {
 	 */
 	@Override
 	@Transactional
+	public PayOutcome pay(UUID customerId, UUID bookingId, Instant now) {
+		if (jpa.confirm(bookingId, customerId, now) == 1) {
+			return jpa.findById(bookingId).map(BookingEntity::toBooking).<PayOutcome>map(PayOutcome.Paid::new)
+				.orElseGet(PayOutcome.Gone::new);
+		}
+		return jpa.findById(bookingId).map(BookingEntity::toBooking).<PayOutcome>map(current -> {
+			if (!current.customerId().equals(customerId)) {
+				return new PayOutcome.Gone();
+			}
+			BookingStatus status = current.statusAt(now);
+			return status == BookingStatus.CONFIRMED ? new PayOutcome.AlreadyPaid(current)
+				: new PayOutcome.NotPayable(status);
+		}).orElseGet(PayOutcome.Gone::new);
+	}
+
+	@Override
+	@Transactional
 	public PayOutcome pay(Booking booking, Instant now) {
-		if (jpa.confirm(booking.id(), now) == 1) {
+		if (jpa.confirm(booking.id(), booking.customerId(), now) == 1) {
 			return new PayOutcome.Paid(booking.confirmed());
 		}
 		return jpa.findById(booking.id()).map(BookingEntity::toBooking).<PayOutcome>map(current -> {
+			if (!current.customerId().equals(booking.customerId())) {
+				return new PayOutcome.Gone();
+			}
 			BookingStatus status = current.statusAt(now);
 			return status == BookingStatus.CONFIRMED ? new PayOutcome.AlreadyPaid(current)
 				: new PayOutcome.NotPayable(status);
@@ -106,12 +126,22 @@ public class JpaSeatInventory implements SeatInventory {
 	/** Like {@link #pay}, the row is read again in the same transaction when nothing was deleted. */
 	@Override
 	@Transactional
-	public AbandonOutcome abandon(Booking booking) {
-		if (jpa.deletePending(booking.id()) == 1) {
+	public AbandonOutcome abandon(UUID customerId, UUID bookingId) {
+		if (jpa.deletePending(bookingId, customerId) == 1) {
 			return new AbandonOutcome.Abandoned();
 		}
-		return jpa.findById(booking.id()).<AbandonOutcome>map(current -> new AbandonOutcome.NotPending(
-			current.toBooking().status())).orElseGet(AbandonOutcome.Gone::new);
+		return jpa.findById(bookingId).map(BookingEntity::toBooking).<AbandonOutcome>map(current -> {
+			if (!current.customerId().equals(customerId)) {
+				return new AbandonOutcome.Gone();
+			}
+			return new AbandonOutcome.NotPending(current.status());
+		}).orElseGet(AbandonOutcome.Gone::new);
+	}
+
+	@Override
+	@Transactional
+	public AbandonOutcome abandon(Booking booking) {
+		return abandon(booking.customerId(), booking.id());
 	}
 
 	/** Only rows that pass {@code HoldSql.OCCUPIES} come back: a Pending one is a live Hold, the others were sold. */
@@ -128,7 +158,7 @@ public class JpaSeatInventory implements SeatInventory {
 	@Transactional
 	public CancelOutcome cancel(UUID showtimeId, Cancellation cancellation, Instant now) {
 		if (jpa.cancelShowtime(showtimeId, cancellation.reason().name(), cancellation.note(), now) == 0) {
-			return new CancelOutcome.NotCancellable();
+			return jpa.existsShowtime(showtimeId) ? new CancelOutcome.NotCancellable() : new CancelOutcome.NotFound();
 		}
 		// Delete before refunding: a payment that commits in between is then refunded, never left Confirmed.
 		jpa.deletePendingBookings(showtimeId);
@@ -142,7 +172,10 @@ public class JpaSeatInventory implements SeatInventory {
 		try {
 			return transaction.execute(status -> {
 				jpa.deleteLapsedHoldsOfShowtime(showtimeId, now);
-				jpa.deleteShowtime(showtimeId);
+				int rows = jpa.deleteShowtime(showtimeId);
+				if (rows == 0) {
+					return new DeleteOutcome.NotFound();
+				}
 				return new DeleteOutcome.Deleted();
 			});
 		} catch (DataIntegrityViolationException e) {

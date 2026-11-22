@@ -203,6 +203,7 @@ class BookingPersistenceTest {
 			now, now.plusSeconds(600), List.of(new BookedSeat(seat1, 100_000)));
 		HoldOutcome outcome = testInventory.hold(holdA2, now);
 		assertThat(outcome).isInstanceOf(HoldOutcome.CustomerHasPending.class);
+		assertThat(((HoldOutcome.CustomerHasPending) outcome).bookingId()).isEqualTo(holdA1.id());
 
 		// Customer A also attempts to hold their own already-held seat2
 		Booking holdA3 = new Booking(UUID.randomUUID(), customerA, showtimeId, BookingStatus.PENDING,
@@ -255,7 +256,9 @@ class BookingPersistenceTest {
 
 		assertThat(inventory.pay(live, now)).isEqualTo(new PayOutcome.Paid(live.confirmed()));
 		assertThat(inventory.pay(live, now)).isEqualTo(new PayOutcome.AlreadyPaid(live.confirmed()));
+		assertThat(inventory.pay(live.customerId(), live.id(), now)).isEqualTo(new PayOutcome.AlreadyPaid(live.confirmed()));
 		assertThat(inventory.abandon(live)).isEqualTo(new AbandonOutcome.NotPending(BookingStatus.CONFIRMED));
+		assertThat(inventory.abandon(live.customerId(), live.id())).isEqualTo(new AbandonOutcome.NotPending(BookingStatus.CONFIRMED));
 		assertThat(repository.findById(live.id())).get().extracting(Booking::status).isEqualTo(BookingStatus.CONFIRMED);
 		assertThat(inventory.statuses(showtimeId, now)).containsExactly(Map.entry(seatId, SeatStatus.SOLD));
 	}

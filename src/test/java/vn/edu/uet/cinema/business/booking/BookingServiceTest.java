@@ -124,6 +124,18 @@ class BookingServiceTest {
 	}
 
 	@Test
+	void customerPendingTakesPrecedenceOverTakenSeatsWhenBothViolated() {
+		Booking pending = service.book(customerId, showtime.id(), List.of(vip.id()), NOW);
+		UUID otherCustomer = UUID.randomUUID();
+		service.book(otherCustomer, showtime.id(), List.of(standard.id()), NOW);
+
+		// Customer has pending booking (vip) and requests standard (which is held by otherCustomer)
+		assertThatThrownBy(() -> service.book(customerId, showtime.id(), List.of(standard.id()), NOW))
+			.isInstanceOf(ConflictException.class)
+			.hasMessageContaining("Customer already has a Pending Booking");
+	}
+
+	@Test
 	void customerWhoseHoldLapsedCanBookAgain() {
 		Booking lapsed = service.book(customerId, showtime.id(), List.of(vip.id()), NOW);
 		Instant later = lapsed.expiresAt();
@@ -238,6 +250,11 @@ class BookingServiceTest {
 		// The adapter finds the Hold lapsed when it pays: its outcome is mapped, not re-read.
 		InMemorySeatInventory lapsing = new InMemorySeatInventory(showtimeRows) {
 			@Override
+			public PayOutcome pay(UUID customerId, UUID bookingId, Instant now) {
+				return new PayOutcome.NotPayable(BookingStatus.EXPIRED);
+			}
+
+			@Override
 			public PayOutcome pay(Booking booking, Instant now) {
 				return new PayOutcome.NotPayable(BookingStatus.EXPIRED);
 			}
@@ -261,6 +278,11 @@ class BookingServiceTest {
 		Booking pending = stored(BookingStatus.PENDING, NOW.plusSeconds(60));
 		// The other payment confirms it between our read and our conditional update.
 		InMemorySeatInventory racing = new InMemorySeatInventory(showtimeRows) {
+			@Override
+			public PayOutcome pay(UUID customerId, UUID bookingId, Instant now) {
+				return new PayOutcome.AlreadyPaid(pending.confirmed());
+			}
+
 			@Override
 			public PayOutcome pay(Booking booking, Instant now) {
 				return new PayOutcome.AlreadyPaid(pending.confirmed());
@@ -345,6 +367,11 @@ class BookingServiceTest {
 	void abandoningABookingPaidMeanwhileIsConflictNamingItsStatus() {
 		Booking pending = stored(BookingStatus.PENDING, NOW.plusSeconds(60));
 		InMemorySeatInventory racing = new InMemorySeatInventory(showtimeRows) {
+			@Override
+			public AbandonOutcome abandon(UUID customerId, UUID bookingId) {
+				return new AbandonOutcome.NotPending(BookingStatus.CONFIRMED);
+			}
+
 			@Override
 			public AbandonOutcome abandon(Booking booking) {
 				return new AbandonOutcome.NotPending(BookingStatus.CONFIRMED);

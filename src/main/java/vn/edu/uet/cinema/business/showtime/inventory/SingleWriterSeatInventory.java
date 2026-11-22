@@ -106,6 +106,28 @@ public class SingleWriterSeatInventory implements SeatInventory {
 	}
 
 	@Override
+	public PayOutcome pay(UUID customerId, UUID bookingId, Instant now) {
+		PayOutcome outcome = delegate.pay(customerId, bookingId, now);
+		if (outcome instanceof PayOutcome.Paid paid) {
+			Booking booking = paid.confirmed();
+			ShowtimeSeats model = models.get(booking.showtimeId());
+			if (model != null) {
+				for (BookedSeat seat : booking.seats()) {
+					model.seats.computeIfPresent(seat.seatId(), (seatId, entry) ->
+						new SeatEntry(booking.id(), null, true)
+					);
+				}
+			}
+		}
+		return outcome;
+	}
+
+	@Override
+	public AbandonOutcome abandon(UUID customerId, UUID bookingId) {
+		return delegate.abandon(customerId, bookingId);
+	}
+
+	@Override
 	public PayOutcome pay(Booking booking, Instant now) {
 		PayOutcome outcome = delegate.pay(booking, now);
 		if (outcome instanceof PayOutcome.Paid) {

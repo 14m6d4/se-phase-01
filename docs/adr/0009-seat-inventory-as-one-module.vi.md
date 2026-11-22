@@ -25,7 +25,7 @@ Quy tắc Hold còn hiệu lực giờ chỉ được viết một lần bằng 
 
 ## Hệ quả
 
-- Mỗi chiến lược tranh chấp ghế sau này là một cách cài đặt khác của `hold`, hoặc một decorator bọc port. `pay`, `abandon`, `statuses`, `cancel` và `delete` dùng chung. Unique constraint vẫn là lớp bảo vệ cuối cùng (ADR 0004).
+- Mỗi chiến lược tranh chấp ghế sau này là một cách cài đặt khác của `hold`, hoặc một decorator bọc port. `pay`, `abandon`, `statuses`, `cancel` và `delete` dùng chung. Unique constraint vẫn là lớp bảo vệ cuối cùng (ADR 0004). Xem [ADR 0010](0010-seat-contention-strategies-benchmark-comparison.vi.md) về kết quả so sánh thực nghiệm giữa `unique`, `showtime_lock`, `seat_rows` và `single_writer`.
 - Giữa các module business: `business.booking` phụ thuộc `business.showtime`, không bao giờ theo chiều ngược lại. Bên trong module suất chiếu, `inventory` dùng `Cancellation` còn `ShowtimeService` dùng port, nên hai package phụ thuộc lẫn nhau. Một quy tắc kiểm tra vòng phụ thuộc phải coi `business.showtime..` là một slice.
 - Xóa suất chiếu giờ là một câu native `delete from showtime`, không còn câu select mà `deleteById` của Spring Data chạy trước. Lớp bảo vệ `fk_booking_showtime` và mã `409` của nó không đổi.
 - Port không giữ trạng thái in-memory nào, nên quy tắc 8 không áp dụng cho nó.

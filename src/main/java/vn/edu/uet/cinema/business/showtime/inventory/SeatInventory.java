@@ -19,10 +19,18 @@ public interface SeatInventory {
 	HoldOutcome hold(Booking pending, Instant now);
 
 	/** Makes the Booking Confirmed if it is Pending with a Hold still running at {@code now}. */
-	PayOutcome pay(Booking booking, Instant now);
+	PayOutcome pay(UUID customerId, UUID bookingId, Instant now);
+
+	default PayOutcome pay(Booking booking, Instant now) {
+		return pay(booking.customerId(), booking.id(), now);
+	}
 
 	/** Deletes the Booking if it is Pending, Expired ones included. */
-	AbandonOutcome abandon(Booking booking);
+	AbandonOutcome abandon(UUID customerId, UUID bookingId);
+
+	default AbandonOutcome abandon(Booking booking) {
+		return abandon(booking.customerId(), booking.id());
+	}
 
 	/** The Seats of the Showtime that are HELD or SOLD at {@code now}. Missing Seats are AVAILABLE. */
 	Map<UUID, SeatStatus> statuses(UUID showtimeId, Instant now);

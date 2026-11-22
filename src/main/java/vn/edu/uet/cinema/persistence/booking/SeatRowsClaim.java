@@ -4,6 +4,7 @@ import static vn.edu.uet.cinema.persistence.ConstraintViolations.hasConstraint;
 
 import java.time.Instant;
 import java.util.List;
+import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 import org.springframework.dao.DataIntegrityViolationException;
@@ -40,8 +41,9 @@ class SeatRowsClaim implements Claim {
 				// 2. Delete lapsed holds on requested seats and customer's own pending booking
 				jpa.deleteLapsedHolds(booking.customerId(), booking.showtimeId(), seatIds, now);
 
-				if (jpa.findLivePending(booking.customerId(), now).isPresent()) {
-					return new HoldOutcome.CustomerHasPending();
+				Optional<BookingEntity> livePending = jpa.findLivePending(booking.customerId(), now);
+				if (livePending.isPresent()) {
+					return new HoldOutcome.CustomerHasPending(livePending.get().getId());
 				}
 
 				// 3. Execute atomic upsert claim in ascending seat_id order
@@ -62,7 +64,9 @@ class SeatRowsClaim implements Claim {
 			// Drift fallback: if seats were booked under another strategy and have no showtime_seat row,
 			// the claim succeeds but booked_seat UNIQUE constraint catches the conflict.
 			if (hasConstraint(e, "uq_booking_customer_pending")) {
-				return new HoldOutcome.CustomerHasPending();
+				UUID pendingId = jpa.findLivePending(booking.customerId(), now)
+					.map(BookingEntity::getId).orElse(null);
+				return new HoldOutcome.CustomerHasPending(pendingId);
 			}
 			if (hasConstraint(e, "uq_booked_seat_showtime_seat")) {
 				Set<UUID> taken = Set.copyOf(jpa.findTakenSeats(booking.showtimeId(), seatIds, now));

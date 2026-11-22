@@ -9,4 +9,8 @@ public sealed interface DeleteOutcome {
 	/** It has a Confirmed, Refunded or live Pending Booking. */
 	record HasBookings() implements DeleteOutcome {
 	}
+
+	/** Showtime does not exist. */
+	record NotFound() implements DeleteOutcome {
+	}
 }

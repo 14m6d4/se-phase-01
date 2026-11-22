@@ -53,4 +53,18 @@ class TokenBucketTest {
 		// After 150ms, at least 1 token should have refilled
 		assertThat(bucket.tryConsume(1).allowed()).isTrue();
 	}
+
+	@Test
+	void highThroughputBenchmarkOverhead() {
+		TokenBucket bucket = new TokenBucket(1_000_000, 1_000_000, Duration.ofSeconds(1));
+		int iterations = 100_000;
+		long start = System.nanoTime();
+		for (int i = 0; i < iterations; i++) {
+			bucket.tryConsume(1);
+		}
+		long elapsedNanos = System.nanoTime() - start;
+		long nanosPerOp = elapsedNanos / iterations;
+		// Must take less than 10 microseconds per operation in test environment
+		assertThat(nanosPerOp).isLessThan(10_000);
+	}
 }
