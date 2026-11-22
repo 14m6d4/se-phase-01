@@ -28,7 +28,11 @@ public sealed interface HoldOutcome {
 	}
 
 	/** The Customer already has a Pending Booking with a live Hold. */
-	record CustomerHasPending() implements HoldOutcome {
+	record CustomerHasPending(UUID bookingId) implements HoldOutcome {
+
+		public CustomerHasPending() {
+			this(null);
+		}
 	}
 
 	/** The Hold lost a deadlock, and so did its retry. */

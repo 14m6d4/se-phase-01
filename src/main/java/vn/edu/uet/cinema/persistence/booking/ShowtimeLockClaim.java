@@ -48,8 +48,9 @@ class ShowtimeLockClaim implements Claim {
 				// 3. Delete lapsed holds on requested seats and customer's own lapsed holds
 				jpa.deleteLapsedHolds(booking.customerId(), booking.showtimeId(), seatIds, now);
 
-				if (jpa.findLivePending(booking.customerId(), now).isPresent()) {
-					return new HoldOutcome.CustomerHasPending();
+				Optional<BookingEntity> livePending = jpa.findLivePending(booking.customerId(), now);
+				if (livePending.isPresent()) {
+					return new HoldOutcome.CustomerHasPending(livePending.get().toBooking().id());
 				}
 
 				// 4. Check taken seats INSIDE the row lock
@@ -66,7 +67,9 @@ class ShowtimeLockClaim implements Claim {
 		} catch (DataIntegrityViolationException e) {
 			// Permanent last-line-of-defense guard (ADR 0004)
 			if (hasConstraint(e, "uq_booking_customer_pending")) {
-				return new HoldOutcome.CustomerHasPending();
+				UUID pendingId = jpa.findLivePending(booking.customerId(), now)
+					.map(BookingEntity::toBooking).map(Booking::id).orElse(null);
+				return new HoldOutcome.CustomerHasPending(pendingId);
 			}
 			if (hasConstraint(e, "uq_booked_seat_showtime_seat")) {
 				Set<UUID> taken = Set.copyOf(jpa.findTakenSeats(booking.showtimeId(), seatIds, now));

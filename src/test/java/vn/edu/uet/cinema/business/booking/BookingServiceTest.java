@@ -124,6 +124,18 @@ class BookingServiceTest {
 	}
 
 	@Test
+	void customerPendingTakesPrecedenceOverTakenSeatsWhenBothViolated() {
+		Booking pending = service.book(customerId, showtime.id(), List.of(vip.id()), NOW);
+		UUID otherCustomer = UUID.randomUUID();
+		service.book(otherCustomer, showtime.id(), List.of(standard.id()), NOW);
+
+		// Customer has pending booking (vip) and requests standard (which is held by otherCustomer)
+		assertThatThrownBy(() -> service.book(customerId, showtime.id(), List.of(standard.id()), NOW))
+			.isInstanceOf(ConflictException.class)
+			.hasMessageContaining("Customer already has a Pending Booking");
+	}
+
+	@Test
 	void customerWhoseHoldLapsedCanBookAgain() {
 		Booking lapsed = service.book(customerId, showtime.id(), List.of(vip.id()), NOW);
 		Instant later = lapsed.expiresAt();
