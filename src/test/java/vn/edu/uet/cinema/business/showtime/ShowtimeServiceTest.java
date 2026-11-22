@@ -203,6 +203,12 @@ class ShowtimeServiceTest {
 	}
 
 	@Test
+	void unknownShowtimeCannotBeDeleted() {
+		assertThatThrownBy(() -> service.delete(UUID.randomUUID(), Instant.now()))
+			.isInstanceOf(NotFoundException.class);
+	}
+
+	@Test
 	void pricedSeatsPriceEachSeatTypeFromTheBasePrice() {
 		Showtime showtime = withSeats();
 
