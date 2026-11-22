@@ -15,6 +15,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.context.annotation.Import;
+import org.springframework.core.env.Environment;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.ResultActions;
@@ -27,6 +28,8 @@ class AuthenticationApiTest {
 
 	@Autowired
 	MockMvc mvc;
+	@Autowired
+	Environment environment;
 
 	@Test
 	void customerRegistersLogsInAndReadsOwnAccount() throws Exception {
@@ -76,6 +79,10 @@ class AuthenticationApiTest {
 		mvc.perform(get("/actuator/metrics").header("Authorization", "Bearer " + customer))
 			.andExpect(status().isForbidden());
 		mvc.perform(get("/actuator/metrics").header("Authorization", "Bearer " + admin)).andExpect(status().isOk());
+		mvc.perform(get("/actuator/metrics/hikaricp.connections.max").header("Authorization", "Bearer " + admin))
+			.andExpect(status().isOk())
+			.andExpect(jsonPath("$.measurements[0].value").value(40.0));
+		assertThat(environment.getProperty("server.tomcat.threads.max", Integer.class)).isEqualTo(40);
 	}
 
 	@Test
