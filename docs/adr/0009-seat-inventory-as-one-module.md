@@ -25,7 +25,7 @@ The live-Hold rule is now written once in Java (`Booking.statusAt`, `Booking.occ
 
 ## Consequences
 
-- Each future contention strategy is another way to implement `hold`, or a decorator over the port. `pay`, `abandon`, `statuses`, `cancel` and `delete` are shared. The unique constraint stays the last guard (ADR 0004).
+- Each future contention strategy is another way to implement `hold`, or a decorator over the port. `pay`, `abandon`, `statuses`, `cancel` and `delete` are shared. The unique constraint stays the last guard (ADR 0004). See [ADR 0010](0010-seat-contention-strategies-benchmark-comparison.md) for the empirical benchmark comparison across `unique`, `showtime_lock`, `seat_rows`, and `single_writer`.
 - Business modules: `business.booking` depends on `business.showtime`, never the reverse. Inside the Showtime module, `inventory` uses `Cancellation` and `ShowtimeService` uses the port, so the two packages depend on each other. A cycle rule must treat `business.showtime..` as one slice.
 - Deleting a Showtime is now a native `delete from showtime`, without the select Spring Data's `deleteById` ran first. The `fk_booking_showtime` guard and its `409` are unchanged.
 - The port holds no in-memory state, so rule 8 does not apply to it.
