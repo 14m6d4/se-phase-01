@@ -51,7 +51,7 @@ class ShowtimeLockClaim implements Claim {
 
 				Optional<BookingEntity> livePending = jpa.findLivePending(booking.customerId(), now);
 				if (livePending.isPresent()) {
-					return new HoldOutcome.CustomerHasPending(livePending.get().toBooking().id());
+					return new HoldOutcome.CustomerHasPending(livePending.get().getId());
 				}
 
 				// 4. Check taken seats INSIDE the row lock
@@ -69,7 +69,7 @@ class ShowtimeLockClaim implements Claim {
 			// Permanent last-line-of-defense guard (ADR 0004)
 			if (hasConstraint(e, "uq_booking_customer_pending")) {
 				UUID pendingId = jpa.findLivePending(booking.customerId(), now)
-					.map(BookingEntity::toBooking).map(Booking::id).orElse(null);
+					.map(BookingEntity::getId).orElse(null);
 				return new HoldOutcome.CustomerHasPending(pendingId);
 			}
 			if (hasConstraint(e, "uq_booked_seat_showtime_seat")) {

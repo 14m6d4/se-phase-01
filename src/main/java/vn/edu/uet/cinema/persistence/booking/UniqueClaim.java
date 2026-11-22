@@ -43,7 +43,7 @@ class UniqueClaim implements Claim {
 			// The insert that loses the race fails here (ADR 0004).
 			if (hasConstraint(e, "uq_booking_customer_pending")) {
 				UUID pendingId = jpa.findLivePending(booking.customerId(), now)
-					.map(BookingEntity::toBooking).map(Booking::id).orElse(null);
+					.map(BookingEntity::getId).orElse(null);
 				return new HoldOutcome.CustomerHasPending(pendingId);
 			}
 			if (hasConstraint(e, "uq_booked_seat_showtime_seat")) {
