@@ -45,6 +45,10 @@ class BookingEntity {
 	protected BookingEntity() {
 	}
 
+	UUID getId() {
+		return id;
+	}
+
 	static BookingEntity from(Booking booking) {
 		BookingEntity entity = new BookingEntity();
 		entity.id = booking.id();

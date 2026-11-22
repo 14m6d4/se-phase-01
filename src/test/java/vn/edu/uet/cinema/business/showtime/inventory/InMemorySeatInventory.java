@@ -77,9 +77,10 @@ public class InMemorySeatInventory implements SeatInventory, BookingRepository {
 		List<UUID> seatIds = pending.seats().stream().map(BookedSeat::seatId).toList();
 		rows.values().removeIf(b -> b.statusAt(now) == BookingStatus.EXPIRED && (b.customerId().equals(pending.customerId())
 			|| b.showtimeId().equals(pending.showtimeId()) && b.seats().stream().anyMatch(s -> seatIds.contains(s.seatId()))));
-		if (rows.values().stream().anyMatch(b -> b.customerId().equals(pending.customerId())
-			&& b.status() == BookingStatus.PENDING)) {
-			return new HoldOutcome.CustomerHasPending();
+		Optional<Booking> livePending = rows.values().stream().filter(b -> b.customerId().equals(pending.customerId())
+			&& b.status() == BookingStatus.PENDING).findFirst();
+		if (livePending.isPresent()) {
+			return new HoldOutcome.CustomerHasPending(livePending.get().id());
 		}
 		// Every remaining row of the Showtime counts, as for UNIQUE(showtime_id, seat_id).
 		Set<UUID> taken = rows.values().stream().filter(b -> b.showtimeId().equals(pending.showtimeId()))

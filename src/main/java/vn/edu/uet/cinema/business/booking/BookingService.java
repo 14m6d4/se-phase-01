@@ -55,9 +55,6 @@ public class BookingService {
 			}
 			return new BookedSeat(id, seat.price());
 		}).toList();
-		bookings.findLivePending(customerId, now).ifPresent(pending -> {
-			throw new ConflictException("Customer already has a Pending Booking " + pending.id());
-		});
 		HoldOutcome outcome = inventory.hold(new Booking(UUID.randomUUID(), customerId, showtimeId,
 			BookingStatus.PENDING, now, now.plus(HOLD), booked), now);
 		return switch (outcome) {
@@ -66,7 +63,8 @@ public class BookingService {
 			case HoldOutcome.ShowtimeCancelled cancelled -> throw new ConflictException("Showtime is Cancelled");
 			case HoldOutcome.ShowtimeGone gone -> throw new ConflictException("Showtime no longer exists");
 			case HoldOutcome.CustomerHasPending pending ->
-				throw new ConflictException("Customer already has a Pending Booking");
+				throw new ConflictException("Customer already has a Pending Booking"
+					+ (pending.bookingId() != null ? " " + pending.bookingId() : ""));
 			case HoldOutcome.Busy busy ->
 				throw new ConflictException("Seats are being booked by others right now, try again");
 		};

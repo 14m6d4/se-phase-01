@@ -203,6 +203,7 @@ class BookingPersistenceTest {
 			now, now.plusSeconds(600), List.of(new BookedSeat(seat1, 100_000)));
 		HoldOutcome outcome = testInventory.hold(holdA2, now);
 		assertThat(outcome).isInstanceOf(HoldOutcome.CustomerHasPending.class);
+		assertThat(((HoldOutcome.CustomerHasPending) outcome).bookingId()).isEqualTo(holdA1.id());
 
 		// Customer A also attempts to hold their own already-held seat2
 		Booking holdA3 = new Booking(UUID.randomUUID(), customerA, showtimeId, BookingStatus.PENDING,
