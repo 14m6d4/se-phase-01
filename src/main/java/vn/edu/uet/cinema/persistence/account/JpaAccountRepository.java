@@ -28,6 +28,10 @@ class JpaAccountRepository implements AccountRepository {
 	private final AccountEntityRepository jpa;
 	private final JdbcClient jdbc;
 
+    JpaAccountRepository(AccountEntityRepository jpa) {
+        this(jpa, null);
+    }
+
 	JpaAccountRepository(AccountEntityRepository jpa, JdbcClient jdbc) {
 		this.jpa = jpa;
 		this.jdbc = jdbc;
