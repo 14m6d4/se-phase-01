@@ -109,7 +109,7 @@ interface BookingEntityRepository extends JpaRepository<BookingEntity, UUID> {
 	/** Fails on {@code fk_booking_showtime} while any Booking of it is left. */
 	@Modifying
 	@Query(nativeQuery = true, value = "delete from showtime where id = :showtimeId")
-	void deleteShowtime(UUID showtimeId);
+	int deleteShowtime(UUID showtimeId);
 
 	@Modifying
 	@Query(nativeQuery = true, value = """
