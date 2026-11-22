@@ -4,6 +4,7 @@ import static vn.edu.uet.cinema.persistence.ConstraintViolations.hasConstraint;
 
 import java.util.Optional;
 import java.util.UUID;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Repository;
@@ -28,10 +29,11 @@ class JpaAccountRepository implements AccountRepository {
 	private final AccountEntityRepository jpa;
 	private final JdbcClient jdbc;
 
-    JpaAccountRepository(AccountEntityRepository jpa) {
-        this(jpa, null);
-    }
+	JpaAccountRepository(AccountEntityRepository jpa) {
+		this(jpa, null);
+	}
 
+	@Autowired
 	JpaAccountRepository(AccountEntityRepository jpa, JdbcClient jdbc) {
 		this.jpa = jpa;
 		this.jdbc = jdbc;
