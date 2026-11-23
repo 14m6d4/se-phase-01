@@ -1,15 +1,12 @@
 package vn.edu.uet.cinema.persistence.booking;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.times;
-import static org.mockito.Mockito.verify;
-import static org.mockito.Mockito.when;
 
+import java.lang.reflect.Proxy;
 import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
+import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.Test;
 import org.springframework.dao.CannotAcquireLockException;
 import org.springframework.transaction.support.TransactionOperations;
@@ -19,32 +16,64 @@ import vn.edu.uet.cinema.business.showtime.inventory.BookingStatus;
 import vn.edu.uet.cinema.business.showtime.inventory.HoldOutcome;
 
 /**
- * A real deadlock between lapsed-Hold deletes depends on the order PostgreSQL visits rows, so it can't be forced
- * reliably against the database; the retry is checked here with the deadlock thrown by a mock.
+ * Deadlock retry verification without dynamic bytecode instrumentation (ADR 0001, C3).
+ * A real deadlock between lapsed-Hold deletes is verified against PostgreSQL in BookingPersistenceTest;
+ * the retry logic in JpaSeatInventory is tested here via standard Java dynamic proxies.
  */
 class JpaSeatInventoryTest {
 
 	private static final Instant NOW = Instant.parse("2026-10-01T10:00:00Z");
 
-	private final BookingEntityRepository jpa = mock(BookingEntityRepository.class);
-	private final JpaSeatInventory inventory = new JpaSeatInventory(jpa, TransactionOperations.withoutTransaction());
 	private final Booking booking = new Booking(UUID.randomUUID(), UUID.randomUUID(), UUID.randomUUID(),
 		BookingStatus.PENDING, NOW, NOW.plusSeconds(600), List.of(new BookedSeat(UUID.randomUUID(), 100_000)));
 
 	@Test
 	void bookingThatLosesADeadlockIsRetriedOnce() {
-		when(jpa.saveAndFlush(any())).thenThrow(new CannotAcquireLockException("deadlock detected"))
-			.thenAnswer(invocation -> invocation.getArgument(0));
+		AtomicInteger saveCalls = new AtomicInteger();
+		BookingEntityRepository jpa = (BookingEntityRepository) Proxy.newProxyInstance(
+			BookingEntityRepository.class.getClassLoader(),
+			new Class<?>[] { BookingEntityRepository.class },
+			(proxy, method, args) -> {
+				if ("saveAndFlush".equals(method.getName())) {
+					int count = saveCalls.incrementAndGet();
+					if (count == 1) {
+						throw new CannotAcquireLockException("deadlock detected");
+					}
+					return args[0];
+				}
+				if ("lockShowtimeStatus".equals(method.getName())) {
+					return "SCHEDULED";
+				}
+				return null;
+			}
+		);
+		JpaSeatInventory inventory = new JpaSeatInventory(jpa, TransactionOperations.withoutTransaction());
 
 		assertThat(inventory.hold(booking, NOW)).isEqualTo(new HoldOutcome.Held(booking));
-		verify(jpa, times(2)).saveAndFlush(any());
+		assertThat(saveCalls.get()).isEqualTo(2);
 	}
 
 	@Test
 	void secondDeadlockIsAConflictThatDoesNotClaimTheSeatsAreTaken() {
-		when(jpa.saveAndFlush(any())).thenThrow(new CannotAcquireLockException("deadlock detected"));
+		AtomicInteger saveCalls = new AtomicInteger();
+		BookingEntityRepository jpa = (BookingEntityRepository) Proxy.newProxyInstance(
+			BookingEntityRepository.class.getClassLoader(),
+			new Class<?>[] { BookingEntityRepository.class },
+			(proxy, method, args) -> {
+				if ("saveAndFlush".equals(method.getName())) {
+					saveCalls.incrementAndGet();
+					throw new CannotAcquireLockException("deadlock detected");
+				}
+				if ("lockShowtimeStatus".equals(method.getName())) {
+					return "SCHEDULED";
+				}
+				return null;
+			}
+		);
+		JpaSeatInventory inventory = new JpaSeatInventory(jpa, TransactionOperations.withoutTransaction());
 
 		assertThat(inventory.hold(booking, NOW)).isEqualTo(new HoldOutcome.Busy());
-		verify(jpa, times(2)).saveAndFlush(any());
+		assertThat(saveCalls.get()).isEqualTo(2);
 	}
 }
+

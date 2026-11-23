@@ -151,9 +151,9 @@ public class SingleWriterSeatInventory implements SeatInventory {
 			ShowtimeSeats model = models.get(booking.showtimeId());
 			if (model != null) {
 				for (BookedSeat seat : booking.seats()) {
-					// Conditional remove: only remove if entry still holds this bookingId
+					// Conditional remove: remove if entry holds this bookingId or was cold-loaded without id
 					model.seats.computeIfPresent(seat.seatId(), (seatId, entry) ->
-						booking.id().equals(entry.bookingId) ? null : entry
+						(entry.bookingId == null || booking.id().equals(entry.bookingId)) ? null : entry
 					);
 				}
 			}

@@ -13,6 +13,7 @@ import vn.edu.uet.cinema.business.account.AccountService;
 import vn.edu.uet.cinema.business.account.PasswordHasher;
 import vn.edu.uet.cinema.business.auditorium.AuditoriumRepository;
 import vn.edu.uet.cinema.business.auditorium.AuditoriumService;
+import vn.edu.uet.cinema.business.booking.AntiHoardingGuard;
 import vn.edu.uet.cinema.business.booking.BookingRepository;
 import vn.edu.uet.cinema.business.booking.BookingService;
 import vn.edu.uet.cinema.business.cinema.CinemaRepository;
@@ -70,8 +71,9 @@ class BusinessConfig {
 	}
 
 	@Bean
-	BookingService bookingService(ShowtimeService showtimes, BookingRepository bookings, SeatInventory inventory) {
-		return new BookingService(showtimes, bookings, inventory);
+	BookingService bookingService(ShowtimeService showtimes, BookingRepository bookings, SeatInventory inventory,
+		@Value("${app.anti-hoarding.enabled:false}") boolean antiHoardingEnabled) {
+		return new BookingService(showtimes, bookings, inventory, new AntiHoardingGuard(antiHoardingEnabled));
 	}
 
 	/** Admins are never self-registered: the one Admin comes from ADMIN_EMAIL / ADMIN_PASSWORD. */
