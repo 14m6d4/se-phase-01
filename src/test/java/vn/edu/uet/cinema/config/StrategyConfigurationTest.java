@@ -13,14 +13,7 @@ import vn.edu.uet.cinema.persistence.booking.JpaSeatInventory;
 class StrategyConfigurationTest {
 
 	private final BusinessConfig businessConfig = new BusinessConfig();
-	private final SeatInventory mockInventory = new SeatInventory() {
-		public vn.edu.uet.cinema.business.showtime.inventory.HoldOutcome hold(vn.edu.uet.cinema.business.showtime.inventory.Booking pending, java.time.Instant now) { return null; }
-		public vn.edu.uet.cinema.business.showtime.inventory.PayOutcome pay(vn.edu.uet.cinema.business.showtime.inventory.Booking booking, java.time.Instant now) { return null; }
-		public vn.edu.uet.cinema.business.showtime.inventory.AbandonOutcome abandon(vn.edu.uet.cinema.business.showtime.inventory.Booking booking) { return null; }
-		public java.util.Map<java.util.UUID, vn.edu.uet.cinema.business.showtime.inventory.SeatStatus> statuses(java.util.UUID showtimeId, java.time.Instant now) { return java.util.Map.of(); }
-		public vn.edu.uet.cinema.business.showtime.inventory.CancelOutcome cancel(java.util.UUID showtimeId, vn.edu.uet.cinema.business.showtime.inventory.Cancellation cancellation, java.time.Instant now) { return null; }
-		public vn.edu.uet.cinema.business.showtime.inventory.DeleteOutcome delete(java.util.UUID showtimeId, java.time.Instant now) { return null; }
-	};
+	private final SeatInventory mockInventory = mock(SeatInventory.class);
 
 	@Test
 	void wiresJpaSeatInventoryForDatabaseStrategies() {

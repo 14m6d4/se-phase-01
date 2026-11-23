@@ -66,8 +66,18 @@ class SingleWriterSeatInventoryTest {
 			}
 
 			@Override
+			public PayOutcome pay(UUID customerId, UUID bookingId, Instant now) {
+				return new PayOutcome.Paid(null);
+			}
+
+			@Override
 			public PayOutcome pay(Booking booking, Instant now) {
 				return new PayOutcome.Paid(booking.confirmed());
+			}
+
+			@Override
+			public AbandonOutcome abandon(UUID customerId, UUID bookingId) {
+				return new AbandonOutcome.Abandoned();
 			}
 
 			@Override

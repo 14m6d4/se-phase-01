@@ -6,14 +6,21 @@ import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Repository;
 import org.springframework.transaction.annotation.Transactional;
 import vn.edu.uet.cinema.business.ConflictException;
+import vn.edu.uet.cinema.business.PageQuery;
+import vn.edu.uet.cinema.business.PageSlice;
 import vn.edu.uet.cinema.business.cinema.Cinema;
 import vn.edu.uet.cinema.business.cinema.CinemaRepository;
 
 @Repository
 class JpaCinemaRepository implements CinemaRepository {
+
+	private static final Sort DEFAULT_SORT = Sort.by(Sort.Order.asc("name"), Sort.Order.asc("id"));
 
 	private final CinemaEntityRepository jpa;
 
@@ -24,6 +31,13 @@ class JpaCinemaRepository implements CinemaRepository {
 	@Override
 	public List<Cinema> findAll() {
 		return jpa.findAll().stream().map(CinemaEntity::toCinema).toList();
+	}
+
+	@Override
+	public PageSlice<Cinema> findAll(PageQuery query) {
+		Page<CinemaEntity> page = jpa.findAll(PageRequest.of(query.page(), query.size(), DEFAULT_SORT));
+		return new PageSlice<>(page.getContent().stream().map(CinemaEntity::toCinema).toList(),
+			query.page(), query.size(), page.getTotalElements());
 	}
 
 	@Override

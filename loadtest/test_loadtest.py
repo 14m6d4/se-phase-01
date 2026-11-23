@@ -172,7 +172,10 @@ def test_browse_setup():
     source = (ROOT / "loadtest/k6/browse.js").read_text()
     source = re.sub(r"^import .*$", "", source, flags=re.MULTILINE)
     source = source.replace("export { handleSummary };", "")
-    source = source.replace("export default function ({ date }) {", "function browseIteration({ date }) {")
+    source = source.replace(
+        "export default function ({ listUrl, seatUrls }) {",
+        "function browseIteration({ listUrl, seatUrls }) {",
+    )
     source = source.replace("export const ", "const ").replace("export function ", "function ")
     node("""
 import assert from 'node:assert/strict';
@@ -181,22 +184,33 @@ const LOAD = { tags: { phase: 'load' } };
 const summaryOptions = { thresholds: {} };
 function arrivalRate() { return {}; }
 function handleSummary() { return {}; }
-function fail(message) { throw new Error(message); }
 function check(value, assertions) {
 	return Object.values(assertions).every((assertion) => assertion(value));
 }
 const start = Date.UTC(2026, 9, 20, 10, 0, 0);
 const expectedToday = new Date(start + 7 * 3600 * 1000).toISOString().slice(0, 10);
 const expectedTomorrow = new Date(start + (7 + 24) * 3600 * 1000).toISOString().slice(0, 10);
+let seatCount = 120;
 const requests = [];
 const http = {
 	get(url, params) {
 		requests.push({ url, params });
+		if (params !== undefined) {
+			return {
+				status: 200,
+				body: null,
+				json() { throw new Error('json() must not be called in hot path'); },
+			};
+		}
 		if (url.includes('/seats')) {
-			return { status: 200, body: '', json: () => Array.from({ length: 120 }, () => ({})) };
+			return { status: 200, body: '', json: () => Array.from({ length: seatCount }, () => ({})) };
 		}
 		const date = new URL(url).searchParams.get('date');
-		return { status: 200, body: '', json: () => (date === expectedTomorrow ? [{ id: 'showtime-1' }] : []) };
+		return {
+			status: 200,
+			body: '',
+			json: () => (date === expectedTomorrow ? [{ id: 'showtime-1' }, { id: 'showtime-2' }] : []),
+		};
 	},
 };
 globalThis.__VU = 1;
@@ -204,19 +218,35 @@ globalThis.__ITER = 0;
 """ + source + """
 Date.now = () => start;
 const setupData = setup();
-assert.deepEqual(setupData, { date: expectedTomorrow });
-assert.equal(requests.length, 2);
+assert.deepEqual(setupData, {
+	date: expectedTomorrow,
+	listUrl: `http://localhost:8080/api/showtimes?date=${expectedTomorrow}`,
+	seatUrls: [
+		'http://localhost:8080/api/showtimes/showtime-1/seats',
+		'http://localhost:8080/api/showtimes/showtime-2/seats',
+	],
+});
+assert.equal(requests.length, 3);
 assert.ok(requests.every((request) => request.params === undefined));
 const beforeIteration = requests.length;
 Date.now = () => start + 24 * 3600 * 1000;  // midnight may pass after setup
 browseIteration(setupData);
+globalThis.__ITER = 1;
+browseIteration(setupData);
 const measured = requests.slice(beforeIteration);
-assert.equal(measured.length, 2);
-assert.equal(measured[0].params, LOAD);
-assert.equal(measured[1].params, LOAD);
+assert.equal(measured.length, 4);
+assert.equal(measured[0].params.responseType, 'none');
+assert.equal(measured[1].params.responseType, 'none');
+assert.equal(measured[0].params.tags.phase, 'load');
+assert.equal(measured[1].params.tags.phase, 'load');
+assert.equal(measured[0].params.tags.name, 'GET /api/showtimes');
+assert.equal(measured[1].params.tags.name, 'GET /api/showtimes/:id/seats');
 assert.ok(measured[0].url.endsWith(`date=${expectedTomorrow}`));
-assert.ok(measured[1].url.endsWith('/api/showtimes/showtime-1/seats'));
+assert.ok(measured[1].url.endsWith('/api/showtimes/showtime-2/seats'));
+assert.ok(measured[3].url.endsWith('/api/showtimes/showtime-1/seats'));
 assert.notEqual(expectedToday, expectedTomorrow);
+seatCount = 10;
+assert.throws(() => setup(), /expected 120 seats, got 10/);
 """)
 
 

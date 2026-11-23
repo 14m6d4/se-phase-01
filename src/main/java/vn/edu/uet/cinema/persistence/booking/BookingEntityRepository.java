@@ -9,6 +9,8 @@ import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
@@ -20,15 +22,28 @@ interface BookingEntityRepository extends JpaRepository<BookingEntity, UUID> {
 
 	List<BookingEntity> findByCustomerIdOrderByCreatedAtDesc(UUID customerId);
 
+	Page<BookingEntity> findByCustomerIdOrderByCreatedAtDescIdDesc(UUID customerId, Pageable pageable);
+
 	/** The conditional update of ADR 0004: only a live Hold can be paid. */
 	@Modifying
 	@Query(nativeQuery = true, value = "update booking b set status = 'CONFIRMED' where b.id = :id and " + LIVE_HOLD)
 	int confirm(UUID id, Instant now);
 
+	@Modifying
+	@Query(nativeQuery = true, value = "update booking b set status = 'CONFIRMED' where b.id = :id and b.customer_id = :customerId and " + LIVE_HOLD)
+	int confirm(UUID id, UUID customerId, Instant now);
+
 	/** booked_seat rows go by ON DELETE CASCADE. */
 	@Modifying
 	@Query(nativeQuery = true, value = "delete from booking where id = :id and status = 'PENDING'")
 	int deletePending(UUID id);
+
+	@Modifying
+	@Query(nativeQuery = true, value = "delete from booking where id = :id and customer_id = :customerId and status = 'PENDING'")
+	int deletePending(UUID id, UUID customerId);
+
+	@Query(nativeQuery = true, value = "select exists(select 1 from showtime where id = :showtimeId)")
+	boolean existsShowtime(UUID showtimeId);
 
 	/**
 	 * Holds the Showtime row until commit, so a cancel waits for this Booking and then deletes it, or has already
@@ -94,7 +109,7 @@ interface BookingEntityRepository extends JpaRepository<BookingEntity, UUID> {
 	/** Fails on {@code fk_booking_showtime} while any Booking of it is left. */
 	@Modifying
 	@Query(nativeQuery = true, value = "delete from showtime where id = :showtimeId")
-	void deleteShowtime(UUID showtimeId);
+	int deleteShowtime(UUID showtimeId);
 
 	@Modifying
 	@Query(nativeQuery = true, value = """

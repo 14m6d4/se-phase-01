@@ -6,6 +6,8 @@ import com.nimbusds.jose.jwk.source.ImmutableSecret;
 import jakarta.servlet.http.HttpServletResponse;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
+import java.time.Instant;
+import java.util.concurrent.ConcurrentHashMap;
 import javax.crypto.SecretKey;
 import javax.crypto.spec.SecretKeySpec;
 import org.springframework.beans.factory.annotation.Value;
@@ -17,14 +19,17 @@ import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.http.SessionCreationPolicy;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.oauth2.jose.jws.MacAlgorithm;
+import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.security.oauth2.jwt.JwtDecoder;
 import org.springframework.security.oauth2.jwt.JwtEncoder;
 import org.springframework.security.oauth2.jwt.NimbusJwtDecoder;
 import org.springframework.security.oauth2.jwt.NimbusJwtEncoder;
 import org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationConverter;
+import org.springframework.boot.web.servlet.FilterRegistrationBean;
 import org.springframework.security.oauth2.server.resource.authentication.JwtGrantedAuthoritiesConverter;
 import org.springframework.security.oauth2.server.resource.web.BearerTokenAuthenticationEntryPoint;
 import org.springframework.security.oauth2.server.resource.web.access.BearerTokenAccessDeniedHandler;
+import org.springframework.security.oauth2.server.resource.web.authentication.BearerTokenAuthenticationFilter;
 import org.springframework.security.web.AuthenticationEntryPoint;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.access.AccessDeniedHandler;
@@ -44,7 +49,7 @@ public class SecurityConfig {
 		"/api/showtimes/**"};
 
 	@Bean
-	SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
+	SecurityFilterChain securityFilterChain(HttpSecurity http, RateLimitingFilter rateLimitingFilter) throws Exception {
 		AuthenticationEntryPoint unauthorized = problemJson(new BearerTokenAuthenticationEntryPoint());
 		AccessDeniedHandler forbidden = problemJson(new BearerTokenAccessDeniedHandler());
 		return http
@@ -63,7 +68,28 @@ public class SecurityConfig {
 				.jwt(jwt -> jwt.jwtAuthenticationConverter(rolesClaimConverter()))
 				.authenticationEntryPoint(unauthorized)
 				.accessDeniedHandler(forbidden))
+			.addFilterAfter(rateLimitingFilter, BearerTokenAuthenticationFilter.class)
 			.build();
+	}
+
+	@Bean
+	RateLimitingFilter rateLimitingFilter(
+		@Value("${app.rate-limit.enabled:true}") boolean enabled,
+		@Value("${app.rate-limit.auth.capacity:200}") long authCapacity,
+		@Value("${app.rate-limit.auth.refill-tokens:200}") long authRefillTokens,
+		@Value("${app.rate-limit.auth.refill-duration-seconds:60}") long authDurationSeconds,
+		@Value("${app.rate-limit.api.capacity:3000}") long apiCapacity,
+		@Value("${app.rate-limit.api.refill-tokens:3000}") long apiRefillTokens,
+		@Value("${app.rate-limit.api.refill-duration-seconds:60}") long apiDurationSeconds) {
+		return new RateLimitingFilter(enabled, authCapacity, authRefillTokens, authDurationSeconds,
+			apiCapacity, apiRefillTokens, apiDurationSeconds);
+	}
+
+	@Bean
+	FilterRegistrationBean<RateLimitingFilter> rateLimitingFilterRegistration(RateLimitingFilter filter) {
+		FilterRegistrationBean<RateLimitingFilter> registration = new FilterRegistrationBean<>(filter);
+		registration.setEnabled(false);
+		return registration;
 	}
 
 	@Bean
@@ -82,7 +108,28 @@ public class SecurityConfig {
 
 	@Bean
 	JwtDecoder jwtDecoder(SecretKey jwtKey) {
-		return NimbusJwtDecoder.withSecretKey(jwtKey).macAlgorithm(MacAlgorithm.HS256).build();
+		NimbusJwtDecoder delegate = NimbusJwtDecoder.withSecretKey(jwtKey).macAlgorithm(MacAlgorithm.HS256).build();
+		ConcurrentHashMap<String, Jwt> cache = new ConcurrentHashMap<>(2048);
+		return token -> {
+			Jwt cached = cache.get(token);
+			Instant now = Instant.now();
+			if (cached != null) {
+				Instant expiresAt = cached.getExpiresAt();
+				if (expiresAt == null || expiresAt.isAfter(now)) {
+					return cached;
+				}
+				cache.remove(token, cached);
+			}
+			Jwt decoded = delegate.decode(token);
+			Instant expiresAt = decoded.getExpiresAt();
+			if (expiresAt == null || expiresAt.isAfter(now)) {
+				if (cache.size() >= 4096) {
+					cache.clear();
+				}
+				cache.putIfAbsent(token, decoded);
+			}
+			return decoded;
+		};
 	}
 
 	@Bean
