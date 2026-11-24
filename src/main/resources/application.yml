@@ -62,8 +62,18 @@ app:
   anti-hoarding:
     enabled: ${ANTI_HOARDING_ENABLED:false}
 
+logging:
+  structured:
+    format:
+      console: ${LOG_STRUCTURED_FORMAT:logstash}
+  level:
+    vn.edu.uet.cinema.config.TraceResponseHeaderFilter: ${HTTP_ACCESS_LOG_LEVEL:INFO}
+
 management:
   endpoints:
     web:
       exposure:
         include: health,metrics
+  tracing:
+    sampling:
+      probability: ${TRACING_SAMPLING_PROBABILITY:1.0}
