@@ -6,3 +6,5 @@ app:
     secret: test-secret-not-for-production-0123456789
   rate-limit:
     enabled: ${RATE_LIMIT_ENABLED:false}
+  anti-hoarding:
+    enabled: ${ANTI_HOARDING_ENABLED:false}

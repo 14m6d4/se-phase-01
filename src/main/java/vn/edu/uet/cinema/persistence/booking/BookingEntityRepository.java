@@ -17,6 +17,9 @@ import org.springframework.data.jpa.repository.Query;
 
 interface BookingEntityRepository extends JpaRepository<BookingEntity, UUID> {
 
+	@Query("select b from BookingEntity b left join fetch b.seats where b.id = :id")
+	Optional<BookingEntity> findByIdWithSeats(UUID id);
+
 	@Query(nativeQuery = true, value = "select b.* from booking b where b.customer_id = :customerId and " + LIVE_HOLD)
 	Optional<BookingEntity> findLivePending(UUID customerId, Instant now);
 

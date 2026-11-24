@@ -1,6 +1,7 @@
 package vn.edu.uet.cinema.business.showtime;
 
 import java.time.Instant;
+import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -27,6 +28,7 @@ public class ShowtimeService {
 	private final ShowtimeRepository showtimes;
 	private final SeatInventory inventory;
 	private final Map<UUID, List<Seat>> layouts = new ConcurrentHashMap<>();
+	private final Map<UUID, Map<UUID, Seat>> seatsByIdCache = new ConcurrentHashMap<>();
 
 	public ShowtimeService(MovieService movies, AuditoriumService auditoriums, ShowtimeRepository showtimes,
 		SeatInventory inventory) {
@@ -73,6 +75,21 @@ public class ShowtimeService {
 		return priced;
 	}
 
+	/** The Seats of an Auditorium keyed by Seat id, cached without allocating per-request pricing wrappers. */
+	public Map<UUID, Seat> seatsById(UUID auditoriumId) {
+		Map<UUID, Seat> byId = seatsByIdCache.get(auditoriumId);
+		if (byId != null) {
+			return byId;
+		}
+		Map<UUID, Seat> computed = new LinkedHashMap<>();
+		for (Seat seat : layout(auditoriumId)) {
+			computed.put(seat.id(), seat);
+		}
+		Map<UUID, Seat> immutable = Collections.unmodifiableMap(computed);
+		Map<UUID, Seat> existing = seatsByIdCache.putIfAbsent(auditoriumId, immutable);
+		return existing != null ? existing : immutable;
+	}
+
 	/**
 	 * An Auditorium's Seats, read once (ADR 0008). Auditoriums are not edited, and one with a Showtime cannot be
 	 * deleted (ADR 0006), so the layout behind a Showtime is fixed on every instance. A change that lets an
@@ -88,8 +105,12 @@ public class ShowtimeService {
 	public List<SeatMapEntry> seatMap(UUID id, Instant now) {
 		Showtime showtime = getScheduled(id);
 		Map<UUID, SeatStatus> statuses = inventory.statuses(id, now);
-		return pricedSeats(showtime).values().stream().map(p -> new SeatMapEntry(p,
-			statuses.getOrDefault(p.seat().id(), SeatStatus.AVAILABLE))).toList();
+		long basePrice = showtime.basePrice();
+		return layout(showtime.auditoriumId()).stream()
+			.map(seat -> new SeatMapEntry(
+				new PricedSeat(seat, SeatPricing.price(seat.type(), basePrice)),
+				statuses.getOrDefault(seat.id(), SeatStatus.AVAILABLE)))
+			.toList();
 	}
 
 	public List<Showtime> list(Instant fromInclusive, Instant toExclusive, UUID cinemaId, UUID movieId) {

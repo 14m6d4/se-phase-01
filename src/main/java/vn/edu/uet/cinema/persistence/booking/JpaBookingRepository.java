@@ -26,7 +26,7 @@ class JpaBookingRepository implements BookingRepository {
 	@Override
 	@Transactional(readOnly = true)
 	public Optional<Booking> findById(UUID id) {
-		return jpa.findById(id).map(BookingEntity::toBooking);
+		return jpa.findByIdWithSeats(id).map(BookingEntity::toBooking);
 	}
 
 	@Override

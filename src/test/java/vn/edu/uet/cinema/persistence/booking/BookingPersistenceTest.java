@@ -52,6 +52,7 @@ import vn.edu.uet.cinema.business.showtime.inventory.HoldOutcome;
 import vn.edu.uet.cinema.business.showtime.inventory.PayOutcome;
 import vn.edu.uet.cinema.business.showtime.inventory.SeatInventory;
 import vn.edu.uet.cinema.business.showtime.inventory.SeatStatus;
+import vn.edu.uet.cinema.business.showtime.inventory.SingleWriterSeatInventory;
 import vn.edu.uet.cinema.config.SeatInventoryStrategy;
 
 @SpringBootTest
@@ -178,9 +179,9 @@ class BookingPersistenceTest {
 	}
 
 	@ParameterizedTest
-	@EnumSource(value = SeatInventoryStrategy.class, names = {"UNIQUE", "SHOWTIME_LOCK", "SEAT_ROWS"})
+	@EnumSource(SeatInventoryStrategy.class)
 	void whenBothCustomerHasPendingAndSeatsTaken_customerHasPendingIsReported(SeatInventoryStrategy strategy) {
-		JpaSeatInventory testInventory = new JpaSeatInventory(jpa, transaction, strategy);
+		SeatInventory testInventory = seatInventoryFor(strategy);
 		Auditorium hall = auditorium();
 		UUID showtimeId = showtime(hall);
 		UUID seat1 = hall.seats().get(0).id();
@@ -395,8 +396,32 @@ class BookingPersistenceTest {
 		}
 	}
 
-	@Test
-	void deadlockOnLapsedHoldRetrySucceedsWhenContentionRollsBack() throws Exception {
+	@ParameterizedTest
+	@EnumSource(SeatInventoryStrategy.class)
+	void abandonByCustomerIdAndBookingIdReleasesSeatsImmediatelyForNextHold(SeatInventoryStrategy strategy) {
+		SeatInventory testInventory = seatInventoryFor(strategy);
+		Auditorium hall = auditorium();
+		UUID showtimeId = showtime(hall);
+		UUID seatId = hall.seats().get(0).id();
+		UUID customer1 = customer();
+		UUID customer2 = customer();
+
+		Booking b1 = new Booking(UUID.randomUUID(), customer1, showtimeId, BookingStatus.PENDING,
+			now, now.plus(10, ChronoUnit.MINUTES), List.of(new BookedSeat(seatId, 100_000)));
+		assertThat(testInventory.hold(b1, now)).isInstanceOf(HoldOutcome.Held.class);
+
+		assertThat(testInventory.abandon(customer1, b1.id())).isEqualTo(new AbandonOutcome.Abandoned());
+		assertThat(testInventory.statuses(showtimeId, now)).isEmpty();
+
+		Booking b2 = new Booking(UUID.randomUUID(), customer2, showtimeId, BookingStatus.PENDING,
+			now, now.plus(10, ChronoUnit.MINUTES), List.of(new BookedSeat(seatId, 100_000)));
+		assertThat(testInventory.hold(b2, now)).isInstanceOf(HoldOutcome.Held.class);
+	}
+
+	@ParameterizedTest
+	@EnumSource(SeatInventoryStrategy.class)
+	void deadlockOnLapsedHoldRetrySucceedsWhenContentionRollsBack(SeatInventoryStrategy strategy) throws Exception {
+		SeatInventory testInventory = seatInventoryFor(strategy);
 		Auditorium hall = auditorium();
 		UUID showtimeId = showtime(hall);
 		UUID seatId = hall.seats().get(0).id();
@@ -426,7 +451,7 @@ class BookingPersistenceTest {
 			}
 
 			// 4. Launch adapter hold H in background
-			CompletableFuture<HoldOutcome> holdFuture = CompletableFuture.supplyAsync(() -> inventory.hold(fresh, now));
+			CompletableFuture<HoldOutcome> holdFuture = CompletableFuture.supplyAsync(() -> testInventory.hold(fresh, now));
 
 			// 5. Wait until H is blocked on deleting P
 			waitForBlockedLock(conn);
@@ -446,8 +471,10 @@ class BookingPersistenceTest {
 		}
 	}
 
-	@Test
-	void doubleDeadlockReturnsBusyOutcome() throws Exception {
+	@ParameterizedTest
+	@EnumSource(SeatInventoryStrategy.class)
+	void doubleDeadlockReturnsBusyOutcome(SeatInventoryStrategy strategy) throws Exception {
+		SeatInventory testInventory = seatInventoryFor(strategy);
 		Auditorium hall = auditorium();
 		UUID showtimeId = showtime(hall);
 		UUID seatA = hall.seats().get(0).id();
@@ -494,7 +521,7 @@ class BookingPersistenceTest {
 			}
 
 			// 5. Launch adapter hold H in background
-			CompletableFuture<HoldOutcome> holdFuture = CompletableFuture.supplyAsync(() -> inventory.hold(fresh, now));
+			CompletableFuture<HoldOutcome> holdFuture = CompletableFuture.supplyAsync(() -> testInventory.hold(fresh, now));
 
 			// 6. Wait until H is blocked on deleting P1
 			waitForBlockedLock(conn1);
@@ -524,6 +551,11 @@ class BookingPersistenceTest {
 			HoldOutcome outcome = holdFuture.get(10, TimeUnit.SECONDS);
 			assertThat(outcome).isInstanceOf(HoldOutcome.Busy.class);
 		}
+	}
+
+	private SeatInventory seatInventoryFor(SeatInventoryStrategy strategy) {
+		JpaSeatInventory db = new JpaSeatInventory(jpa, transaction, strategy);
+		return strategy == SeatInventoryStrategy.SINGLE_WRITER ? new SingleWriterSeatInventory(db) : db;
 	}
 
 	private void waitForBlockedLock(Connection conn) throws Exception {

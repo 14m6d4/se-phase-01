@@ -60,7 +60,11 @@ app:
       refill-tokens: ${RATE_LIMIT_API_REFILL_TOKENS:3000}
       refill-duration-seconds: ${RATE_LIMIT_API_DURATION:60}
   anti-hoarding:
-    enabled: ${ANTI_HOARDING_ENABLED:false}
+    enabled: ${ANTI_HOARDING_ENABLED:true}
+    abandon-cooldown-seconds: ${ANTI_HOARDING_ABANDON_COOLDOWN_SECONDS:5}
+    max-abandons-in-window: ${ANTI_HOARDING_MAX_ABANDONS_IN_WINDOW:3}
+    repeated-abandon-penalty-seconds: ${ANTI_HOARDING_REPEATED_ABANDON_PENALTY_SECONDS:120}
+    max-active-holds-per-ip: ${ANTI_HOARDING_MAX_ACTIVE_HOLDS_PER_IP:3}
 
 logging:
   structured:
@@ -68,6 +72,7 @@ logging:
       console: ${LOG_STRUCTURED_FORMAT:logstash}
   level:
     vn.edu.uet.cinema.config.TraceResponseHeaderFilter: ${HTTP_ACCESS_LOG_LEVEL:INFO}
+    org.hibernate.orm.jdbc.error: ${HIBERNATE_JDBC_ERROR_LEVEL:ERROR}
 
 management:
   endpoints:

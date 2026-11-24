@@ -6,6 +6,7 @@ import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.media.Schema;
 import io.swagger.v3.oas.annotations.security.SecurityRequirement;
 import io.swagger.v3.oas.annotations.tags.Tag;
+import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
@@ -50,9 +51,12 @@ class BookingController {
 		+ "showtime is 404. Requires CUSTOMER.")
 	@ResponseStatus(HttpStatus.CREATED)
 	@SecurityRequirement(name = OpenApiConfig.BEARER_AUTH)
-	BookingResponse book(@AuthenticationPrincipal Jwt jwt, @Valid @RequestBody BookingRequest request) {
+	BookingResponse book(@AuthenticationPrincipal Jwt jwt, @Valid @RequestBody BookingRequest request,
+		HttpServletRequest httpRequest) {
 		Instant now = Instant.now();
-		return BookingResponse.from(bookings.book(customerId(jwt), request.showtimeId(), request.seatIds(), now), now);
+		String clientKey = httpRequest != null ? httpRequest.getRemoteAddr() : null;
+		return BookingResponse.from(
+			bookings.book(customerId(jwt), request.showtimeId(), request.seatIds(), now, clientKey), now);
 	}
 
 	@GetMapping("/api/bookings")

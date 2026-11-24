@@ -15,13 +15,15 @@ import java.util.function.LongConsumer;
  * Strategy 4 (single-writer): A single writer per Showtime coordinated via JVM {@link ReentrantLock}
  * coupled with an in-memory seat occupancy read model (ADR 0013).
  *
- * Fast path: lock-free check against in-memory model rejects taken seats with zero DB access.
+ * Fast path: lock-free check against in-memory state rejects active pending holds (B4 precedence) and
+ * taken seats with zero DB access.
  * Protected path: acquires lane lock (tryLock with timeout), re-checks in memory, delegates to
  * underlying SeatInventory, and updates the read model strictly post-commit.
  */
 public class SingleWriterSeatInventory implements SeatInventory {
 
 	private static final long DEFAULT_LOCK_TIMEOUT_SECONDS = 2;
+	private static final int MAX_INDEX_ENTRIES = 10_000;
 	private static final LongConsumer NOOP_OBSERVER = nanos -> { };
 
 	private final SeatInventory delegate;
@@ -31,6 +33,8 @@ public class SingleWriterSeatInventory implements SeatInventory {
 	private final ConcurrentHashMap<UUID, ReentrantLock> lanes = new ConcurrentHashMap<>();
 	private final ConcurrentHashMap<UUID, ShowtimeSeats> models = new ConcurrentHashMap<>();
 	private final ConcurrentHashMap<UUID, AtomicLong> versions = new ConcurrentHashMap<>();
+	private final ConcurrentHashMap<UUID, HeldBookingRef> bookingIndex = new ConcurrentHashMap<>();
+	private final ConcurrentHashMap<UUID, PendingHoldRef> customerPending = new ConcurrentHashMap<>();
 
 	public SingleWriterSeatInventory(SeatInventory delegate) {
 		this(delegate, DEFAULT_LOCK_TIMEOUT_SECONDS, NOOP_OBSERVER);
@@ -51,7 +55,11 @@ public class SingleWriterSeatInventory implements SeatInventory {
 		UUID showtimeId = pending.showtimeId();
 		List<UUID> requestedSeatIds = pending.seats().stream().map(BookedSeat::seatId).toList();
 
-		// 1. Lock-free fast-path pre-check
+		// 1. Lock-free fast-path pre-check: enforce CustomerHasPending before SeatsTaken (B4)
+		HoldOutcome pendingConflict = findLiveCustomerPending(pending, now);
+		if (pendingConflict != null) {
+			return pendingConflict;
+		}
 		ShowtimeSeats model = models.get(showtimeId);
 		if (model != null) {
 			List<UUID> taken = findTakenInModel(model, requestedSeatIds, now);
@@ -78,7 +86,12 @@ public class SingleWriterSeatInventory implements SeatInventory {
 		}
 
 		try {
-			// 3. Re-check in-memory model inside the lane
+			// 3. Re-check customer pending and in-memory model inside the lane
+			HoldOutcome lanePendingConflict = findLiveCustomerPending(pending, now);
+			if (lanePendingConflict != null) {
+				return lanePendingConflict;
+			}
+
 			ShowtimeSeats currentModel = models.get(showtimeId);
 			if (currentModel == null) {
 				currentModel = loadModel(showtimeId, now);
@@ -94,18 +107,25 @@ public class SingleWriterSeatInventory implements SeatInventory {
 
 			// 5. Update in-memory model strictly post-commit
 			if (outcome instanceof HoldOutcome.Held held) {
-				boolean sold = held.booking().status() == BookingStatus.CONFIRMED
-					|| held.booking().status() == BookingStatus.REFUNDED;
-				for (BookedSeat seat : held.booking().seats()) {
+				Booking saved = held.booking();
+				boolean sold = saved.status() == BookingStatus.CONFIRMED
+					|| saved.status() == BookingStatus.REFUNDED;
+				for (BookedSeat seat : saved.seats()) {
 					currentModel.seats.put(seat.seatId(), new SeatEntry(
-						held.booking().id(), held.booking().expiresAt(), sold
+						saved.id(), saved.expiresAt(), sold
 					));
 				}
-			} else if (outcome instanceof HoldOutcome.SeatsTaken takenOutcome) {
-				// Drift fallback: update taken seats into cache
-				for (UUID seatId : takenOutcome.seatIds()) {
-					currentModel.seats.put(seatId, new SeatEntry(null, null, true));
+				if (saved.status() == BookingStatus.PENDING) {
+					pruneExpiredIndexEntries(now);
+					List<UUID> heldSeats = saved.seats().stream().map(BookedSeat::seatId).toList();
+					bookingIndex.put(saved.id(),
+						new HeldBookingRef(showtimeId, saved.customerId(), heldSeats, saved.expiresAt()));
+					customerPending.put(saved.customerId(),
+						new PendingHoldRef(saved.id(), showtimeId, saved.expiresAt()));
 				}
+			} else if (outcome instanceof HoldOutcome.SeatsTaken) {
+				// Drift fallback: evict stale showtime model so next caller reloads exact HELD/SOLD truth.
+				models.remove(showtimeId);
 			} else if (outcome instanceof HoldOutcome.ShowtimeCancelled || outcome instanceof HoldOutcome.ShowtimeGone) {
 				evictShowtime(showtimeId);
 			}
@@ -119,55 +139,68 @@ public class SingleWriterSeatInventory implements SeatInventory {
 	@Override
 	public PayOutcome pay(UUID customerId, UUID bookingId, Instant now) {
 		PayOutcome outcome = delegate.pay(customerId, bookingId, now);
-		if (outcome instanceof PayOutcome.Paid paid) {
-			Booking booking = paid.confirmed();
-			ShowtimeSeats model = models.get(booking.showtimeId());
-			if (model != null) {
-				for (BookedSeat seat : booking.seats()) {
-					model.seats.computeIfPresent(seat.seatId(), (seatId, entry) ->
-						new SeatEntry(booking.id(), null, true)
-					);
-				}
-			}
-		}
+		handlePayOutcome(customerId, bookingId, outcome);
 		return outcome;
-	}
-
-	@Override
-	public AbandonOutcome abandon(UUID customerId, UUID bookingId) {
-		return delegate.abandon(customerId, bookingId);
 	}
 
 	@Override
 	public PayOutcome pay(Booking booking, Instant now) {
 		PayOutcome outcome = delegate.pay(booking, now);
-		if (outcome instanceof PayOutcome.Paid) {
-			ShowtimeSeats model = models.get(booking.showtimeId());
-			if (model != null) {
-				for (BookedSeat seat : booking.seats()) {
-					model.seats.computeIfPresent(seat.seatId(), (seatId, entry) ->
-						new SeatEntry(booking.id(), null, true)
-					);
-				}
+		handlePayOutcome(booking.customerId(), booking.id(), outcome);
+		return outcome;
+	}
+
+	@Override
+	public AbandonOutcome abandon(UUID customerId, UUID bookingId) {
+		HeldBookingRef ref = bookingIndex.get(bookingId);
+		AbandonOutcome outcome = delegate.abandon(customerId, bookingId);
+		if (outcome instanceof AbandonOutcome.Abandoned) {
+			bookingIndex.remove(bookingId);
+			customerPending.computeIfPresent(customerId, (k, v) -> bookingId.equals(v.bookingId()) ? null : v);
+			if (ref != null) {
+				versionFor(ref.showtimeId()).incrementAndGet();
+				removeBookingSeatsFromModel(ref.showtimeId(), ref.seatIds(), bookingId, true);
+			} else {
+				// Cold-loaded booking not in bookingIndex: bump versions and evict cold-loaded HELD models.
+				versions.values().forEach(AtomicLong::incrementAndGet);
+				models.entrySet().removeIf(entry -> entry.getValue().seats.values().stream()
+					.anyMatch(se -> !se.sold && se.bookingId == null));
 			}
+		} else if (outcome instanceof AbandonOutcome.Gone) {
+			bookingIndex.remove(bookingId);
+			customerPending.computeIfPresent(customerId, (k, v) -> bookingId.equals(v.bookingId()) ? null : v);
+			if (ref != null) {
+				removeBookingSeatsFromModel(ref.showtimeId(), ref.seatIds(), bookingId, false);
+			}
+		} else if (outcome instanceof AbandonOutcome.NotPending) {
+			bookingIndex.remove(bookingId);
+			customerPending.computeIfPresent(customerId, (k, v) -> bookingId.equals(v.bookingId()) ? null : v);
 		}
 		return outcome;
 	}
 
 	@Override
 	public AbandonOutcome abandon(Booking booking) {
-		versionFor(booking.showtimeId()).incrementAndGet();
 		AbandonOutcome outcome = delegate.abandon(booking);
+		UUID bookingId = booking.id();
+		UUID showtimeId = booking.showtimeId();
 		if (outcome instanceof AbandonOutcome.Abandoned) {
-			ShowtimeSeats model = models.get(booking.showtimeId());
-			if (model != null) {
-				for (BookedSeat seat : booking.seats()) {
-					// Conditional remove: remove if entry holds this bookingId or was cold-loaded without id
-					model.seats.computeIfPresent(seat.seatId(), (seatId, entry) ->
-						(entry.bookingId == null || booking.id().equals(entry.bookingId)) ? null : entry
-					);
-				}
-			}
+			versionFor(showtimeId).incrementAndGet();
+			bookingIndex.remove(bookingId);
+			customerPending.computeIfPresent(booking.customerId(),
+				(k, v) -> bookingId.equals(v.bookingId()) ? null : v);
+			List<UUID> seatIds = booking.seats().stream().map(BookedSeat::seatId).toList();
+			removeBookingSeatsFromModel(showtimeId, seatIds, bookingId, true);
+		} else if (outcome instanceof AbandonOutcome.Gone) {
+			bookingIndex.remove(bookingId);
+			customerPending.computeIfPresent(booking.customerId(),
+				(k, v) -> bookingId.equals(v.bookingId()) ? null : v);
+			List<UUID> seatIds = booking.seats().stream().map(BookedSeat::seatId).toList();
+			removeBookingSeatsFromModel(showtimeId, seatIds, bookingId, false);
+		} else if (outcome instanceof AbandonOutcome.NotPending) {
+			bookingIndex.remove(bookingId);
+			customerPending.computeIfPresent(booking.customerId(),
+				(k, v) -> bookingId.equals(v.bookingId()) ? null : v);
 		}
 		return outcome;
 	}
@@ -192,18 +225,90 @@ public class SingleWriterSeatInventory implements SeatInventory {
 
 	@Override
 	public CancelOutcome cancel(UUID showtimeId, Cancellation cancellation, Instant now) {
-		versionFor(showtimeId).incrementAndGet();
 		CancelOutcome outcome = delegate.cancel(showtimeId, cancellation, now);
+		AtomicLong version = versions.get(showtimeId);
+		if (version != null) {
+			version.incrementAndGet();
+		}
 		evictShowtime(showtimeId);
 		return outcome;
 	}
 
 	@Override
 	public DeleteOutcome delete(UUID showtimeId, Instant now) {
-		versionFor(showtimeId).incrementAndGet();
 		DeleteOutcome outcome = delegate.delete(showtimeId, now);
+		AtomicLong version = versions.get(showtimeId);
+		if (version != null) {
+			version.incrementAndGet();
+		}
 		evictShowtime(showtimeId);
 		return outcome;
+	}
+
+	private HoldOutcome findLiveCustomerPending(Booking pending, Instant now) {
+		if (pending.status() != BookingStatus.PENDING) {
+			return null;
+		}
+		PendingHoldRef existing = customerPending.get(pending.customerId());
+		if (existing == null) {
+			return null;
+		}
+		if (existing.expiresAt() != null && existing.expiresAt().isAfter(now)) {
+			return new HoldOutcome.CustomerHasPending(existing.bookingId());
+		}
+		customerPending.remove(pending.customerId(), existing);
+		return null;
+	}
+
+	private void handlePayOutcome(UUID customerId, UUID bookingId, PayOutcome outcome) {
+		if (outcome instanceof PayOutcome.Paid paid) {
+			markBookingSoldInModel(paid.confirmed());
+			bookingIndex.remove(bookingId);
+			customerPending.computeIfPresent(customerId, (k, v) -> bookingId.equals(v.bookingId()) ? null : v);
+		} else if (outcome instanceof PayOutcome.AlreadyPaid already) {
+			markBookingSoldInModel(already.current());
+			bookingIndex.remove(bookingId);
+			customerPending.computeIfPresent(customerId, (k, v) -> bookingId.equals(v.bookingId()) ? null : v);
+		} else if (outcome instanceof PayOutcome.Gone || outcome instanceof PayOutcome.NotPayable) {
+			bookingIndex.remove(bookingId);
+			customerPending.computeIfPresent(customerId, (k, v) -> bookingId.equals(v.bookingId()) ? null : v);
+		}
+	}
+
+	private void markBookingSoldInModel(Booking booking) {
+		ShowtimeSeats model = models.get(booking.showtimeId());
+		if (model != null) {
+			for (BookedSeat seat : booking.seats()) {
+				model.seats.put(seat.seatId(), new SeatEntry(booking.id(), null, true));
+			}
+		}
+	}
+
+	private void removeBookingSeatsFromModel(UUID showtimeId, List<UUID> seatIds, UUID bookingId,
+		boolean removeColdLoaded) {
+		ShowtimeSeats model = models.get(showtimeId);
+		if (model == null) {
+			return;
+		}
+		for (UUID seatId : seatIds) {
+			model.seats.computeIfPresent(seatId, (id, entry) -> {
+				if (bookingId.equals(entry.bookingId) || (removeColdLoaded && entry.bookingId == null && !entry.sold)) {
+					return null;
+				}
+				return entry;
+			});
+		}
+	}
+
+	private void pruneExpiredIndexEntries(Instant now) {
+		if (bookingIndex.size() >= MAX_INDEX_ENTRIES) {
+			bookingIndex.entrySet().removeIf(
+				e -> e.getValue().expiresAt() != null && !e.getValue().expiresAt().isAfter(now));
+		}
+		if (customerPending.size() >= MAX_INDEX_ENTRIES) {
+			customerPending.entrySet().removeIf(
+				e -> e.getValue().expiresAt() != null && !e.getValue().expiresAt().isAfter(now));
+		}
 	}
 
 	private ReentrantLock laneFor(UUID showtimeId) {
@@ -218,6 +323,8 @@ public class SingleWriterSeatInventory implements SeatInventory {
 		models.remove(showtimeId);
 		lanes.remove(showtimeId);
 		versions.remove(showtimeId);
+		bookingIndex.entrySet().removeIf(e -> showtimeId.equals(e.getValue().showtimeId()));
+		customerPending.entrySet().removeIf(e -> showtimeId.equals(e.getValue().showtimeId()));
 	}
 
 	/**
@@ -229,17 +336,18 @@ public class SingleWriterSeatInventory implements SeatInventory {
 		while (true) {
 			long v0 = version.get();
 			Map<UUID, SeatStatus> currentStatuses = delegate.statuses(showtimeId, now);
+			ShowtimeSeats newModel = new ShowtimeSeats();
+			for (Map.Entry<UUID, SeatStatus> entry : currentStatuses.entrySet()) {
+				boolean sold = entry.getValue() == SeatStatus.SOLD;
+				// A held status from cold read is treated as live until time lapse
+				Instant expires = sold ? null : now.plusSeconds(600);
+				newModel.seats.put(entry.getKey(), new SeatEntry(null, expires, sold));
+			}
+			models.put(showtimeId, newModel);
 			if (v0 == version.get()) {
-				ShowtimeSeats newModel = new ShowtimeSeats();
-				for (Map.Entry<UUID, SeatStatus> entry : currentStatuses.entrySet()) {
-					boolean sold = entry.getValue() == SeatStatus.SOLD;
-					// A held status from cold read is treated as live until time lapse
-					Instant expires = sold ? null : now.plusSeconds(600);
-					newModel.seats.put(entry.getKey(), new SeatEntry(null, expires, sold));
-				}
-				models.put(showtimeId, newModel);
 				return newModel;
 			}
+			models.remove(showtimeId, newModel);
 		}
 	}
 
@@ -258,5 +366,11 @@ public class SingleWriterSeatInventory implements SeatInventory {
 		boolean isOccupied(Instant now) {
 			return sold || (expiresAt != null && expiresAt.isAfter(now));
 		}
+	}
+
+	private record HeldBookingRef(UUID showtimeId, UUID customerId, List<UUID> seatIds, Instant expiresAt) {
+	}
+
+	private record PendingHoldRef(UUID bookingId, UUID showtimeId, Instant expiresAt) {
 	}
 }
