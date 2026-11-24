@@ -2,6 +2,8 @@ package vn.edu.uet.cinema.config;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.ApplicationRunner;
@@ -31,6 +33,17 @@ class BusinessConfig {
 
 	private static final Logger log = LoggerFactory.getLogger(BusinessConfig.class);
 
+	private final BookingMetrics bookingMetrics;
+
+	BusinessConfig() {
+		this.bookingMetrics = BookingMetrics.noop();
+	}
+
+	@Autowired
+	BusinessConfig(ObjectProvider<BookingMetrics> bookingMetrics) {
+		this.bookingMetrics = bookingMetrics.getIfAvailable(BookingMetrics::noop);
+	}
+
 	@Bean
 	AccountService accountService(AccountRepository accounts, PasswordHasher passwordHasher) {
 		return new AccountService(accounts, passwordHasher);
@@ -59,7 +72,8 @@ class BusinessConfig {
 		SeatInventoryStrategy strategy = SeatInventoryStrategy.from(strategyValue);
 		log.info("Configured seat inventory strategy: {}", strategy.value());
 		if (strategy == SeatInventoryStrategy.SINGLE_WRITER) {
-			return new SingleWriterSeatInventory(databaseInventory);
+			return new SingleWriterSeatInventory(databaseInventory, 2,
+				waitNanos -> bookingMetrics.recordLockWait("single_writer_lane", strategy.value(), waitNanos));
 		}
 		return databaseInventory;
 	}

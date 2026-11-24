@@ -9,6 +9,7 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.locks.ReentrantLock;
+import java.util.function.LongConsumer;
 
 /**
  * Strategy 4 (single-writer): A single writer per Showtime coordinated via JVM {@link ReentrantLock}
@@ -21,21 +22,28 @@ import java.util.concurrent.locks.ReentrantLock;
 public class SingleWriterSeatInventory implements SeatInventory {
 
 	private static final long DEFAULT_LOCK_TIMEOUT_SECONDS = 2;
+	private static final LongConsumer NOOP_OBSERVER = nanos -> { };
 
 	private final SeatInventory delegate;
 	private final long lockTimeoutSeconds;
+	private final LongConsumer lockWaitObserver;
 
 	private final ConcurrentHashMap<UUID, ReentrantLock> lanes = new ConcurrentHashMap<>();
 	private final ConcurrentHashMap<UUID, ShowtimeSeats> models = new ConcurrentHashMap<>();
 	private final ConcurrentHashMap<UUID, AtomicLong> versions = new ConcurrentHashMap<>();
 
 	public SingleWriterSeatInventory(SeatInventory delegate) {
-		this(delegate, DEFAULT_LOCK_TIMEOUT_SECONDS);
+		this(delegate, DEFAULT_LOCK_TIMEOUT_SECONDS, NOOP_OBSERVER);
 	}
 
 	public SingleWriterSeatInventory(SeatInventory delegate, long lockTimeoutSeconds) {
+		this(delegate, lockTimeoutSeconds, NOOP_OBSERVER);
+	}
+
+	public SingleWriterSeatInventory(SeatInventory delegate, long lockTimeoutSeconds, LongConsumer lockWaitObserver) {
 		this.delegate = delegate;
 		this.lockTimeoutSeconds = lockTimeoutSeconds;
+		this.lockWaitObserver = lockWaitObserver != null ? lockWaitObserver : NOOP_OBSERVER;
 	}
 
 	@Override
@@ -55,11 +63,14 @@ public class SingleWriterSeatInventory implements SeatInventory {
 		// 2. Protected path: acquire per-showtime lane
 		ReentrantLock lane = laneFor(showtimeId);
 		boolean acquired;
+		long lockStart = System.nanoTime();
 		try {
 			acquired = lane.tryLock(lockTimeoutSeconds, TimeUnit.SECONDS);
 		} catch (InterruptedException e) {
 			Thread.currentThread().interrupt();
 			return new HoldOutcome.Busy();
+		} finally {
+			lockWaitObserver.accept(System.nanoTime() - lockStart);
 		}
 
 		if (!acquired) {
