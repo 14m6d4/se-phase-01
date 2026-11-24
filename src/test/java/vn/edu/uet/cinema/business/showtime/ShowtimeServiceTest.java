@@ -95,6 +95,28 @@ class ShowtimeServiceTest {
 	}
 
 	@Test
+	void seatsByIdCachesPerAuditoriumAndReturnsEverySeat() {
+		Showtime showtime = withSeats();
+		AtomicInteger reads = new AtomicInteger();
+		AuditoriumService counting = new AuditoriumService(new CinemaService(new InMemoryCinemas(), auditoriumRows),
+			auditoriumRows, repository) {
+			@Override
+			public Auditorium get(UUID id) {
+				reads.incrementAndGet();
+				return super.get(id);
+			}
+		};
+		ShowtimeService cached = new ShowtimeService(movies, counting, repository, bookings);
+
+		Map<UUID, Seat> firstLookup = cached.seatsById(showtime.auditoriumId());
+		Map<UUID, Seat> secondLookup = cached.seatsById(showtime.auditoriumId());
+
+		assertThat(firstLookup).containsOnlyKeys(standard.id(), vip.id(), couple.id(), lapsed.id());
+		assertThat(secondLookup).isSameAs(firstLookup);
+		assertThat(reads).hasValue(1);
+	}
+
+	@Test
 	void creationSnapshotsMovieDurationPlusCleaningTime() {
 		UUID movieId = movie(120);
 

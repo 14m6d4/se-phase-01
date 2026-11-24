@@ -10,7 +10,8 @@ import vn.edu.uet.cinema.business.ConflictException;
 import vn.edu.uet.cinema.business.NotFoundException;
 import vn.edu.uet.cinema.business.PageQuery;
 import vn.edu.uet.cinema.business.PageSlice;
-import vn.edu.uet.cinema.business.showtime.PricedSeat;
+import vn.edu.uet.cinema.business.auditorium.Seat;
+import vn.edu.uet.cinema.business.showtime.SeatPricing;
 import vn.edu.uet.cinema.business.showtime.Showtime;
 import vn.edu.uet.cinema.business.showtime.ShowtimeService;
 import vn.edu.uet.cinema.business.showtime.inventory.AbandonOutcome;
@@ -55,13 +56,14 @@ public class BookingService {
 		if (!now.isBefore(showtime.startsAt())) {
 			throw new ConflictException("Showtime has already started");
 		}
-		Map<UUID, PricedSeat> seats = showtimes.pricedSeats(showtime);
+		Map<UUID, Seat> seats = showtimes.seatsById(showtime.auditoriumId());
+		long basePrice = showtime.basePrice();
 		List<BookedSeat> booked = seatIds.stream().map(id -> {
-			PricedSeat seat = seats.get(id);
+			Seat seat = seats.get(id);
 			if (seat == null) {
 				throw new InvalidBookingException("Seat " + id + " is not in the Showtime's Auditorium");
 			}
-			return new BookedSeat(id, seat.price());
+			return new BookedSeat(id, SeatPricing.price(seat.type(), basePrice));
 		}).toList();
 		HoldOutcome outcome = inventory.hold(new Booking(UUID.randomUUID(), customerId, showtimeId,
 			BookingStatus.PENDING, now, now.plus(HOLD), booked), now);

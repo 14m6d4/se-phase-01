@@ -9,7 +9,10 @@ import jakarta.persistence.EnumType;
 import jakarta.persistence.Enumerated;
 import jakarta.persistence.Id;
 import jakarta.persistence.JoinColumn;
+import jakarta.persistence.PostLoad;
+import jakarta.persistence.PostPersist;
 import jakarta.persistence.Table;
+import jakarta.persistence.Transient;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
@@ -17,13 +20,14 @@ import java.util.Comparator;
 import java.util.List;
 import java.util.UUID;
 import org.hibernate.annotations.BatchSize;
+import org.springframework.data.domain.Persistable;
 import vn.edu.uet.cinema.business.showtime.inventory.BookedSeat;
 import vn.edu.uet.cinema.business.showtime.inventory.Booking;
 import vn.edu.uet.cinema.business.showtime.inventory.BookingStatus;
 
 @Entity
 @Table(name = "booking")
-class BookingEntity {
+class BookingEntity implements Persistable<UUID> {
 
 	@Id
 	private UUID id;
@@ -41,16 +45,31 @@ class BookingEntity {
 	@BatchSize(size = 50)
 	@CollectionTable(name = "booked_seat", joinColumns = @JoinColumn(name = "booking_id"))
 	private List<BookedSeatEmbeddable> seats = new ArrayList<>();
+	@Transient
+	private boolean isNew = false;
 
 	protected BookingEntity() {
 	}
 
-	UUID getId() {
+	@Override
+	public UUID getId() {
 		return id;
+	}
+
+	@Override
+	public boolean isNew() {
+		return isNew;
+	}
+
+	@PostLoad
+	@PostPersist
+	void markNotNew() {
+		this.isNew = false;
 	}
 
 	static BookingEntity from(Booking booking) {
 		BookingEntity entity = new BookingEntity();
+		entity.isNew = true;
 		entity.id = booking.id();
 		entity.customerId = booking.customerId();
 		entity.showtimeId = booking.showtimeId();

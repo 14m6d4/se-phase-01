@@ -16,7 +16,9 @@ services:
     cpuset: "${APP_CPUS:-1-3}"
     environment:
       # Experiment knob: Hibernate logs every unique violation (a lost seat race, ADR 0004) at WARN.
-      LOGGING_LEVEL_ORG_HIBERNATE_ORM_JDBC_ERROR: "${HIBERNATE_JDBC_ERROR_LEVEL:-WARN}"
+      LOGGING_LEVEL_ORG_HIBERNATE_ORM_JDBC_ERROR: "${HIBERNATE_JDBC_ERROR_LEVEL:-ERROR}"
+      HTTP_ACCESS_LOG_LEVEL: "${HTTP_ACCESS_LOG_LEVEL:-WARN}"
+      ANTI_HOARDING_ENABLED: "${ANTI_HOARDING_ENABLED:-false}"
       SEAT_INVENTORY_STRATEGY: "${SEAT_INVENTORY_STRATEGY:-unique}"
     # Own port, so the stack can run beside anything else on 8080. Locust then needs BASE_URL.
     ports: !override

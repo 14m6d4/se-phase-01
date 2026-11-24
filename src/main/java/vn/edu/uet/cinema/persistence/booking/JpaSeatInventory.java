@@ -128,12 +128,12 @@ public class JpaSeatInventory implements SeatInventory {
 					() -> jpa.confirm(bookingId, customerId, now));
 				if (updated == 1) {
 					result = metrics.timeDbQuery("pay", "reload_booking", strategy.value(),
-						() -> jpa.findById(bookingId)).map(BookingEntity::toBooking)
+						() -> jpa.findByIdWithSeats(bookingId)).map(BookingEntity::toBooking)
 						.<PayOutcome>map(PayOutcome.Paid::new)
 						.orElseGet(PayOutcome.Gone::new);
 				} else {
 					result = metrics.timeDbQuery("pay", "reload_booking", strategy.value(),
-						() -> jpa.findById(bookingId)).map(BookingEntity::toBooking)
+						() -> jpa.findByIdWithSeats(bookingId)).map(BookingEntity::toBooking)
 						.<PayOutcome>map(current -> {
 							if (!current.customerId().equals(customerId)) {
 								return new PayOutcome.Gone();
@@ -171,7 +171,7 @@ public class JpaSeatInventory implements SeatInventory {
 					result = new PayOutcome.Paid(booking.confirmed());
 				} else {
 					result = metrics.timeDbQuery("pay", "reload_booking", strategy.value(),
-						() -> jpa.findById(booking.id())).map(BookingEntity::toBooking)
+						() -> jpa.findByIdWithSeats(booking.id())).map(BookingEntity::toBooking)
 						.<PayOutcome>map(current -> {
 							if (!current.customerId().equals(booking.customerId())) {
 								return new PayOutcome.Gone();
