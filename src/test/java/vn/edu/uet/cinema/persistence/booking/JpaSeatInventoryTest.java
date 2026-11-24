@@ -75,5 +75,44 @@ class JpaSeatInventoryTest {
 		assertThat(inventory.hold(booking, NOW)).isEqualTo(new HoldOutcome.Busy());
 		assertThat(saveCalls.get()).isEqualTo(2);
 	}
+
+	@Test
+	void holdRecordsStepQueriesCommitLockWaitAndDeadlockMetrics() {
+		io.micrometer.core.instrument.simple.SimpleMeterRegistry registry =
+			new io.micrometer.core.instrument.simple.SimpleMeterRegistry();
+		vn.edu.uet.cinema.config.BookingMetrics metrics = new vn.edu.uet.cinema.config.BookingMetrics(registry);
+		AtomicInteger saveCalls = new AtomicInteger();
+		BookingEntityRepository jpa = (BookingEntityRepository) Proxy.newProxyInstance(
+			BookingEntityRepository.class.getClassLoader(),
+			new Class<?>[] { BookingEntityRepository.class },
+			(proxy, method, args) -> {
+				if ("saveAndFlush".equals(method.getName())) {
+					if (saveCalls.incrementAndGet() == 1) {
+						throw new CannotAcquireLockException("deadlock detected");
+					}
+					return args[0];
+				}
+				if ("lockShowtimeStatus".equals(method.getName())) {
+					return "SCHEDULED";
+				}
+				return null;
+			}
+		);
+		JpaSeatInventory inventory = new JpaSeatInventory(jpa, TransactionOperations.withoutTransaction(),
+			vn.edu.uet.cinema.config.SeatInventoryStrategy.UNIQUE, metrics);
+
+		assertThat(inventory.hold(booking, NOW)).isEqualTo(new HoldOutcome.Held(booking));
+		assertThat(registry.get(vn.edu.uet.cinema.config.BookingMetrics.OPERATION_TIMER)
+			.tag("operation", "hold").tag("strategy", "unique").tag("outcome", "held").timer().count()).isEqualTo(1L);
+		assertThat(registry.get(vn.edu.uet.cinema.config.BookingMetrics.DB_COMMIT_TIMER)
+			.tag("operation", "hold").tag("strategy", "unique").timer().count()).isEqualTo(1L);
+		assertThat(registry.get(vn.edu.uet.cinema.config.BookingMetrics.LOCK_WAIT_TIMER)
+			.tag("lock", "showtime_share").tag("strategy", "unique").timer().count()).isEqualTo(2L);
+		assertThat(registry.get(vn.edu.uet.cinema.config.BookingMetrics.DB_QUERY_TIMER)
+			.tag("operation", "hold").tag("step", "persist_booking").tag("strategy", "unique").timer().count())
+			.isEqualTo(2L);
+		assertThat(registry.get(vn.edu.uet.cinema.config.BookingMetrics.DEADLOCK_RETRY_COUNTER)
+			.tag("strategy", "unique").tag("result", "retried").counter().count()).isEqualTo(1.0);
+	}
 }
 
