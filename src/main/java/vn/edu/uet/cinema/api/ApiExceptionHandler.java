@@ -1,5 +1,6 @@
 package vn.edu.uet.cinema.api;
 
+import io.micrometer.core.instrument.MeterRegistry;
 import java.time.LocalDate;
 import java.time.OffsetDateTime;
 import java.util.ArrayList;
@@ -7,6 +8,8 @@ import java.util.Arrays;
 import java.util.List;
 import java.util.UUID;
 import org.springframework.beans.TypeMismatchException;
+import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.MessageSourceResolvable;
 import org.springframework.core.annotation.Order;
 import org.springframework.dao.DataIntegrityViolationException;
@@ -34,11 +37,15 @@ import tools.jackson.core.JacksonException;
 import tools.jackson.databind.exc.InvalidFormatException;
 import vn.edu.uet.cinema.business.ConflictException;
 import vn.edu.uet.cinema.business.NotFoundException;
+import vn.edu.uet.cinema.business.account.EmailTakenException;
 import vn.edu.uet.cinema.business.account.InvalidCredentialsException;
+import vn.edu.uet.cinema.business.auditorium.AuditoriumNameTakenException;
 import vn.edu.uet.cinema.business.auditorium.InvalidSeatLayoutException;
 import vn.edu.uet.cinema.business.booking.InvalidBookingException;
+import vn.edu.uet.cinema.business.booking.SeatHoardingException;
 import vn.edu.uet.cinema.business.booking.SeatsTakenException;
 import vn.edu.uet.cinema.business.showtime.InvalidShowtimeException;
+import vn.edu.uet.cinema.config.BookingMetrics;
 
 /**
  * Maps business and framework exceptions to RFC 9457 problem details.
@@ -50,6 +57,31 @@ class ApiExceptionHandler extends ResponseEntityExceptionHandler {
 	private static final String VALIDATION_DETAIL = "Request validation failed.";
 	private static final String LOGIN_VALIDATION_DETAIL = "Invalid request.";
 	private static final String UNREADABLE_DETAIL = "Request body could not be read.";
+
+	private final BookingMetrics metrics;
+
+	ApiExceptionHandler() {
+		this(BookingMetrics.noop());
+	}
+
+	@Autowired
+	ApiExceptionHandler(ObjectProvider<BookingMetrics> metricsProvider, ObjectProvider<MeterRegistry> registryProvider) {
+		this(resolveMetrics(metricsProvider, registryProvider));
+	}
+
+	ApiExceptionHandler(BookingMetrics metrics) {
+		this.metrics = metrics != null ? metrics : BookingMetrics.noop();
+	}
+
+	private static BookingMetrics resolveMetrics(ObjectProvider<BookingMetrics> metricsProvider,
+		ObjectProvider<MeterRegistry> registryProvider) {
+		BookingMetrics existing = metricsProvider.getIfAvailable();
+		if (existing != null) {
+			return existing;
+		}
+		MeterRegistry registry = registryProvider.getIfAvailable();
+		return registry != null ? new BookingMetrics(registry) : BookingMetrics.noop();
+	}
 
 	@Override
 	protected ResponseEntity<Object> handleMethodArgumentNotValid(MethodArgumentNotValidException e, HttpHeaders headers,
@@ -217,6 +249,7 @@ class ApiExceptionHandler extends ResponseEntityExceptionHandler {
 
 	@ExceptionHandler
 	ProblemDetail conflict(ConflictException e) {
+		metrics.recordConflict(classifyConflictReason(e));
 		return ProblemDetail.forStatusAndDetail(HttpStatus.CONFLICT, e.getMessage());
 	}
 
@@ -229,7 +262,59 @@ class ApiExceptionHandler extends ResponseEntityExceptionHandler {
 
 	@ExceptionHandler
 	ProblemDetail dataIntegrityViolation(DataIntegrityViolationException e) {
+		metrics.recordConflict("data_integrity_violation");
 		return ProblemDetail.forStatusAndDetail(HttpStatus.CONFLICT, "Data integrity constraint violated.");
+	}
+
+	static String classifyConflictReason(ConflictException e) {
+		if (e instanceof SeatsTakenException) {
+			return "seats_taken";
+		}
+		if (e instanceof SeatHoardingException) {
+			return "seat_hoarding";
+		}
+		if (e instanceof EmailTakenException) {
+			return "email_taken";
+		}
+		if (e instanceof AuditoriumNameTakenException) {
+			return "auditorium_name_taken";
+		}
+		String message = e.getMessage();
+		if (message == null) {
+			return "other";
+		}
+		if (message.startsWith("Customer already has a Pending Booking")) {
+			return "customer_has_pending";
+		}
+		if (message.startsWith("Seats are being booked by others")) {
+			return "busy";
+		}
+		if (message.equals("Showtime is Cancelled")) {
+			return "showtime_cancelled";
+		}
+		if (message.equals("Showtime has already started")) {
+			return "showtime_started";
+		}
+		if (message.equals("Showtime no longer exists")) {
+			return "showtime_gone";
+		}
+		if (message.startsWith("Showtime is already Cancelled")) {
+			return "showtime_not_cancellable";
+		}
+		if (message.equals("Showtime has Bookings")) {
+			return "showtime_has_bookings";
+		}
+		if (message.startsWith("Booking is ")) {
+			return "booking_invalid_state";
+		}
+		if (message.equals("Auditorium has an overlapping Showtime")) {
+			return "showtime_overlap";
+		}
+		if (message.equals("Cinema has Auditoriums") || message.equals("Auditorium has Showtimes")
+			|| message.equals("Movie has Showtimes")) {
+			return "resource_in_use";
+		}
+		return "other";
 	}
 
 	@ExceptionHandler

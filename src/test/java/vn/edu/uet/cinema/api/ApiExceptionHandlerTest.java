@@ -97,6 +97,33 @@ class ApiExceptionHandlerTest {
 		assertThat(problem.getDetail()).isEqualTo("Data integrity constraint violated.");
 	}
 
+	@Test
+	void conflictHandlersIncrementHttpConflictCounterByReasonWithoutDoubleCounting() {
+		io.micrometer.core.instrument.simple.SimpleMeterRegistry registry =
+			new io.micrometer.core.instrument.simple.SimpleMeterRegistry();
+		ApiExceptionHandler handler = new ApiExceptionHandler(new vn.edu.uet.cinema.config.BookingMetrics(registry));
+
+		handler.seatsTaken(new vn.edu.uet.cinema.business.booking.SeatsTakenException(java.util.List.of()));
+		handler.conflict(new vn.edu.uet.cinema.business.ConflictException("Customer already has a Pending Booking 123"));
+		handler.conflict(new vn.edu.uet.cinema.business.ConflictException("Seats are being booked by others right now, try again"));
+		handler.conflict(new vn.edu.uet.cinema.business.booking.SeatHoardingException("cooldown"));
+		handler.conflict(new vn.edu.uet.cinema.business.account.EmailTakenException());
+		handler.dataIntegrityViolation(new org.springframework.dao.DataIntegrityViolationException("constraint"));
+
+		assertThat(registry.get(vn.edu.uet.cinema.config.BookingMetrics.HTTP_CONFLICT_COUNTER)
+			.tag("reason", "seats_taken").counter().count()).isEqualTo(1.0);
+		assertThat(registry.get(vn.edu.uet.cinema.config.BookingMetrics.HTTP_CONFLICT_COUNTER)
+			.tag("reason", "customer_has_pending").counter().count()).isEqualTo(1.0);
+		assertThat(registry.get(vn.edu.uet.cinema.config.BookingMetrics.HTTP_CONFLICT_COUNTER)
+			.tag("reason", "busy").counter().count()).isEqualTo(1.0);
+		assertThat(registry.get(vn.edu.uet.cinema.config.BookingMetrics.HTTP_CONFLICT_COUNTER)
+			.tag("reason", "seat_hoarding").counter().count()).isEqualTo(1.0);
+		assertThat(registry.get(vn.edu.uet.cinema.config.BookingMetrics.HTTP_CONFLICT_COUNTER)
+			.tag("reason", "email_taken").counter().count()).isEqualTo(1.0);
+		assertThat(registry.get(vn.edu.uet.cinema.config.BookingMetrics.HTTP_CONFLICT_COUNTER)
+			.tag("reason", "data_integrity_violation").counter().count()).isEqualTo(1.0);
+	}
+
 	@RestController
 	static class ValidationController {
 
