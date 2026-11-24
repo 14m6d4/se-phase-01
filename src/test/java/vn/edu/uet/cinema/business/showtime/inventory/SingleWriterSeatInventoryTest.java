@@ -220,4 +220,124 @@ class SingleWriterSeatInventoryTest {
 		// Model is evicted
 		assertThat(singleWriter.statuses(showtimeId, now)).isEmpty();
 	}
+
+	@Test
+	void abandonByCustomerAndBookingIdReleasesWarmHoldImmediately() {
+		InMemorySeatInventory fake = new InMemorySeatInventory(new InMemoryShowtimes(new InMemoryAuditoriums()));
+		SingleWriterSeatInventory singleWriter = new SingleWriterSeatInventory(fake);
+
+		UUID showtimeId = UUID.randomUUID();
+		UUID seatId = UUID.randomUUID();
+		UUID customer1 = UUID.randomUUID();
+		UUID customer2 = UUID.randomUUID();
+
+		Booking b1 = new Booking(UUID.randomUUID(), customer1, showtimeId, BookingStatus.PENDING, now,
+			now.plus(10, ChronoUnit.MINUTES), List.of(new BookedSeat(seatId, 100_000)));
+		assertThat(singleWriter.hold(b1, now)).isInstanceOf(HoldOutcome.Held.class);
+
+		// Production controllers call abandon(customerId, bookingId), not abandon(Booking)
+		assertThat(singleWriter.abandon(customer1, b1.id())).isEqualTo(new AbandonOutcome.Abandoned());
+
+		Booking b2 = new Booking(UUID.randomUUID(), customer2, showtimeId, BookingStatus.PENDING, now,
+			now.plus(10, ChronoUnit.MINUTES), List.of(new BookedSeat(seatId, 100_000)));
+		assertThat(singleWriter.hold(b2, now)).isInstanceOf(HoldOutcome.Held.class);
+
+		// customer1 is also unblocked to book another seat cleanly
+		Booking b3 = new Booking(UUID.randomUUID(), customer1, showtimeId, BookingStatus.PENDING, now,
+			now.plus(10, ChronoUnit.MINUTES), List.of(new BookedSeat(UUID.randomUUID(), 100_000)));
+		assertThat(singleWriter.hold(b3, now)).isInstanceOf(HoldOutcome.Held.class);
+	}
+
+	@Test
+	void abandonByCustomerAndBookingIdEvictsColdLoadedHoldModel() {
+		InMemorySeatInventory fake = new InMemorySeatInventory(new InMemoryShowtimes(new InMemoryAuditoriums()));
+		SingleWriterSeatInventory singleWriter = new SingleWriterSeatInventory(fake);
+
+		UUID showtimeId = UUID.randomUUID();
+		UUID coldSeat = UUID.randomUUID();
+		UUID otherSeat = UUID.randomUUID();
+		UUID customer1 = UUID.randomUUID();
+
+		// Pre-existing cold hold directly in underlying delegate (simulating restart or multi-instance seed)
+		Booking coldHold = new Booking(UUID.randomUUID(), customer1, showtimeId, BookingStatus.PENDING, now,
+			now.plus(10, ChronoUnit.MINUTES), List.of(new BookedSeat(coldSeat, 100_000)));
+		fake.store(coldHold);
+
+		// Trigger loadModel for showtimeId so coldSeat is loaded with bookingId == null
+		Booking warmup = new Booking(UUID.randomUUID(), UUID.randomUUID(), showtimeId, BookingStatus.PENDING, now,
+			now.plus(10, ChronoUnit.MINUTES), List.of(new BookedSeat(otherSeat, 100_000)));
+		assertThat(singleWriter.hold(warmup, now)).isInstanceOf(HoldOutcome.Held.class);
+
+		assertThat(singleWriter.abandon(customer1, coldHold.id())).isEqualTo(new AbandonOutcome.Abandoned());
+
+		Booking nextHold = new Booking(UUID.randomUUID(), UUID.randomUUID(), showtimeId, BookingStatus.PENDING, now,
+			now.plus(10, ChronoUnit.MINUTES), List.of(new BookedSeat(coldSeat, 100_000)));
+		assertThat(singleWriter.hold(nextHold, now)).isInstanceOf(HoldOutcome.Held.class);
+	}
+
+	@Test
+	void driftSeatsTakenEvictsModelInsteadOfMarkingSeatPermanentlySold() {
+		InMemorySeatInventory fake = new InMemorySeatInventory(new InMemoryShowtimes(new InMemoryAuditoriums()));
+		SingleWriterSeatInventory singleWriter = new SingleWriterSeatInventory(fake);
+
+		UUID showtimeId = UUID.randomUUID();
+		UUID warmSeat = UUID.randomUUID();
+		UUID driftedSeat = UUID.randomUUID();
+
+		// Warm showtime model before driftedSeat is inserted out-of-band into fake
+		Booking initial = new Booking(UUID.randomUUID(), UUID.randomUUID(), showtimeId, BookingStatus.PENDING, now,
+			now.plus(10, ChronoUnit.MINUTES), List.of(new BookedSeat(warmSeat, 100_000)));
+		assertThat(singleWriter.hold(initial, now)).isInstanceOf(HoldOutcome.Held.class);
+
+		// Simulate out-of-band temporary hold stored in delegate (expires in 10 minutes)
+		Booking outOfBandHold = new Booking(UUID.randomUUID(), UUID.randomUUID(), showtimeId, BookingStatus.PENDING,
+			now, now.plus(10, ChronoUnit.MINUTES), List.of(new BookedSeat(driftedSeat, 100_000)));
+		fake.store(outOfBandHold);
+
+		// Hold hits delegate drift -> SeatsTaken, must NOT permanently mark driftedSeat as SOLD
+		Booking attempt1 = new Booking(UUID.randomUUID(), UUID.randomUUID(), showtimeId, BookingStatus.PENDING, now,
+			now.plus(10, ChronoUnit.MINUTES), List.of(new BookedSeat(driftedSeat, 100_000)));
+		assertThat(singleWriter.hold(attempt1, now)).isInstanceOf(HoldOutcome.SeatsTaken.class);
+
+		// After the out-of-band hold expires, holding driftedSeat must succeed
+		Instant afterLapse = now.plus(11, ChronoUnit.MINUTES);
+		Booking attempt2 = new Booking(UUID.randomUUID(), UUID.randomUUID(), showtimeId, BookingStatus.PENDING,
+			afterLapse, afterLapse.plus(10, ChronoUnit.MINUTES), List.of(new BookedSeat(driftedSeat, 100_000)));
+		assertThat(singleWriter.hold(attempt2, afterLapse)).isInstanceOf(HoldOutcome.Held.class);
+	}
+
+	@Test
+	void customerHasPendingTakesPrecedenceOverSeatsTakenInFastPath() {
+		InMemorySeatInventory fake = new InMemorySeatInventory(new InMemoryShowtimes(new InMemoryAuditoriums()));
+		SingleWriterSeatInventory singleWriter = new SingleWriterSeatInventory(fake);
+
+		UUID showtimeId = UUID.randomUUID();
+		UUID seat1 = UUID.randomUUID();
+		UUID seat2 = UUID.randomUUID();
+		UUID customerA = UUID.randomUUID();
+		UUID customerB = UUID.randomUUID();
+
+		Booking holdB = new Booking(UUID.randomUUID(), customerB, showtimeId, BookingStatus.PENDING, now,
+			now.plus(10, ChronoUnit.MINUTES), List.of(new BookedSeat(seat1, 100_000)));
+		assertThat(singleWriter.hold(holdB, now)).isInstanceOf(HoldOutcome.Held.class);
+
+		Booking holdA1 = new Booking(UUID.randomUUID(), customerA, showtimeId, BookingStatus.PENDING, now,
+			now.plus(10, ChronoUnit.MINUTES), List.of(new BookedSeat(seat2, 100_000)));
+		assertThat(singleWriter.hold(holdA1, now)).isInstanceOf(HoldOutcome.Held.class);
+
+		// Customer A requests seat1 (held by B) while Customer A already has holdA1 -> CustomerHasPending (B4)
+		Booking holdA2 = new Booking(UUID.randomUUID(), customerA, showtimeId, BookingStatus.PENDING, now,
+			now.plus(10, ChronoUnit.MINUTES), List.of(new BookedSeat(seat1, 100_000)));
+		HoldOutcome outcome = singleWriter.hold(holdA2, now);
+		assertThat(outcome).isInstanceOf(HoldOutcome.CustomerHasPending.class);
+		assertThat(((HoldOutcome.CustomerHasPending) outcome).bookingId()).isEqualTo(holdA1.id());
+
+		// After paying holdA1, Customer A no longer has a pending hold, so requesting seat1 now reports SeatsTaken
+		assertThat(singleWriter.pay(customerA, holdA1.id(), now)).isInstanceOf(PayOutcome.Paid.class);
+		Booking holdA3 = new Booking(UUID.randomUUID(), customerA, showtimeId, BookingStatus.PENDING, now,
+			now.plus(10, ChronoUnit.MINUTES), List.of(new BookedSeat(seat1, 100_000)));
+		HoldOutcome afterPay = singleWriter.hold(holdA3, now);
+		assertThat(afterPay).isInstanceOf(HoldOutcome.SeatsTaken.class);
+		assertThat(((HoldOutcome.SeatsTaken) afterPay).seatIds()).containsExactly(seat1);
+	}
 }
