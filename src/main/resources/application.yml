@@ -68,6 +68,7 @@ logging:
       console: ${LOG_STRUCTURED_FORMAT:logstash}
   level:
     vn.edu.uet.cinema.config.TraceResponseHeaderFilter: ${HTTP_ACCESS_LOG_LEVEL:INFO}
+    org.hibernate.orm.jdbc.error: ${HIBERNATE_JDBC_ERROR_LEVEL:ERROR}
 
 management:
   endpoints:
