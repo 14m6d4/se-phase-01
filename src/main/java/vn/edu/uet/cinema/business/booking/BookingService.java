@@ -45,7 +45,11 @@ public class BookingService {
 	}
 
 	public Booking book(UUID customerId, UUID showtimeId, List<UUID> seatIds, Instant now) {
-		antiHoarding.checkHoldAllowed(customerId, now);
+		return book(customerId, showtimeId, seatIds, now, null);
+	}
+
+	public Booking book(UUID customerId, UUID showtimeId, List<UUID> seatIds, Instant now, String clientKey) {
+		antiHoarding.checkHoldAllowed(customerId, clientKey, now);
 		if (seatIds.isEmpty() || seatIds.size() > MAX_SEATS) {
 			throw new InvalidBookingException("A Booking has 1 to " + MAX_SEATS + " Seats");
 		}
@@ -68,7 +72,11 @@ public class BookingService {
 		HoldOutcome outcome = inventory.hold(new Booking(UUID.randomUUID(), customerId, showtimeId,
 			BookingStatus.PENDING, now, now.plus(HOLD), booked), now);
 		return switch (outcome) {
-			case HoldOutcome.Held held -> held.booking();
+			case HoldOutcome.Held held -> {
+				antiHoarding.recordHoldCreated(customerId, clientKey, held.booking().id(),
+					held.booking().expiresAt(), now);
+				yield held.booking();
+			}
 			case HoldOutcome.SeatsTaken taken -> throw new SeatsTakenException(taken.seatIds());
 			case HoldOutcome.ShowtimeCancelled cancelled -> throw new ConflictException("Showtime is Cancelled");
 			case HoldOutcome.ShowtimeGone gone -> throw new ConflictException("Showtime no longer exists");
@@ -101,8 +109,14 @@ public class BookingService {
 		// Not confirmed by us: it was already, or a concurrent payment just did, or the Hold has lapsed or the
 		// Booking was deleted meanwhile. The adapter tells which, in the transaction of its conditional update.
 		return switch (inventory.pay(customerId, id, now)) {
-			case PayOutcome.Paid paid -> paid.confirmed();
-			case PayOutcome.AlreadyPaid already -> already.current();
+			case PayOutcome.Paid paid -> {
+				antiHoarding.recordHoldReleased(paid.confirmed().id());
+				yield paid.confirmed();
+			}
+			case PayOutcome.AlreadyPaid already -> {
+				antiHoarding.recordHoldReleased(already.current().id());
+				yield already.current();
+			}
 			case PayOutcome.NotPayable notPayable -> throw new ConflictException(
 				"Booking is " + notPayable.status() + ", only a Pending Booking can be paid");
 			case PayOutcome.Gone gone -> throw new NotFoundException("Booking not found");
@@ -118,7 +132,10 @@ public class BookingService {
 		// Nothing deleted: it is Confirmed or Refunded, was paid just now, or is already gone (then this is 404).
 		// The adapter tells which, in the transaction of its conditional delete.
 		switch (inventory.abandon(customerId, id)) {
-			case AbandonOutcome.Abandoned abandoned -> antiHoarding.recordAbandon(customerId, now);
+			case AbandonOutcome.Abandoned abandoned -> {
+				antiHoarding.recordHoldReleased(id);
+				antiHoarding.recordAbandon(customerId, now);
+			}
 			case AbandonOutcome.NotPending notPending -> throw new ConflictException(
 				"Booking is " + notPending.status() + ", only a Pending Booking can be abandoned");
 			case AbandonOutcome.Gone gone -> throw new NotFoundException("Booking not found");

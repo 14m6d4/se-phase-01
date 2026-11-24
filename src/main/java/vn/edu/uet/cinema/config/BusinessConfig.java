@@ -1,5 +1,6 @@
 package vn.edu.uet.cinema.config;
 
+import java.time.Duration;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.ObjectProvider;
@@ -86,8 +87,14 @@ class BusinessConfig {
 
 	@Bean
 	BookingService bookingService(ShowtimeService showtimes, BookingRepository bookings, SeatInventory inventory,
-		@Value("${app.anti-hoarding.enabled:false}") boolean antiHoardingEnabled) {
-		return new BookingService(showtimes, bookings, inventory, new AntiHoardingGuard(antiHoardingEnabled));
+		@Value("${app.anti-hoarding.enabled:true}") boolean antiHoardingEnabled,
+		@Value("${app.anti-hoarding.abandon-cooldown-seconds:5}") long abandonCooldownSeconds,
+		@Value("${app.anti-hoarding.max-abandons-in-window:3}") int maxAbandonsInWindow,
+		@Value("${app.anti-hoarding.repeated-abandon-penalty-seconds:120}") long repeatedAbandonPenaltySeconds,
+		@Value("${app.anti-hoarding.max-active-holds-per-ip:3}") int maxActiveHoldsPerIp) {
+		return new BookingService(showtimes, bookings, inventory,
+			new AntiHoardingGuard(antiHoardingEnabled, Duration.ofSeconds(abandonCooldownSeconds),
+				maxAbandonsInWindow, Duration.ofSeconds(repeatedAbandonPenaltySeconds), maxActiveHoldsPerIp));
 	}
 
 	/** Admins are never self-registered: the one Admin comes from ADMIN_EMAIL / ADMIN_PASSWORD. */
