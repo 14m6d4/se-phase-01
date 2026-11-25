@@ -26,6 +26,7 @@ public class BookingService {
 
 	private static final Duration HOLD = Duration.ofMinutes(10);
 	private static final int MAX_SEATS = 8;
+	public static final int MAX_IDEMPOTENCY_KEY_LENGTH = 128;
 
 	private final ShowtimeService showtimes;
 	private final BookingRepository bookings;
@@ -106,9 +107,21 @@ public class BookingService {
 
 	/** Simulated payment: always succeeds, so only the Hold decides. Paying a Confirmed Booking returns it. */
 	public Booking pay(UUID customerId, UUID id, Instant now) {
+		return pay(customerId, id, now, null);
+	}
+
+	/**
+	 * Idempotent payment with an optional {@code Idempotency-Key}. Retrying with the same key returns the same result
+	 * without creating a duplicate transaction; reusing a key on a different Booking fails with 409.
+	 */
+	public Booking pay(UUID customerId, UUID id, Instant now, String idempotencyKey) {
+		String validatedKey = validateIdempotencyKey(idempotencyKey);
 		// Not confirmed by us: it was already, or a concurrent payment just did, or the Hold has lapsed or the
 		// Booking was deleted meanwhile. The adapter tells which, in the transaction of its conditional update.
-		return switch (inventory.pay(customerId, id, now)) {
+		PayOutcome outcome = validatedKey == null
+			? inventory.pay(customerId, id, now)
+			: inventory.pay(customerId, id, now, validatedKey);
+		return switch (outcome) {
 			case PayOutcome.Paid paid -> {
 				antiHoarding.recordHoldReleased(paid.confirmed().id());
 				yield paid.confirmed();
@@ -119,8 +132,27 @@ public class BookingService {
 			}
 			case PayOutcome.NotPayable notPayable -> throw new ConflictException(
 				"Booking is " + notPayable.status() + ", only a Pending Booking can be paid");
+			case PayOutcome.IdempotencyKeyConflict conflict -> throw new ConflictException(
+				"Idempotency-Key is already used for a different Booking");
 			case PayOutcome.Gone gone -> throw new NotFoundException("Booking not found");
 		};
+	}
+
+	private static String validateIdempotencyKey(String idempotencyKey) {
+		if (idempotencyKey == null) {
+			return null;
+		}
+		if (idempotencyKey.indexOf('\0') >= 0) {
+			throw new InvalidBookingException("Idempotency-Key must not contain a NUL character");
+		}
+		String trimmed = idempotencyKey.strip();
+		if (trimmed.isEmpty()) {
+			throw new InvalidBookingException("Idempotency-Key must not be blank");
+		}
+		if (trimmed.length() > MAX_IDEMPOTENCY_KEY_LENGTH) {
+			throw new InvalidBookingException("Idempotency-Key must be at most " + MAX_IDEMPOTENCY_KEY_LENGTH + " characters");
+		}
+		return trimmed;
 	}
 
 	/** An Expired Booking can be abandoned too: it is removed like any lapsed Hold. */

@@ -21,6 +21,15 @@ public interface SeatInventory {
 	/** Makes the Booking Confirmed if it is Pending with a Hold still running at {@code now}. */
 	PayOutcome pay(UUID customerId, UUID bookingId, Instant now);
 
+	/**
+	 * Idempotent payment with an optional client-supplied {@code idempotencyKey}. Retrying with the same key for the
+	 * same Booking returns the same outcome without a duplicate charge; reusing a key for a different Booking reports
+	 * {@link PayOutcome.IdempotencyKeyConflict}.
+	 */
+	default PayOutcome pay(UUID customerId, UUID bookingId, Instant now, String idempotencyKey) {
+		return pay(customerId, bookingId, now);
+	}
+
 	default PayOutcome pay(Booking booking, Instant now) {
 		return pay(booking.customerId(), booking.id(), now);
 	}

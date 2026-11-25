@@ -14,6 +14,10 @@ public sealed interface PayOutcome {
 	record NotPayable(BookingStatus status) implements PayOutcome {
 	}
 
+	/** The supplied Idempotency-Key was already used for a different Booking. */
+	record IdempotencyKeyConflict() implements PayOutcome {
+	}
+
 	/** The Booking no longer exists. */
 	record Gone() implements PayOutcome {
 	}
