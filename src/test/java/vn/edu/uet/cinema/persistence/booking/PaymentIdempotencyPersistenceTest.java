@@ -17,6 +17,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.context.annotation.Import;
+import org.springframework.transaction.support.TransactionOperations;
 import vn.edu.uet.cinema.TestcontainersConfiguration;
 import vn.edu.uet.cinema.business.account.AccountService;
 import vn.edu.uet.cinema.business.auditorium.Auditorium;
@@ -49,6 +50,7 @@ class PaymentIdempotencyPersistenceTest {
 	@Autowired SeatInventory inventory;
 	@Autowired PaymentTransactionRepository paymentTransactions;
 	@Autowired BookingEntityRepository jpa;
+	@Autowired TransactionOperations transaction;
 	@Autowired AccountService accounts;
 	@Autowired MovieService movies;
 	@Autowired CinemaService cinemas;
@@ -184,7 +186,7 @@ class PaymentIdempotencyPersistenceTest {
 		showtimes.cancel(showtimeId, CancellationReason.EQUIPMENT_FAILURE, null, now);
 
 		// Even if refund insertion is invoked again directly, DB partial unique index prevents duplicate refunds.
-		jpa.insertRefundTransactionsForShowtime(showtimeId, now);
+		transaction.executeWithoutResult(status -> jpa.insertRefundTransactionsForShowtime(showtimeId, now));
 
 		List<PaymentTransaction> txs = paymentTransactions.findByBookingId(paid.id());
 		assertThat(txs).hasSize(2);
