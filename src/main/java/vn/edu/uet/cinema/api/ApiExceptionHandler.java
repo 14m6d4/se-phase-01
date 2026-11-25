@@ -307,6 +307,9 @@ class ApiExceptionHandler extends ResponseEntityExceptionHandler {
 		if (message.startsWith("Booking is ")) {
 			return "booking_invalid_state";
 		}
+		if (message.startsWith("Idempotency-Key is already used")) {
+			return "idempotency_key_conflict";
+		}
 		if (message.equals("Auditorium has an overlapping Showtime")) {
 			return "showtime_overlap";
 		}
