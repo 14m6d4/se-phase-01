@@ -340,4 +340,29 @@ class SingleWriterSeatInventoryTest {
 		assertThat(afterPay).isInstanceOf(HoldOutcome.SeatsTaken.class);
 		assertThat(((HoldOutcome.SeatsTaken) afterPay).seatIds()).containsExactly(seat1);
 	}
+
+	@Test
+	void idempotentPayWithKeyUpdatesModelAndKeyConflictLeavesSecondHoldIntact() {
+		InMemorySeatInventory fake = new InMemorySeatInventory(new InMemoryShowtimes(new InMemoryAuditoriums()));
+		SingleWriterSeatInventory singleWriter = new SingleWriterSeatInventory(fake);
+
+		UUID showtimeId = UUID.randomUUID();
+		UUID seat1 = UUID.randomUUID();
+		UUID seat2 = UUID.randomUUID();
+		UUID customerId = UUID.randomUUID();
+
+		Booking first = new Booking(UUID.randomUUID(), customerId, showtimeId, BookingStatus.PENDING, now,
+			now.plus(10, ChronoUnit.MINUTES), List.of(new BookedSeat(seat1, 100_000)));
+		assertThat(singleWriter.hold(first, now)).isInstanceOf(HoldOutcome.Held.class);
+		assertThat(singleWriter.pay(customerId, first.id(), now, "sw-key-1")).isInstanceOf(PayOutcome.Paid.class);
+		assertThat(singleWriter.pay(customerId, first.id(), now, "sw-key-1")).isInstanceOf(PayOutcome.AlreadyPaid.class);
+		assertThat(singleWriter.statuses(showtimeId, now)).containsEntry(seat1, SeatStatus.SOLD);
+
+		Booking second = new Booking(UUID.randomUUID(), customerId, showtimeId, BookingStatus.PENDING, now,
+			now.plus(10, ChronoUnit.MINUTES), List.of(new BookedSeat(seat2, 100_000)));
+		assertThat(singleWriter.hold(second, now)).isInstanceOf(HoldOutcome.Held.class);
+		assertThat(singleWriter.pay(customerId, second.id(), now, "sw-key-1"))
+			.isEqualTo(new PayOutcome.IdempotencyKeyConflict());
+		assertThat(singleWriter.statuses(showtimeId, now)).containsEntry(seat2, SeatStatus.HELD);
+	}
 }

@@ -108,6 +108,8 @@ class ApiExceptionHandlerTest {
 		handler.conflict(new vn.edu.uet.cinema.business.ConflictException("Seats are being booked by others right now, try again"));
 		handler.conflict(new vn.edu.uet.cinema.business.booking.SeatHoardingException("cooldown"));
 		handler.conflict(new vn.edu.uet.cinema.business.account.EmailTakenException());
+		handler.conflict(new vn.edu.uet.cinema.business.ConflictException(
+			"Idempotency-Key is already used for a different Booking"));
 		handler.dataIntegrityViolation(new org.springframework.dao.DataIntegrityViolationException("constraint"));
 
 		assertThat(registry.get(vn.edu.uet.cinema.config.BookingMetrics.HTTP_CONFLICT_COUNTER)
@@ -120,6 +122,8 @@ class ApiExceptionHandlerTest {
 			.tag("reason", "seat_hoarding").counter().count()).isEqualTo(1.0);
 		assertThat(registry.get(vn.edu.uet.cinema.config.BookingMetrics.HTTP_CONFLICT_COUNTER)
 			.tag("reason", "email_taken").counter().count()).isEqualTo(1.0);
+		assertThat(registry.get(vn.edu.uet.cinema.config.BookingMetrics.HTTP_CONFLICT_COUNTER)
+			.tag("reason", "idempotency_key_conflict").counter().count()).isEqualTo(1.0);
 		assertThat(registry.get(vn.edu.uet.cinema.config.BookingMetrics.HTTP_CONFLICT_COUNTER)
 			.tag("reason", "data_integrity_violation").counter().count()).isEqualTo(1.0);
 	}

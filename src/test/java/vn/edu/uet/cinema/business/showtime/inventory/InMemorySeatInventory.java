@@ -1,6 +1,7 @@
 package vn.edu.uet.cinema.business.showtime.inventory;
 
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
@@ -13,6 +14,10 @@ import java.util.stream.Collectors;
 import vn.edu.uet.cinema.business.PageQuery;
 import vn.edu.uet.cinema.business.PageSlice;
 import vn.edu.uet.cinema.business.booking.BookingRepository;
+import vn.edu.uet.cinema.business.booking.PaymentTransaction;
+import vn.edu.uet.cinema.business.booking.PaymentTransactionRepository;
+import vn.edu.uet.cinema.business.booking.PaymentTransactionStatus;
+import vn.edu.uet.cinema.business.booking.PaymentTransactionType;
 import vn.edu.uet.cinema.business.showtime.InMemoryShowtimes;
 import vn.edu.uet.cinema.business.showtime.Showtime;
 import vn.edu.uet.cinema.business.showtime.ShowtimeStatus;
@@ -23,10 +28,11 @@ import vn.edu.uet.cinema.business.showtime.ShowtimeStatus;
  * touches both tables. Every method is synchronized, so a test may call it from several threads; deadlocks, retries
  * and database locks stay covered against PostgreSQL.
  */
-public class InMemorySeatInventory implements SeatInventory, BookingRepository {
+public class InMemorySeatInventory implements SeatInventory, BookingRepository, PaymentTransactionRepository {
 
 	private final InMemoryShowtimes showtimes;
 	private final Map<UUID, Booking> rows = new LinkedHashMap<>();
+	private final List<PaymentTransaction> transactions = new ArrayList<>();
 
 	public InMemorySeatInventory(InMemoryShowtimes showtimes) {
 		this.showtimes = showtimes;
@@ -94,7 +100,53 @@ public class InMemorySeatInventory implements SeatInventory, BookingRepository {
 	}
 
 	@Override
+	public synchronized List<PaymentTransaction> findByBookingId(UUID bookingId) {
+		return transactions.stream().filter(tx -> tx.bookingId().equals(bookingId)).toList();
+	}
+
+	@Override
+	public synchronized Optional<PaymentTransaction> findByCustomerAndKey(UUID customerId, PaymentTransactionType type,
+		String idempotencyKey) {
+		if (idempotencyKey == null) {
+			return Optional.empty();
+		}
+		return transactions.stream()
+			.filter(tx -> tx.customerId().equals(customerId) && tx.type() == type
+				&& idempotencyKey.equals(tx.idempotencyKey()))
+			.findFirst();
+	}
+
+	@Override
 	public synchronized PayOutcome pay(UUID customerId, UUID bookingId, Instant now) {
+		return payInternal(customerId, bookingId, now, null);
+	}
+
+	@Override
+	public synchronized PayOutcome pay(UUID customerId, UUID bookingId, Instant now, String idempotencyKey) {
+		return payInternal(customerId, bookingId, now, idempotencyKey);
+	}
+
+	private PayOutcome payInternal(UUID customerId, UUID bookingId, Instant now, String idempotencyKey) {
+		if (idempotencyKey != null) {
+			Optional<PaymentTransaction> existing = findByCustomerAndKey(customerId, PaymentTransactionType.PAYMENT,
+				idempotencyKey);
+			if (existing.isPresent()) {
+				PaymentTransaction tx = existing.get();
+				if (!tx.bookingId().equals(bookingId)) {
+					return new PayOutcome.IdempotencyKeyConflict();
+				}
+				if (tx.status() == PaymentTransactionStatus.REFUNDED) {
+					return new PayOutcome.NotPayable(BookingStatus.EXPIRED);
+				}
+				Booking replay = rows.get(bookingId);
+				if (replay == null || !replay.customerId().equals(customerId)) {
+					return new PayOutcome.Gone();
+				}
+				BookingStatus status = replay.statusAt(now);
+				return status == BookingStatus.CONFIRMED ? new PayOutcome.AlreadyPaid(replay)
+					: new PayOutcome.NotPayable(status);
+			}
+		}
 		Booking current = rows.get(bookingId);
 		if (current == null || !current.customerId().equals(customerId)) {
 			return new PayOutcome.Gone();
@@ -103,10 +155,23 @@ public class InMemorySeatInventory implements SeatInventory, BookingRepository {
 		if (status == BookingStatus.PENDING) {
 			Booking confirmed = current.confirmed();
 			rows.put(current.id(), confirmed);
+			transactions.add(new PaymentTransaction(UUID.randomUUID(), confirmed.id(), customerId,
+				PaymentTransactionType.PAYMENT, PaymentTransactionStatus.COMPLETED, confirmed.totalPrice(),
+				idempotencyKey, now, now));
 			return new PayOutcome.Paid(confirmed);
 		}
-		return status == BookingStatus.CONFIRMED ? new PayOutcome.AlreadyPaid(current)
-			: new PayOutcome.NotPayable(status);
+		if (status == BookingStatus.CONFIRMED) {
+			return new PayOutcome.AlreadyPaid(current);
+		}
+		if (status == BookingStatus.EXPIRED) {
+			String lateKey = idempotencyKey != null ? idempotencyKey : "late-refund:" + current.id();
+			if (findByCustomerAndKey(customerId, PaymentTransactionType.PAYMENT, lateKey).isEmpty()) {
+				transactions.add(new PaymentTransaction(UUID.randomUUID(), current.id(), customerId,
+					PaymentTransactionType.PAYMENT, PaymentTransactionStatus.REFUNDED, current.totalPrice(),
+					lateKey, now, now));
+			}
+		}
+		return new PayOutcome.NotPayable(status);
 	}
 
 	@Override
@@ -156,10 +221,20 @@ public class InMemorySeatInventory implements SeatInventory, BookingRepository {
 		showtimes.replace(new Showtime(s.id(), s.movieId(), s.auditoriumId(), s.startsAt(), s.endsAt(), s.basePrice(),
 			ShowtimeStatus.CANCELLED, cancellation));
 		rows.values().removeIf(b -> b.showtimeId().equals(showtimeId) && b.status() == BookingStatus.PENDING);
-		rows.replaceAll((bookingId, b) -> b.showtimeId().equals(showtimeId) && b.status() == BookingStatus.CONFIRMED
-			? new Booking(b.id(), b.customerId(), b.showtimeId(), BookingStatus.REFUNDED, b.createdAt(), b.expiresAt(),
-				b.seats())
-			: b);
+		rows.replaceAll((bookingId, b) -> {
+			if (b.showtimeId().equals(showtimeId) && b.status() == BookingStatus.CONFIRMED) {
+				boolean alreadyRefunded = transactions.stream()
+					.anyMatch(tx -> tx.bookingId().equals(b.id()) && tx.type() == PaymentTransactionType.REFUND);
+				if (!alreadyRefunded) {
+					transactions.add(new PaymentTransaction(UUID.randomUUID(), b.id(), b.customerId(),
+						PaymentTransactionType.REFUND, PaymentTransactionStatus.REFUNDED, b.totalPrice(),
+						"refund:" + b.id(), now, now));
+				}
+				return new Booking(b.id(), b.customerId(), b.showtimeId(), BookingStatus.REFUNDED, b.createdAt(),
+					b.expiresAt(), b.seats());
+			}
+			return b;
+		});
 		return new CancelOutcome.Cancelled();
 	}
 
