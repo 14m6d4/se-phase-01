@@ -41,14 +41,14 @@ class JpaRefreshTokenRepository implements RefreshTokenRepository {
 
 	@Override
 	@Transactional
-	public int revokeById(UUID tokenId, Instant revokedAt) {
-		return jpa.revokeById(tokenId, revokedAt);
+	public int revokeByFamilyId(UUID familyId, Instant revokedAt) {
+		return jpa.revokeByFamilyId(familyId, revokedAt);
 	}
 
 	@Override
 	@Transactional
-	public int revokeByFamilyId(UUID familyId, Instant revokedAt) {
-		return jpa.revokeByFamilyId(familyId, revokedAt);
+	public int revokeByAccountIdAndFamilyId(UUID accountId, UUID familyId, Instant revokedAt) {
+		return jpa.revokeByAccountIdAndFamilyId(accountId, familyId, revokedAt);
 	}
 
 	@Override

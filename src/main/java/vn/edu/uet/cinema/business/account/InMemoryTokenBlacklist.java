@@ -61,11 +61,6 @@ public class InMemoryTokenBlacklist implements TokenBlacklist {
 		return true;
 	}
 
-	@Override
-	public boolean isRevoked(String tokenId) {
-		return isRevoked(tokenId, clock.instant());
-	}
-
 	public int size() {
 		return revokedTokens.size();
 	}

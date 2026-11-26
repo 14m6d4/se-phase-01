@@ -40,16 +40,18 @@ class TokenIssuer {
 		return ttl;
 	}
 
-	String issue(Account account) {
+	String issue(Account account, UUID familyId) {
 		Instant now = Instant.now();
-		JwtClaimsSet claims = JwtClaimsSet.builder()
+		JwtClaimsSet.Builder claims = JwtClaimsSet.builder()
 			.id(UUID.randomUUID().toString())
 			.subject(account.id().toString())
 			.issuedAt(now)
 			.expiresAt(now.plus(ttl))
-			.claim(SecurityConfig.ROLES_CLAIM, List.of(account.role().name()))
-			.build();
+			.claim(SecurityConfig.ROLES_CLAIM, List.of(account.role().name()));
+		if (familyId != null) {
+			claims.claim(SecurityConfig.FAMILY_ID_CLAIM, familyId.toString());
+		}
 		JwsHeader header = JwsHeader.with(MacAlgorithm.HS256).build();
-		return encoder.encode(JwtEncoderParameters.from(header, claims)).getTokenValue();
+		return encoder.encode(JwtEncoderParameters.from(header, claims.build())).getTokenValue();
 	}
 }

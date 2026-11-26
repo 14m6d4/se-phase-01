@@ -11,8 +11,4 @@ public interface TokenBlacklist {
 	void revoke(String tokenId, Instant expiresAt);
 
 	boolean isRevoked(String tokenId, Instant now);
-
-	default boolean isRevoked(String tokenId) {
-		return isRevoked(tokenId, Instant.now());
-	}
 }

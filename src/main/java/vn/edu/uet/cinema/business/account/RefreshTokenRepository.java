@@ -21,9 +21,9 @@ public interface RefreshTokenRepository {
 	 */
 	boolean rotate(UUID previousTokenId, RefreshToken replacement, Instant revokedAt);
 
-	int revokeById(UUID tokenId, Instant revokedAt);
-
 	int revokeByFamilyId(UUID familyId, Instant revokedAt);
+
+	int revokeByAccountIdAndFamilyId(UUID accountId, UUID familyId, Instant revokedAt);
 
 	int revokeByAccountId(UUID accountId, Instant revokedAt);
 }

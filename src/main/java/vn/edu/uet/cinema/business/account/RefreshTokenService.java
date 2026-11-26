@@ -48,12 +48,8 @@ public class RefreshTokenService {
 		this.random = new SecureRandom();
 	}
 
-	public Duration ttl() {
-		return ttl;
-	}
-
 	/** Creates a fresh refresh token starting a new token family for a login session. */
-	public String issue(UUID accountId) {
+	public IssuedRefreshToken issue(UUID accountId) {
 		Objects.requireNonNull(accountId, "accountId must not be null");
 		Instant now = clock.instant();
 		String rawToken = generateRawToken();
@@ -67,7 +63,7 @@ public class RefreshTokenService {
 			null,
 			null);
 		refreshTokens.save(token);
-		return rawToken;
+		return new IssuedRefreshToken(rawToken, token);
 	}
 
 	/**
@@ -114,6 +110,14 @@ public class RefreshTokenService {
 		return new RotatedRefreshToken(account, newRawToken, replacement);
 	}
 
+	/** Revokes the token family associated with an access token when it belongs to {@code accountId}. */
+	public void revokeFamilyForAccount(UUID accountId, UUID familyId) {
+		if (accountId == null || familyId == null) {
+			return;
+		}
+		refreshTokens.revokeByAccountIdAndFamilyId(accountId, familyId, clock.instant());
+	}
+
 	/**
 	 * Revokes the refresh token family when it belongs to {@code accountId}.
 	 * Ignores missing/unknown tokens or tokens belonging to another account.
@@ -147,6 +151,9 @@ public class RefreshTokenService {
 		byte[] bytes = new byte[TOKEN_BYTES];
 		random.nextBytes(bytes);
 		return Base64.getUrlEncoder().withoutPadding().encodeToString(bytes);
+	}
+
+	public record IssuedRefreshToken(String rawRefreshToken, RefreshToken refreshToken) {
 	}
 
 	public record RotatedRefreshToken(Account account, String rawRefreshToken, RefreshToken refreshToken) {

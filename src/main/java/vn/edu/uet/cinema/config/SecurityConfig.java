@@ -6,6 +6,8 @@ import com.nimbusds.jose.jwk.source.ImmutableSecret;
 import jakarta.servlet.http.HttpServletResponse;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
+import java.time.Clock;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.concurrent.ConcurrentHashMap;
 import javax.crypto.SecretKey;
@@ -23,6 +25,7 @@ import org.springframework.security.oauth2.jwt.BadJwtException;
 import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.security.oauth2.jwt.JwtDecoder;
 import org.springframework.security.oauth2.jwt.JwtEncoder;
+import org.springframework.security.oauth2.jwt.JwtTimestampValidator;
 import org.springframework.security.oauth2.jwt.NimbusJwtDecoder;
 import org.springframework.security.oauth2.jwt.NimbusJwtEncoder;
 import org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationConverter;
@@ -47,6 +50,9 @@ public class SecurityConfig {
 
 	/** Token claim holding the Account's roles, mapped to {@code ROLE_*} authorities. */
 	public static final String ROLES_CLAIM = "roles";
+
+	/** Token claim linking an access JWT to its refresh token family so logout without a body revokes the session. */
+	public static final String FAMILY_ID_CLAIM = "familyId";
 
 	private static final String[] CATALOGUE = {"/api/cinemas/**", "/api/auditoriums/**", "/api/movies/**",
 		"/api/showtimes/**"};
@@ -117,11 +123,19 @@ public class SecurityConfig {
 
 	@Bean
 	JwtDecoder jwtDecoder(SecretKey jwtKey, TokenBlacklist tokenBlacklist) {
+		return jwtDecoder(jwtKey, tokenBlacklist, Clock.systemUTC());
+	}
+
+	JwtDecoder jwtDecoder(SecretKey jwtKey, TokenBlacklist tokenBlacklist, Clock clock) {
 		NimbusJwtDecoder delegate = NimbusJwtDecoder.withSecretKey(jwtKey).macAlgorithm(MacAlgorithm.HS256).build();
+		// Disable Nimbus's default 60s clock skew so a logged-out JWT cannot be resurrected during [exp, exp + 60s].
+		JwtTimestampValidator timestampValidator = new JwtTimestampValidator(Duration.ZERO);
+		timestampValidator.setClock(clock);
+		delegate.setJwtValidator(timestampValidator);
 		ConcurrentHashMap<String, Jwt> cache = new ConcurrentHashMap<>(2048);
 		return token -> {
 			Jwt cached = cache.get(token);
-			Instant now = Instant.now();
+			Instant now = clock.instant();
 			if (cached != null) {
 				if (tokenBlacklist.isRevoked(tokenKey(cached), now)) {
 					cache.remove(token, cached);
@@ -148,7 +162,7 @@ public class SecurityConfig {
 		};
 	}
 
-	private static String tokenKey(Jwt jwt) {
+	public static String tokenKey(Jwt jwt) {
 		String id = jwt.getId();
 		return id != null && !id.isBlank() ? id : jwt.getTokenValue();
 	}

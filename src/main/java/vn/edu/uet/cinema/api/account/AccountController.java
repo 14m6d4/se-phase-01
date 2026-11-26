@@ -25,6 +25,7 @@ import vn.edu.uet.cinema.business.account.AccountService;
 import vn.edu.uet.cinema.business.account.RefreshTokenService;
 import vn.edu.uet.cinema.business.account.TokenBlacklist;
 import vn.edu.uet.cinema.config.OpenApiConfig;
+import vn.edu.uet.cinema.config.SecurityConfig;
 
 @RestController
 @Tag(name = "Accounts", description = "Customer registration, login, token refresh, logout, and the authenticated account.")
@@ -64,31 +65,41 @@ class AccountController {
 		+ "share the same 401 response; login applies only nonblank validation.")
 	TokenResponse login(@Valid @RequestBody LoginRequest request) {
 		Account account = accounts.authenticate(request.email(), request.password());
-		return new TokenResponse(tokens.issue(account), refreshTokens.issue(account.id()), "Bearer",
-			tokens.ttl().toSeconds());
+		RefreshTokenService.IssuedRefreshToken issued = refreshTokens.issue(account.id());
+		return new TokenResponse(tokens.issue(account, issued.refreshToken().familyId()), issued.rawRefreshToken(),
+			"Bearer", tokens.ttl().toSeconds());
 	}
 
 	@PostMapping("/api/auth/refresh")
 	@Operation(summary = "Refresh access token", description = "Public endpoint that exchanges an active refresh token "
 		+ "for a new short-lived Bearer access token and a rotated refresh token. Presenting an unknown, expired, or "
-		+ "already-used refresh token returns 401 and revokes the token family.")
+		+ "revoked refresh token returns 401; replaying an already-used refresh token also revokes its entire token family.")
 	TokenResponse refresh(@Valid @RequestBody RefreshRequest request) {
 		RefreshTokenService.RotatedRefreshToken rotated = refreshTokens.rotate(request.refreshToken());
-		return new TokenResponse(tokens.issue(rotated.account()), rotated.rawRefreshToken(), "Bearer",
-			tokens.ttl().toSeconds());
+		return new TokenResponse(tokens.issue(rotated.account(), rotated.refreshToken().familyId()),
+			rotated.rawRefreshToken(), "Bearer", tokens.ttl().toSeconds());
 	}
 
 	@PostMapping("/api/auth/logout")
 	@ResponseStatus(HttpStatus.NO_CONTENT)
 	@Operation(summary = "Log out", description = "Revokes the caller's current Bearer access token by adding it to the "
-		+ "token blacklist so further requests using that token fail with 401. If a refreshToken belonging to the "
-		+ "caller is supplied in the optional request body, its refresh token family is also revoked.")
+		+ "token blacklist so further requests using that token fail with 401, and revokes the refresh token family "
+		+ "linked to the access token. If an additional refreshToken belonging to the caller is supplied in the optional "
+		+ "request body, its refresh token family is also revoked.")
 	@SecurityRequirement(name = OpenApiConfig.BEARER_AUTH)
 	void logout(@AuthenticationPrincipal Jwt jwt, @RequestBody(required = false) @Valid LogoutRequest request) {
-		String tokenId = jwt.getId() != null && !jwt.getId().isBlank() ? jwt.getId() : jwt.getTokenValue();
-		tokenBlacklist.revoke(tokenId, jwt.getExpiresAt());
+		tokenBlacklist.revoke(SecurityConfig.tokenKey(jwt), jwt.getExpiresAt());
+		UUID accountId = UUID.fromString(jwt.getSubject());
+		String familyClaim = jwt.getClaimAsString(SecurityConfig.FAMILY_ID_CLAIM);
+		if (familyClaim != null && !familyClaim.isBlank()) {
+			try {
+				refreshTokens.revokeFamilyForAccount(accountId, UUID.fromString(familyClaim));
+			} catch (IllegalArgumentException ignored) {
+				// Ignore malformed familyId claim rather than failing logout.
+			}
+		}
 		if (request != null && request.refreshToken() != null && !request.refreshToken().isBlank()) {
-			refreshTokens.revokeForAccount(UUID.fromString(jwt.getSubject()), request.refreshToken());
+			refreshTokens.revokeForAccount(accountId, request.refreshToken());
 		}
 	}
 
