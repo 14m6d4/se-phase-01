@@ -29,7 +29,7 @@ SEED_DAYS = 75
 STEP_SHOWTIMES = 20
 RESERVED_SHOWTIMES = 2 * STEP_SHOWTIMES
 VIETNAM = timezone(timedelta(hours=7))
-TOKEN_TTL_SECONDS = 50 * 60  # tokens last an hour; log in again before that
+TOKEN_TTL_SECONDS = 10 * 60  # access tokens last 15 minutes; log in again before that
 
 # Customers per scenario, as in loadtest/README.md, so scenarios never share a Customer.
 FIRST_CUSTOMER = {"Account": 1, "Book": 1, "Contention": 2001, "Race": 4001}

@@ -27,9 +27,9 @@ class MigrationIntegrityTest {
 				.toList();
 		}
 
-		assertThat(versions).hasSize(13);
+		assertThat(versions).hasSize(14);
 		assertThat(versions).doesNotHaveDuplicates();
-		assertThat(versions).containsExactly(1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13);
+		assertThat(versions).containsExactly(1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14);
 	}
 
 	@Test
@@ -53,5 +53,18 @@ class MigrationIntegrityTest {
 			.contains("uq_payment_tx_booking_payment")
 			.contains("uq_payment_tx_booking_refund")
 			.contains("uq_payment_tx_customer_idempotency_key");
+	}
+
+	@Test
+	void v14CreatesRefreshTokenTableWithHashUniquenessAndIndexes() throws Exception {
+		String sql = Files.readString(Path.of("src/main/resources/db/migration/V14__create_refresh_token.sql"));
+
+		assertThat(sql)
+			.contains("CREATE TABLE refresh_token")
+			.contains("fk_refresh_token_account")
+			.contains("uq_refresh_token_hash")
+			.contains("ix_refresh_token_account_id")
+			.contains("ix_refresh_token_family_id")
+			.contains("ix_refresh_token_expires_at");
 	}
 }

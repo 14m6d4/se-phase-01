@@ -14,7 +14,7 @@
   "tags": [
     {
       "name": "Accounts",
-      "description": "Customer registration, login, and the authenticated account."
+      "description": "Customer registration, login, token refresh, logout, and the authenticated account."
     },
     {
       "name": "Movies",
@@ -997,7 +997,7 @@
           "Accounts"
         ],
         "summary": "Log in",
-        "description": "Public login authenticates with email and password and returns a one-hour Bearer token. Unknown email and wrong password share the same 401 response; login applies only nonblank validation.",
+        "description": "Public login authenticates with email and password and returns a short-lived Bearer access token (default 15 minutes) and a revocable rotating refresh token. Unknown email and wrong password share the same 401 response; login applies only nonblank validation.",
         "operationId": "login",
         "requestBody": {
           "content": {
@@ -1027,6 +1027,79 @@
             "$ref": "#/components/responses/LoginBadRequest"
           }
         }
+      }
+    },
+    "/api/auth/refresh": {
+      "post": {
+        "tags": [
+          "Accounts"
+        ],
+        "summary": "Refresh access token",
+        "description": "Public endpoint that exchanges an active refresh token for a new short-lived Bearer access token and a rotated refresh token. Presenting an unknown, expired, or revoked refresh token returns 401; replaying an already-used refresh token also revokes its entire token family.",
+        "operationId": "refresh",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RefreshRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "*/*": {
+                "schema": {
+                  "$ref": "#/components/schemas/TokenResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          }
+        }
+      }
+    },
+    "/api/auth/logout": {
+      "post": {
+        "tags": [
+          "Accounts"
+        ],
+        "summary": "Log out",
+        "description": "Revokes the caller's current Bearer access token by adding it to the token blacklist so further requests using that token fail with 401, and revokes the refresh token family linked to the access token. If an additional refreshToken belonging to the caller is supplied in the optional request body, its refresh token family is also revoked.",
+        "operationId": "logout",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LogoutRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
       }
     },
     "/api/showtimes/{id}": {
@@ -1991,12 +2064,40 @@
           "password"
         ]
       },
+      "RefreshRequest": {
+        "type": "object",
+        "properties": {
+          "refreshToken": {
+            "type": "string",
+            "description": "Active refresh token returned by login or a previous refresh.",
+            "example": "dGhpcy1pcy1hLXNhbXBsZS1yZWZyZXNoLXRva2Vu",
+            "minLength": 1
+          }
+        },
+        "required": [
+          "refreshToken"
+        ]
+      },
+      "LogoutRequest": {
+        "type": "object",
+        "properties": {
+          "refreshToken": {
+            "type": "string",
+            "description": "Optional refresh token to revoke alongside the current access token.",
+            "example": "dGhpcy1pcy1hLXNhbXBsZS1yZWZyZXNoLXRva2Vu"
+          }
+        }
+      },
       "TokenResponse": {
         "type": "object",
         "properties": {
           "accessToken": {
             "type": "string",
             "description": "Signed HS256 access token."
+          },
+          "refreshToken": {
+            "type": "string",
+            "description": "Opaque revocable rotating refresh token."
           },
           "tokenType": {
             "type": "string",
@@ -2006,8 +2107,8 @@
           "expiresIn": {
             "type": "integer",
             "format": "int64",
-            "description": "Token lifetime in seconds.",
-            "example": 3600
+            "description": "Access token lifetime in seconds.",
+            "example": 900
           }
         }
       },

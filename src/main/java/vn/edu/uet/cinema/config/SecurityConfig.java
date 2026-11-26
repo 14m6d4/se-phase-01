@@ -6,6 +6,8 @@ import com.nimbusds.jose.jwk.source.ImmutableSecret;
 import jakarta.servlet.http.HttpServletResponse;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
+import java.time.Clock;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.concurrent.ConcurrentHashMap;
 import javax.crypto.SecretKey;
@@ -19,9 +21,11 @@ import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.http.SessionCreationPolicy;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.oauth2.jose.jws.MacAlgorithm;
+import org.springframework.security.oauth2.jwt.BadJwtException;
 import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.security.oauth2.jwt.JwtDecoder;
 import org.springframework.security.oauth2.jwt.JwtEncoder;
+import org.springframework.security.oauth2.jwt.JwtTimestampValidator;
 import org.springframework.security.oauth2.jwt.NimbusJwtDecoder;
 import org.springframework.security.oauth2.jwt.NimbusJwtEncoder;
 import org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationConverter;
@@ -33,7 +37,9 @@ import org.springframework.security.oauth2.server.resource.web.authentication.Be
 import org.springframework.security.web.AuthenticationEntryPoint;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.access.AccessDeniedHandler;
+import vn.edu.uet.cinema.business.account.InMemoryTokenBlacklist;
 import vn.edu.uet.cinema.business.account.PasswordHasher;
+import vn.edu.uet.cinema.business.account.TokenBlacklist;
 
 /**
  * The only place that decides who may call what. Controllers never check authentication themselves:
@@ -44,6 +50,9 @@ public class SecurityConfig {
 
 	/** Token claim holding the Account's roles, mapped to {@code ROLE_*} authorities. */
 	public static final String ROLES_CLAIM = "roles";
+
+	/** Token claim linking an access JWT to its refresh token family so logout without a body revokes the session. */
+	public static final String FAMILY_ID_CLAIM = "familyId";
 
 	private static final String[] CATALOGUE = {"/api/cinemas/**", "/api/auditoriums/**", "/api/movies/**",
 		"/api/showtimes/**"};
@@ -56,8 +65,9 @@ public class SecurityConfig {
 			.csrf(csrf -> csrf.disable())
 			.sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
 			.authorizeHttpRequests(auth -> auth
-				.requestMatchers("/api/auth/**", "/error", "/actuator/health", "/swagger-ui.html", "/swagger-ui/**",
-					"/v3/api-docs/**", "/v3/api-docs.yaml").permitAll()
+				.requestMatchers("/api/auth/register", "/api/auth/login", "/api/auth/refresh", "/error",
+					"/actuator/health", "/swagger-ui.html", "/swagger-ui/**", "/v3/api-docs/**", "/v3/api-docs.yaml")
+				.permitAll()
 				.requestMatchers(GET, CATALOGUE).permitAll()
 				.requestMatchers(CATALOGUE).hasRole("ADMIN")
 				.requestMatchers("/api/bookings/**").hasRole("CUSTOMER")
@@ -107,13 +117,30 @@ public class SecurityConfig {
 	}
 
 	@Bean
-	JwtDecoder jwtDecoder(SecretKey jwtKey) {
+	TokenBlacklist tokenBlacklist() {
+		return new InMemoryTokenBlacklist();
+	}
+
+	@Bean
+	JwtDecoder jwtDecoder(SecretKey jwtKey, TokenBlacklist tokenBlacklist) {
+		return jwtDecoder(jwtKey, tokenBlacklist, Clock.systemUTC());
+	}
+
+	JwtDecoder jwtDecoder(SecretKey jwtKey, TokenBlacklist tokenBlacklist, Clock clock) {
 		NimbusJwtDecoder delegate = NimbusJwtDecoder.withSecretKey(jwtKey).macAlgorithm(MacAlgorithm.HS256).build();
+		// Disable Nimbus's default 60s clock skew so a logged-out JWT cannot be resurrected during [exp, exp + 60s].
+		JwtTimestampValidator timestampValidator = new JwtTimestampValidator(Duration.ZERO);
+		timestampValidator.setClock(clock);
+		delegate.setJwtValidator(timestampValidator);
 		ConcurrentHashMap<String, Jwt> cache = new ConcurrentHashMap<>(2048);
 		return token -> {
 			Jwt cached = cache.get(token);
-			Instant now = Instant.now();
+			Instant now = clock.instant();
 			if (cached != null) {
+				if (tokenBlacklist.isRevoked(tokenKey(cached), now)) {
+					cache.remove(token, cached);
+					throw new BadJwtException("Token has been revoked");
+				}
 				Instant expiresAt = cached.getExpiresAt();
 				if (expiresAt == null || expiresAt.isAfter(now)) {
 					return cached;
@@ -121,6 +148,9 @@ public class SecurityConfig {
 				cache.remove(token, cached);
 			}
 			Jwt decoded = delegate.decode(token);
+			if (tokenBlacklist.isRevoked(tokenKey(decoded), now)) {
+				throw new BadJwtException("Token has been revoked");
+			}
 			Instant expiresAt = decoded.getExpiresAt();
 			if (expiresAt == null || expiresAt.isAfter(now)) {
 				if (cache.size() >= 4096) {
@@ -130,6 +160,11 @@ public class SecurityConfig {
 			}
 			return decoded;
 		};
+	}
+
+	public static String tokenKey(Jwt jwt) {
+		String id = jwt.getId();
+		return id != null && !id.isBlank() ? id : jwt.getTokenValue();
 	}
 
 	@Bean

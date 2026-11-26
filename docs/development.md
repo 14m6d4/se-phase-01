@@ -35,6 +35,8 @@ The service reads its configuration from environment variables. Secrets have no 
 | `DB_USERNAME` | | `cinema` | Database user |
 | `DB_PASSWORD` | ✓ | | Database password |
 | `JWT_SECRET` | ✓ | | HS256 signing key, at least 32 bytes (`openssl rand -base64 32`) |
+| `JWT_ACCESS_TOKEN_TTL` | | `15m` | Short-lived access JWT lifetime (Spring duration) |
+| `JWT_REFRESH_TOKEN_TTL` | | `7d` | Rotating refresh token lifetime (Spring duration) |
 | `ADMIN_EMAIL` | | `admin@cinema.local` | The Admin account, created at startup if missing |
 | `ADMIN_PASSWORD` | ✓ | | The Admin's password, reset at every startup; change it and restart to rotate |
 
@@ -42,7 +44,7 @@ Without `JWT_SECRET` or `ADMIN_PASSWORD` the app refuses to start. Without `DB_P
 
 ## Authentication
 
-Log in to get a bearer token (valid for one hour), then send it in the `Authorization` header:
+Log in to get a short-lived Bearer access token (valid for 15 minutes by default) and a rotating refresh token (7 days), then send the access token in the `Authorization` header. Exchange a refresh token at `POST /api/auth/refresh`, or revoke the current access token and its session refresh family at `POST /api/auth/logout`:
 
 ```bash
 curl -X POST localhost:8080/api/auth/register -H 'Content-Type: application/json' \

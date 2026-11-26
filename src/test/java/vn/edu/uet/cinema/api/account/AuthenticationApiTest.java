@@ -99,6 +99,8 @@ class AuthenticationApiTest {
 			.andExpect(jsonPath("$.security").doesNotExist())
 			.andExpect(jsonPath("$.paths['/api/auth/register'].post.security").doesNotExist())
 			.andExpect(jsonPath("$.paths['/api/auth/login'].post.security").doesNotExist())
+			.andExpect(jsonPath("$.paths['/api/auth/refresh'].post.security").doesNotExist())
+			.andExpect(jsonPath("$.paths['/api/auth/logout'].post.security[0].bearerAuth").exists())
 			.andExpect(jsonPath("$.paths['/api/me'].get.security[0].bearerAuth").exists());
 	}
 

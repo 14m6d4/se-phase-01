@@ -31,6 +31,7 @@ import vn.edu.uet.cinema.CinemaApplication;
 import vn.edu.uet.cinema.business.PageQuery;
 import vn.edu.uet.cinema.business.PageSlice;
 import vn.edu.uet.cinema.business.account.AccountService;
+import vn.edu.uet.cinema.business.account.RefreshTokenService;
 import vn.edu.uet.cinema.business.auditorium.AuditoriumService;
 import vn.edu.uet.cinema.business.booking.BookingService;
 import vn.edu.uet.cinema.business.cinema.CinemaService;
@@ -48,6 +49,7 @@ class OpenApiContractTest {
 	private static final String PROBLEM = "application/problem+json";
 	private static final Map<String, String> SUCCESS_RESPONSES = Map.ofEntries(
 		Map.entry("POST /api/auth/register", "201"),
+		Map.entry("POST /api/auth/logout", "204"),
 		Map.entry("POST /api/cinemas", "201"),
 		Map.entry("DELETE /api/cinemas/{id}", "204"),
 		Map.entry("POST /api/cinemas/{id}/auditoriums", "201"),
@@ -61,6 +63,8 @@ class OpenApiContractTest {
 	private static final Map<String, Set<String>> ERROR_MATRIX = Map.ofEntries(
 		Map.entry("POST /api/auth/register", Set.of("400", "401", "409")),
 		Map.entry("POST /api/auth/login", Set.of("400", "401")),
+		Map.entry("POST /api/auth/refresh", Set.of("400", "401")),
+		Map.entry("POST /api/auth/logout", Set.of("400", "401")),
 		Map.entry("GET /api/me", Set.of("401", "404")),
 		Map.entry("POST /api/cinemas", Set.of("400", "401", "403")),
 		Map.entry("GET /api/cinemas", Set.of("400", "401")),
@@ -94,6 +98,8 @@ class OpenApiContractTest {
 	@MockitoBean
 	AccountService accounts;
 	@MockitoBean
+	RefreshTokenService refreshTokens;
+	@MockitoBean
 	CinemaService cinemas;
 	@MockitoBean
 	AuditoriumService auditoriums;
@@ -123,9 +129,9 @@ class OpenApiContractTest {
 		Map<String, Object> validationProblem = map(schemas.get("ValidationProblem"));
 		Map<String, Object> properties = map(validationProblem.get("properties"));
 
-		assertThat(ERROR_MATRIX).hasSize(28);
+		assertThat(ERROR_MATRIX).hasSize(30);
 		assertThat(paths.values().stream().map(OpenApiContractTest::map).mapToInt(path -> (int) path.keySet().stream()
-			.filter(Set.of("get", "post", "put", "delete")::contains).count()).sum()).isEqualTo(28);
+			.filter(Set.of("get", "post", "put", "delete")::contains).count()).sum()).isEqualTo(30);
 		assertThat(api.get("security")).isNull();
 		assertThat(properties).containsKeys("type", "title", "status", "detail", "instance", "errors", "seatIds");
 		assertThat(new HashSet<>((List<?>) validationProblem.get("required")))
@@ -174,19 +180,21 @@ class OpenApiContractTest {
 					}
 				}
 			}
-			boolean shouldRequireBearer = path.equals("/api/me") || path.startsWith("/api/bookings")
-				|| !method.equals("get") && !path.startsWith("/api/auth/");
+			boolean shouldRequireBearer = path.equals("/api/me") || path.equals("/api/auth/logout")
+				|| path.startsWith("/api/bookings") || !method.equals("get") && !path.startsWith("/api/auth/");
 			assertThat(operation.containsKey("security")).as(expected.getKey()).isEqualTo(shouldRequireBearer);
 			if (shouldRequireBearer) {
 				secured++;
 			}
 		}
-		assertThat(secured).isEqualTo(17);
+		assertThat(secured).isEqualTo(18);
 		assertThat(tags).containsExactlyInAnyOrder("Accounts", "Cinemas", "Auditoriums", "Movies", "Showtimes", "Bookings");
 		assertSecurityProblemExamples(responses);
 
 		assertRequestExamples(schemas, "RegisterRequest", "email", "password", "fullName");
 		assertRequestExamples(schemas, "LoginRequest", "email", "password");
+		assertRequestExamples(schemas, "RefreshRequest", "refreshToken");
+		assertRequestExamples(schemas, "LogoutRequest", "refreshToken");
 		assertRequestExamples(schemas, "CinemaRequest", "name", "address");
 		assertRequestExamples(schemas, "AuditoriumRequest", "name", "rows", "seatsPerRow", "vipRows", "coupleRows");
 		assertRequestExamples(schemas, "MovieRequest", "title", "description", "durationMinutes", "genre", "ageRating",
@@ -208,6 +216,7 @@ class OpenApiContractTest {
 		assertNoStorageCeilings(schemas, "MovieRequest", "title", "genre", "description", "posterUrl");
 		assertProperty(schemas, "RegisterRequest", "email", "minLength", 1);
 		assertProperty(schemas, "RegisterRequest", "fullName", "minLength", 1);
+		assertProperty(schemas, "RefreshRequest", "refreshToken", "minLength", 1);
 		assertProperty(schemas, "CinemaRequest", "name", "minLength", 1);
 		assertProperty(schemas, "AuditoriumRequest", "name", "minLength", 1);
 		assertProperty(schemas, "MovieRequest", "title", "minLength", 1);

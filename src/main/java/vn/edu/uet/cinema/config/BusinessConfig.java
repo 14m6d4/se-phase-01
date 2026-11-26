@@ -14,6 +14,8 @@ import org.springframework.context.annotation.Primary;
 import vn.edu.uet.cinema.business.account.AccountRepository;
 import vn.edu.uet.cinema.business.account.AccountService;
 import vn.edu.uet.cinema.business.account.PasswordHasher;
+import vn.edu.uet.cinema.business.account.RefreshTokenRepository;
+import vn.edu.uet.cinema.business.account.RefreshTokenService;
 import vn.edu.uet.cinema.business.auditorium.AuditoriumRepository;
 import vn.edu.uet.cinema.business.auditorium.AuditoriumService;
 import vn.edu.uet.cinema.business.booking.AntiHoardingGuard;
@@ -48,6 +50,12 @@ class BusinessConfig {
 	@Bean
 	AccountService accountService(AccountRepository accounts, PasswordHasher passwordHasher) {
 		return new AccountService(accounts, passwordHasher);
+	}
+
+	@Bean
+	RefreshTokenService refreshTokenService(RefreshTokenRepository refreshTokens, AccountRepository accounts,
+		@Value("${app.jwt.refresh-token-ttl:7d}") Duration refreshTokenTtl) {
+		return new RefreshTokenService(refreshTokens, accounts, refreshTokenTtl);
 	}
 
 	@Bean

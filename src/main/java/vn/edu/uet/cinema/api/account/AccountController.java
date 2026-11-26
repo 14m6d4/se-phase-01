@@ -1,9 +1,9 @@
 package vn.edu.uet.cinema.api.account;
 
+import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.media.Content;
 import io.swagger.v3.oas.annotations.media.ExampleObject;
 import io.swagger.v3.oas.annotations.media.Schema;
-import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import io.swagger.v3.oas.annotations.security.SecurityRequirement;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -22,18 +22,26 @@ import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
 import vn.edu.uet.cinema.business.account.Account;
 import vn.edu.uet.cinema.business.account.AccountService;
+import vn.edu.uet.cinema.business.account.RefreshTokenService;
+import vn.edu.uet.cinema.business.account.TokenBlacklist;
 import vn.edu.uet.cinema.config.OpenApiConfig;
+import vn.edu.uet.cinema.config.SecurityConfig;
 
 @RestController
-@Tag(name = "Accounts", description = "Customer registration, login, and the authenticated account.")
+@Tag(name = "Accounts", description = "Customer registration, login, token refresh, logout, and the authenticated account.")
 class AccountController {
 
 	private final AccountService accounts;
 	private final TokenIssuer tokens;
+	private final RefreshTokenService refreshTokens;
+	private final TokenBlacklist tokenBlacklist;
 
-	AccountController(AccountService accounts, TokenIssuer tokens) {
+	AccountController(AccountService accounts, TokenIssuer tokens, RefreshTokenService refreshTokens,
+		TokenBlacklist tokenBlacklist) {
 		this.accounts = accounts;
 		this.tokens = tokens;
+		this.refreshTokens = refreshTokens;
+		this.tokenBlacklist = tokenBlacklist;
 	}
 
 	@PostMapping("/api/auth/register")
@@ -52,11 +60,47 @@ class AccountController {
 	}
 
 	@PostMapping("/api/auth/login")
-	@Operation(summary = "Log in", description = "Public login authenticates with email and password and returns a one-hour "
-		+ "Bearer token. Unknown email and wrong password share the same 401 response; login applies only nonblank validation.")
+	@Operation(summary = "Log in", description = "Public login authenticates with email and password and returns a short-lived "
+		+ "Bearer access token (default 15 minutes) and a revocable rotating refresh token. Unknown email and wrong password "
+		+ "share the same 401 response; login applies only nonblank validation.")
 	TokenResponse login(@Valid @RequestBody LoginRequest request) {
 		Account account = accounts.authenticate(request.email(), request.password());
-		return new TokenResponse(tokens.issue(account), "Bearer", TokenIssuer.TTL.toSeconds());
+		RefreshTokenService.IssuedRefreshToken issued = refreshTokens.issue(account.id());
+		return new TokenResponse(tokens.issue(account, issued.refreshToken().familyId()), issued.rawRefreshToken(),
+			"Bearer", tokens.ttl().toSeconds());
+	}
+
+	@PostMapping("/api/auth/refresh")
+	@Operation(summary = "Refresh access token", description = "Public endpoint that exchanges an active refresh token "
+		+ "for a new short-lived Bearer access token and a rotated refresh token. Presenting an unknown, expired, or "
+		+ "revoked refresh token returns 401; replaying an already-used refresh token also revokes its entire token family.")
+	TokenResponse refresh(@Valid @RequestBody RefreshRequest request) {
+		RefreshTokenService.RotatedRefreshToken rotated = refreshTokens.rotate(request.refreshToken());
+		return new TokenResponse(tokens.issue(rotated.account(), rotated.refreshToken().familyId()),
+			rotated.rawRefreshToken(), "Bearer", tokens.ttl().toSeconds());
+	}
+
+	@PostMapping("/api/auth/logout")
+	@ResponseStatus(HttpStatus.NO_CONTENT)
+	@Operation(summary = "Log out", description = "Revokes the caller's current Bearer access token by adding it to the "
+		+ "token blacklist so further requests using that token fail with 401, and revokes the refresh token family "
+		+ "linked to the access token. If an additional refreshToken belonging to the caller is supplied in the optional "
+		+ "request body, its refresh token family is also revoked.")
+	@SecurityRequirement(name = OpenApiConfig.BEARER_AUTH)
+	void logout(@AuthenticationPrincipal Jwt jwt, @RequestBody(required = false) @Valid LogoutRequest request) {
+		tokenBlacklist.revoke(SecurityConfig.tokenKey(jwt), jwt.getExpiresAt());
+		UUID accountId = UUID.fromString(jwt.getSubject());
+		String familyClaim = jwt.getClaimAsString(SecurityConfig.FAMILY_ID_CLAIM);
+		if (familyClaim != null && !familyClaim.isBlank()) {
+			try {
+				refreshTokens.revokeFamilyForAccount(accountId, UUID.fromString(familyClaim));
+			} catch (IllegalArgumentException ignored) {
+				// Ignore malformed familyId claim rather than failing logout.
+			}
+		}
+		if (request != null && request.refreshToken() != null && !request.refreshToken().isBlank()) {
+			refreshTokens.revokeForAccount(accountId, request.refreshToken());
+		}
 	}
 
 	@GetMapping("/api/me")
@@ -87,9 +131,20 @@ class AccountController {
 			example = "correctHorseBatteryStaple") String password) {
 	}
 
+	record RefreshRequest(@NotBlank(message = "Refresh token is required")
+		@Schema(description = "Active refresh token returned by login or a previous refresh.", minLength = 1,
+			example = "dGhpcy1pcy1hLXNhbXBsZS1yZWZyZXNoLXRva2Vu") String refreshToken) {
+	}
+
+	record LogoutRequest(
+		@Schema(description = "Optional refresh token to revoke alongside the current access token.",
+			example = "dGhpcy1pcy1hLXNhbXBsZS1yZWZyZXNoLXRva2Vu") String refreshToken) {
+	}
+
 	record TokenResponse(@Schema(description = "Signed HS256 access token.") String accessToken,
+		@Schema(description = "Opaque revocable rotating refresh token.") String refreshToken,
 		@Schema(description = "Authorization scheme.", example = "Bearer") String tokenType,
-		@Schema(description = "Token lifetime in seconds.", example = "3600") long expiresIn) {
+		@Schema(description = "Access token lifetime in seconds.", example = "900") long expiresIn) {
 	}
 
 	record AccountResponse(@Schema(description = "Account identifier.", example = "550e8400-e29b-41d4-a716-446655440000")

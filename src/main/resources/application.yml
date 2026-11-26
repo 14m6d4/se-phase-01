@@ -47,6 +47,8 @@ app:
     password: ${ADMIN_PASSWORD}
   jwt:
     secret: ${JWT_SECRET}
+    access-token-ttl: ${JWT_ACCESS_TOKEN_TTL:15m}
+    refresh-token-ttl: ${JWT_REFRESH_TOKEN_TTL:7d}
   seat-inventory:
     strategy: ${SEAT_INVENTORY_STRATEGY:unique}
   rate-limit:
