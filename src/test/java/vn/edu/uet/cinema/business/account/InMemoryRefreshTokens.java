@@ -58,28 +58,30 @@ public class InMemoryRefreshTokens implements RefreshTokenRepository {
 	}
 
 	@Override
-	public synchronized int revokeById(UUID tokenId, Instant revokedAt) {
-		RefreshToken existing = byId.get(tokenId);
-		if (existing == null || existing.isRevoked()) {
-			return 0;
-		}
-		byId.put(tokenId, new RefreshToken(
-			existing.id(),
-			existing.accountId(),
-			existing.familyId(),
-			existing.tokenHash(),
-			existing.createdAt(),
-			existing.expiresAt(),
-			revokedAt,
-			existing.replacedByTokenId()));
-		return 1;
-	}
-
-	@Override
 	public synchronized int revokeByFamilyId(UUID familyId, Instant revokedAt) {
 		int updated = 0;
 		for (RefreshToken existing : byId.values().stream().toList()) {
 			if (existing.familyId().equals(familyId) && !existing.isRevoked()) {
+				byId.put(existing.id(), new RefreshToken(
+					existing.id(),
+					existing.accountId(),
+					existing.familyId(),
+					existing.tokenHash(),
+					existing.createdAt(),
+					existing.expiresAt(),
+					revokedAt,
+					existing.replacedByTokenId()));
+				updated++;
+			}
+		}
+		return updated;
+	}
+
+	@Override
+	public synchronized int revokeByAccountIdAndFamilyId(UUID accountId, UUID familyId, Instant revokedAt) {
+		int updated = 0;
+		for (RefreshToken existing : byId.values().stream().toList()) {
+			if (existing.accountId().equals(accountId) && existing.familyId().equals(familyId) && !existing.isRevoked()) {
 				byId.put(existing.id(), new RefreshToken(
 					existing.id(),
 					existing.accountId(),

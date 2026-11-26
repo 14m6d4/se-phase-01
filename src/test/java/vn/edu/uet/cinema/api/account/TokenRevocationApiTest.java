@@ -9,6 +9,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import com.jayway.jsonpath.JsonPath;
+import java.time.Instant;
+import java.util.List;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -16,8 +18,17 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.context.annotation.Import;
 import org.springframework.http.MediaType;
+import org.springframework.security.oauth2.jose.jws.MacAlgorithm;
+import org.springframework.security.oauth2.jwt.JwsHeader;
+import org.springframework.security.oauth2.jwt.JwtClaimsSet;
+import org.springframework.security.oauth2.jwt.JwtEncoder;
+import org.springframework.security.oauth2.jwt.JwtEncoderParameters;
 import org.springframework.test.web.servlet.MockMvc;
 import vn.edu.uet.cinema.TestcontainersConfiguration;
+import vn.edu.uet.cinema.business.account.Account;
+import vn.edu.uet.cinema.business.account.AccountService;
+import vn.edu.uet.cinema.business.account.TokenBlacklist;
+import vn.edu.uet.cinema.config.SecurityConfig;
 
 /**
  * HTTP API integration tests for short-lived access tokens, token blacklist logout,
@@ -30,6 +41,12 @@ class TokenRevocationApiTest {
 
 	@Autowired
 	MockMvc mvc;
+	@Autowired
+	JwtEncoder jwtEncoder;
+	@Autowired
+	TokenBlacklist tokenBlacklist;
+	@Autowired
+	AccountService accounts;
 
 	@Test
 	void loginIssuesShortLivedAccessTokenAndRefreshToken() throws Exception {
@@ -60,7 +77,7 @@ class TokenRevocationApiTest {
 		mvc.perform(get("/api/me").header("Authorization", "Bearer " + firstSession.accessToken()))
 			.andExpect(status().isOk());
 
-		// Logout without body blacklists the current access token.
+		// Logout without body blacklists the current access token AND revokes this session's refresh token family.
 		mvc.perform(post("/api/auth/logout")
 				.header("Authorization", "Bearer " + firstSession.accessToken()))
 			.andExpect(status().isNoContent());
@@ -83,10 +100,49 @@ class TokenRevocationApiTest {
 			.andExpect(status().isUnauthorized())
 			.andExpect(content().contentType(MediaType.APPLICATION_PROBLEM_JSON));
 
-		// Another session of the same account remains valid (different jti).
+		// First session's refresh token is also revoked even though logout had no body.
+		mvc.perform(post("/api/auth/refresh")
+				.contentType(MediaType.APPLICATION_JSON)
+				.content("{\"refreshToken\":\"%s\"}".formatted(firstSession.refreshToken())))
+			.andExpect(status().isUnauthorized())
+			.andExpect(content().contentType(MediaType.APPLICATION_PROBLEM_JSON));
+
+		// Another session of the same account remains valid (different jti and different familyId).
 		mvc.perform(get("/api/me").header("Authorization", "Bearer " + secondSession.accessToken()))
 			.andExpect(status().isOk())
 			.andExpect(jsonPath("$.email").value(email));
+		mvc.perform(post("/api/auth/refresh")
+				.contentType(MediaType.APPLICATION_JSON)
+				.content("{\"refreshToken\":\"%s\"}".formatted(secondSession.refreshToken())))
+			.andExpect(status().isOk())
+			.andExpect(jsonPath("$.accessToken").isNotEmpty());
+	}
+
+	@Test
+	void loggedOutTokenIsStillRejectedWith401AtExpPlus30Seconds() throws Exception {
+		Account customer = accounts.registerCustomer("skew-" + UUID.randomUUID() + "@example.com",
+			"password123", "Skew User");
+		Instant now = Instant.now();
+		Instant expired30sAgo = now.minusSeconds(30);
+		String jti = UUID.randomUUID().toString();
+
+		JwtClaimsSet claims = JwtClaimsSet.builder()
+			.id(jti)
+			.subject(customer.id().toString())
+			.issuedAt(now.minusSeconds(90))
+			.expiresAt(expired30sAgo)
+			.claim(SecurityConfig.ROLES_CLAIM, List.of(customer.role().name()))
+			.build();
+		String tokenAtExpPlus30s = jwtEncoder.encode(
+			JwtEncoderParameters.from(JwsHeader.with(MacAlgorithm.HS256).build(), claims)).getTokenValue();
+
+		// Even after blacklist drops/ignores an entry whose exp is 30s in the past (within Nimbus's default 60s skew),
+		// zero clock skew guarantees the HTTP endpoint still returns 401 Unauthorized.
+		tokenBlacklist.revoke(jti, expired30sAgo);
+		mvc.perform(get("/api/me").header("Authorization", "Bearer " + tokenAtExpPlus30s))
+			.andExpect(status().isUnauthorized())
+			.andExpect(header().exists("WWW-Authenticate"))
+			.andExpect(content().contentType(MediaType.APPLICATION_PROBLEM_JSON));
 	}
 
 	@Test

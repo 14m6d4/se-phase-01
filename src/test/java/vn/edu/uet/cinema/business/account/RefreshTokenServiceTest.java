@@ -23,11 +23,13 @@ class RefreshTokenServiceTest {
 	void issuesHashedRefreshTokenAndRotatesWithinSameFamily() {
 		Account alice = saveAccount("alice@example.com");
 
-		String firstRaw = service.issue(alice.id());
+		RefreshTokenService.IssuedRefreshToken issued = service.issue(alice.id());
+		String firstRaw = issued.rawRefreshToken();
 		assertThat(firstRaw).isNotBlank();
 		assertThat(refreshTokens.findByTokenHash(firstRaw)).isEmpty();
 		RefreshToken storedFirst = refreshTokens.findByTokenHash(RefreshTokenService.hash(firstRaw)).orElseThrow();
 		assertThat(storedFirst.accountId()).isEqualTo(alice.id());
+		assertThat(storedFirst.familyId()).isEqualTo(issued.refreshToken().familyId());
 		assertThat(storedFirst.isActive(clock.instant())).isTrue();
 
 		clock.advance(Duration.ofMinutes(15));
@@ -44,7 +46,7 @@ class RefreshTokenServiceTest {
 	@Test
 	void replayingRotatedRefreshTokenRevokesEntireFamily() {
 		Account alice = saveAccount("alice@example.com");
-		String firstRaw = service.issue(alice.id());
+		String firstRaw = service.issue(alice.id()).rawRefreshToken();
 
 		RefreshTokenService.RotatedRefreshToken second = service.rotate(firstRaw);
 		String secondRaw = second.rawRefreshToken();
@@ -62,7 +64,7 @@ class RefreshTokenServiceTest {
 	@Test
 	void rejectsUnknownBlankOrExpiredRefreshToken() {
 		Account alice = saveAccount("alice@example.com");
-		String raw = service.issue(alice.id());
+		String raw = service.issue(alice.id()).rawRefreshToken();
 
 		assertThatThrownBy(() -> service.rotate(null)).isInstanceOf(InvalidCredentialsException.class);
 		assertThatThrownBy(() -> service.rotate("   ")).isInstanceOf(InvalidCredentialsException.class);
@@ -79,8 +81,8 @@ class RefreshTokenServiceTest {
 		Account alice = saveAccount("alice@example.com");
 		Account bob = saveAccount("bob@example.com");
 
-		String aliceToken = service.issue(alice.id());
-		String bobToken = service.issue(bob.id());
+		String aliceToken = service.issue(alice.id()).rawRefreshToken();
+		String bobToken = service.issue(bob.id()).rawRefreshToken();
 
 		// Alice cannot revoke Bob's refresh token.
 		service.revokeForAccount(alice.id(), bobToken);
@@ -94,10 +96,31 @@ class RefreshTokenServiceTest {
 	}
 
 	@Test
+	void revokeFamilyForAccountRevokesOnlyMatchingAccountAndFamily() {
+		Account alice = saveAccount("alice@example.com");
+		Account bob = saveAccount("bob@example.com");
+
+		RefreshTokenService.IssuedRefreshToken aliceSession1 = service.issue(alice.id());
+		RefreshTokenService.IssuedRefreshToken aliceSession2 = service.issue(alice.id());
+		RefreshTokenService.IssuedRefreshToken bobSession = service.issue(bob.id());
+
+		// Alice cannot revoke Bob's family even if she guesses its UUID.
+		service.revokeFamilyForAccount(alice.id(), bobSession.refreshToken().familyId());
+		assertThat(service.rotate(bobSession.rawRefreshToken()).account()).isEqualTo(bob);
+
+		// Revoking Alice's session 1 leaves session 2 active.
+		service.revokeFamilyForAccount(alice.id(), aliceSession1.refreshToken().familyId());
+		assertThatThrownBy(() -> service.rotate(aliceSession1.rawRefreshToken()))
+			.isInstanceOf(InvalidCredentialsException.class)
+			.hasMessageContaining("revoked");
+		assertThat(service.rotate(aliceSession2.rawRefreshToken()).account()).isEqualTo(alice);
+	}
+
+	@Test
 	void revokeAllForAccountRevokesEveryActiveSession() {
 		Account alice = saveAccount("alice@example.com");
-		String device1 = service.issue(alice.id());
-		String device2 = service.issue(alice.id());
+		String device1 = service.issue(alice.id()).rawRefreshToken();
+		String device2 = service.issue(alice.id()).rawRefreshToken();
 
 		assertThat(service.revokeAllForAccount(alice.id())).isEqualTo(2);
 		assertThatThrownBy(() -> service.rotate(device1)).isInstanceOf(InvalidCredentialsException.class);
