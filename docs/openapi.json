@@ -1035,7 +1035,7 @@
           "Accounts"
         ],
         "summary": "Refresh access token",
-        "description": "Public endpoint that exchanges an active refresh token for a new short-lived Bearer access token and a rotated refresh token. Presenting an unknown, expired, or already-used refresh token returns 401 and revokes the token family.",
+        "description": "Public endpoint that exchanges an active refresh token for a new short-lived Bearer access token and a rotated refresh token. Presenting an unknown, expired, or revoked refresh token returns 401; replaying an already-used refresh token also revokes its entire token family.",
         "operationId": "refresh",
         "requestBody": {
           "content": {
@@ -1073,7 +1073,7 @@
           "Accounts"
         ],
         "summary": "Log out",
-        "description": "Revokes the caller's current Bearer access token by adding it to the token blacklist so further requests using that token fail with 401. If a refreshToken belonging to the caller is supplied in the optional request body, its refresh token family is also revoked.",
+        "description": "Revokes the caller's current Bearer access token by adding it to the token blacklist so further requests using that token fail with 401, and revokes the refresh token family linked to the access token. If an additional refreshToken belonging to the caller is supplied in the optional request body, its refresh token family is also revoked.",
         "operationId": "logout",
         "requestBody": {
           "content": {

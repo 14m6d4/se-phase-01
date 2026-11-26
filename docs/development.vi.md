@@ -35,6 +35,8 @@ Service đọc cấu hình từ biến môi trường. Các secret không có gi
 | `DB_USERNAME` | | `cinema` | User của database |
 | `DB_PASSWORD` | ✓ | | Mật khẩu database |
 | `JWT_SECRET` | ✓ | | Khóa ký HS256, tối thiểu 32 byte (`openssl rand -base64 32`) |
+| `JWT_ACCESS_TOKEN_TTL` | | `15m` | Thời hạn Access JWT ngắn hạn (định dạng Spring Duration) |
+| `JWT_REFRESH_TOKEN_TTL` | | `7d` | Thời hạn Refresh Token xoay vòng (định dạng Spring Duration) |
 | `ADMIN_EMAIL` | | `admin@cinema.local` | Tài khoản Admin, được tạo khi khởi động nếu chưa có |
 | `ADMIN_PASSWORD` | ✓ | | Mật khẩu Admin, được đặt lại mỗi lần khởi động; muốn đổi thì sửa biến rồi khởi động lại |
 
@@ -42,7 +44,7 @@ Thiếu `JWT_SECRET` hoặc `ADMIN_PASSWORD` thì ứng dụng không khởi đ�
 
 ## Xác thực
 
-Đăng nhập để lấy bearer token (hiệu lực một giờ), rồi gửi token trong header `Authorization`:
+Đăng nhập để lấy Access JWT ngắn hạn (mặc định 15 phút) và Refresh Token xoay vòng (7 ngày), rồi gửi `accessToken` trong header `Authorization`. Có thể làm mới token qua `POST /api/auth/refresh` hoặc đăng xuất (thu hồi access token và refresh token của phiên hiện tại) qua `POST /api/auth/logout`:
 
 ```bash
 curl -X POST localhost:8080/api/auth/register -H 'Content-Type: application/json' \
