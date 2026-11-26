@@ -383,6 +383,93 @@ class BookingServiceTest {
 			.hasMessage("Booking is CONFIRMED, only a Pending Booking can be abandoned");
 	}
 
+	@Test
+	void payingWithSameIdempotencyKeyReturnsSameResultWithoutDuplicateTransaction() {
+		Booking pending = stored(BookingStatus.PENDING, NOW.plusSeconds(60));
+
+		Booking first = service.pay(customerId, pending.id(), NOW, "pay-key-1");
+		Booking replay = service.pay(customerId, pending.id(), NOW, "pay-key-1");
+
+		assertThat(first.status()).isEqualTo(BookingStatus.CONFIRMED);
+		assertThat(replay).isEqualTo(first);
+		assertThat(repository.findByBookingId(pending.id()))
+			.hasSize(1)
+			.first()
+			.satisfies(tx -> {
+				assertThat(tx.type()).isEqualTo(PaymentTransactionType.PAYMENT);
+				assertThat(tx.status()).isEqualTo(PaymentTransactionStatus.COMPLETED);
+				assertThat(tx.amount()).isEqualTo(pending.totalPrice());
+				assertThat(tx.idempotencyKey()).isEqualTo("pay-key-1");
+			});
+	}
+
+	@Test
+	void reusingIdempotencyKeyForDifferentBookingIsConflictAndLeavesSecondBookingPending() {
+		Booking first = stored(BookingStatus.PENDING, NOW.plusSeconds(60));
+		service.pay(customerId, first.id(), NOW, "shared-key");
+		Booking second = stored(BookingStatus.PENDING, NOW.plusSeconds(60));
+
+		assertThatThrownBy(() -> service.pay(customerId, second.id(), NOW, "shared-key"))
+			.isInstanceOf(ConflictException.class)
+			.hasMessage("Idempotency-Key is already used for a different Booking");
+		assertThat(service.get(customerId, second.id()).status()).isEqualTo(BookingStatus.PENDING);
+		assertThat(repository.findByBookingId(second.id())).isEmpty();
+	}
+
+	@Test
+	void malformedIdempotencyKeyIsRejectedAsInvalidBooking() {
+		Booking pending = stored(BookingStatus.PENDING, NOW.plusSeconds(60));
+
+		for (String badKey : List.of("", "   ", "k".repeat(129), "bad\0key")) {
+			assertThatThrownBy(() -> service.pay(customerId, pending.id(), NOW, badKey))
+				.isInstanceOf(InvalidBookingException.class);
+		}
+		assertThat(service.get(customerId, pending.id()).status()).isEqualTo(BookingStatus.PENDING);
+	}
+
+	@Test
+	void latePaymentAfterHoldExpiryRecordsSingleIdempotentRefundTransaction() {
+		Booking expired = stored(BookingStatus.PENDING, NOW);
+
+		assertThatThrownBy(() -> service.pay(customerId, expired.id(), NOW, "late-key-1"))
+			.isInstanceOf(ConflictException.class).hasMessageContaining("EXPIRED");
+		assertThatThrownBy(() -> service.pay(customerId, expired.id(), NOW, "late-key-1"))
+			.isInstanceOf(ConflictException.class).hasMessageContaining("EXPIRED");
+
+		assertThat(repository.findByBookingId(expired.id()))
+			.hasSize(1)
+			.first()
+			.satisfies(tx -> {
+				assertThat(tx.type()).isEqualTo(PaymentTransactionType.PAYMENT);
+				assertThat(tx.status()).isEqualTo(PaymentTransactionStatus.REFUNDED);
+				assertThat(tx.amount()).isEqualTo(expired.totalPrice());
+				assertThat(tx.idempotencyKey()).isEqualTo("late-key-1");
+			});
+	}
+
+	@Test
+	void showtimeCancellationRecordsSingleIdempotentRefundTransactionForConfirmedBooking() {
+		Booking paid = service.pay(customerId, stored(BookingStatus.PENDING, NOW.plusSeconds(60)).id(), NOW, "pay-c1");
+
+		showtimes.cancel(showtime.id(), CancellationReason.POWER_OUTAGE, null, NOW);
+		assertThatThrownBy(() -> showtimes.cancel(showtime.id(), CancellationReason.POWER_OUTAGE, null, NOW))
+			.isInstanceOf(ConflictException.class);
+
+		List<PaymentTransaction> txs = repository.findByBookingId(paid.id());
+		assertThat(txs).hasSize(2);
+		assertThat(txs).filteredOn(tx -> tx.type() == PaymentTransactionType.PAYMENT)
+			.hasSize(1)
+			.first().extracting(PaymentTransaction::status).isEqualTo(PaymentTransactionStatus.COMPLETED);
+		assertThat(txs).filteredOn(tx -> tx.type() == PaymentTransactionType.REFUND)
+			.hasSize(1)
+			.first()
+			.satisfies(tx -> {
+				assertThat(tx.status()).isEqualTo(PaymentTransactionStatus.REFUNDED);
+				assertThat(tx.amount()).isEqualTo(paid.totalPrice());
+				assertThat(tx.idempotencyKey()).isEqualTo("refund:" + paid.id());
+			});
+	}
+
 	private Booking stored(BookingStatus status, Instant expiresAt) {
 		Booking booking = new Booking(UUID.randomUUID(), customerId, showtime.id(), status, expiresAt.minusSeconds(600),
 			expiresAt, List.of(new BookedSeat(standard.id(), 100_000)));

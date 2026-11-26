@@ -4,6 +4,7 @@ import static vn.edu.uet.cinema.persistence.ConstraintViolations.hasConstraint;
 
 import java.time.Instant;
 import java.util.Map;
+import java.util.Optional;
 import java.util.UUID;
 import java.util.stream.Collectors;
 import org.springframework.beans.factory.ObjectProvider;
@@ -117,38 +118,103 @@ public class JpaSeatInventory implements SeatInventory {
 	 */
 	@Override
 	public PayOutcome pay(UUID customerId, UUID bookingId, Instant now) {
+		return executePay(customerId, bookingId, now, null, null);
+	}
+
+	@Override
+	public PayOutcome pay(UUID customerId, UUID bookingId, Instant now, String idempotencyKey) {
+		return executePay(customerId, bookingId, now, idempotencyKey, null);
+	}
+
+	@Override
+	public PayOutcome pay(Booking booking, Instant now) {
+		return executePay(booking.customerId(), booking.id(), now, null, booking);
+	}
+
+	private PayOutcome executePay(UUID customerId, UUID bookingId, Instant now, String idempotencyKey,
+		Booking preloadedBooking) {
 		long start = System.nanoTime();
 		long[] bodyEnd = {-1L};
 		boolean[] rollbackOnly = {false};
 		PayOutcome outcome = null;
 		try {
-			outcome = transaction.execute(status -> {
-				PayOutcome result;
-				int updated = metrics.timeDbQuery("pay", "confirm_update", strategy.value(),
-					() -> jpa.confirm(bookingId, customerId, now));
-				if (updated == 1) {
-					result = metrics.timeDbQuery("pay", "reload_booking", strategy.value(),
-						() -> jpa.findByIdWithSeats(bookingId)).map(BookingEntity::toBooking)
-						.<PayOutcome>map(PayOutcome.Paid::new)
-						.orElseGet(PayOutcome.Gone::new);
-				} else {
-					result = metrics.timeDbQuery("pay", "reload_booking", strategy.value(),
-						() -> jpa.findByIdWithSeats(bookingId)).map(BookingEntity::toBooking)
-						.<PayOutcome>map(current -> {
-							if (!current.customerId().equals(customerId)) {
-								return new PayOutcome.Gone();
+			try {
+				outcome = transaction.execute(status -> {
+					PayOutcome result;
+					if (idempotencyKey != null) {
+						Optional<BookingEntityRepository.PaymentTxLookup> existing = metrics.timeDbQuery(
+							"pay", "idempotency_lookup", strategy.value(),
+							() -> jpa.findPaymentByIdempotencyKey(customerId, idempotencyKey));
+						if (existing.isPresent()) {
+							BookingEntityRepository.PaymentTxLookup tx = existing.get();
+							if (!tx.getBookingId().equals(bookingId)) {
+								status.setRollbackOnly();
+								rollbackOnly[0] = true;
+								return new PayOutcome.IdempotencyKeyConflict();
 							}
+							if ("REFUNDED".equals(tx.getStatus())) {
+								return new PayOutcome.NotPayable(BookingStatus.EXPIRED);
+							}
+							result = reloadBookingForReplay(customerId, bookingId, now);
+							rollbackOnly[0] = status.isRollbackOnly();
+							bodyEnd[0] = System.nanoTime();
+							return result;
+						}
+					}
+
+					int updated = metrics.timeDbQuery("pay", "confirm_update", strategy.value(),
+						() -> jpa.confirm(bookingId, customerId, now));
+					if (updated == 1) {
+						Optional<Booking> confirmedOpt = preloadedBooking != null
+							? Optional.of(preloadedBooking.confirmed())
+							: metrics.timeDbQuery("pay", "reload_booking", strategy.value(),
+								() -> jpa.findByIdWithSeats(bookingId)).map(BookingEntity::toBooking);
+						if (confirmedOpt.isEmpty()) {
+							result = new PayOutcome.Gone();
+						} else {
+							Booking confirmed = confirmedOpt.get();
+							metrics.timeDbQuery("pay", "record_payment_tx", strategy.value(),
+								() -> jpa.insertPaymentTransaction(UUID.randomUUID(), confirmed.id(), customerId,
+									"PAYMENT", "COMPLETED", confirmed.totalPrice(), idempotencyKey, now));
+							result = new PayOutcome.Paid(confirmed);
+						}
+					} else {
+						Optional<Booking> currentOpt = metrics.timeDbQuery("pay", "reload_booking", strategy.value(),
+							() -> jpa.findByIdWithSeats(bookingId)).map(BookingEntity::toBooking);
+						if (currentOpt.isEmpty() || !currentOpt.get().customerId().equals(customerId)) {
+							result = new PayOutcome.Gone();
+						} else {
+							Booking current = currentOpt.get();
 							BookingStatus currentStatus = current.statusAt(now);
-							return currentStatus == BookingStatus.CONFIRMED ? new PayOutcome.AlreadyPaid(current)
-								: new PayOutcome.NotPayable(currentStatus);
-						}).orElseGet(PayOutcome.Gone::new);
+							if (currentStatus == BookingStatus.CONFIRMED) {
+								result = new PayOutcome.AlreadyPaid(current);
+							} else {
+								if (currentStatus == BookingStatus.EXPIRED) {
+									String lateKey = idempotencyKey != null ? idempotencyKey
+										: "late-refund:" + current.id();
+									metrics.timeDbQuery("pay", "record_late_refund_tx", strategy.value(),
+										() -> jpa.insertLatePaymentRefund(UUID.randomUUID(), current.id(), customerId,
+											current.totalPrice(), lateKey, now));
+								}
+								result = new PayOutcome.NotPayable(currentStatus);
+							}
+						}
+					}
+					rollbackOnly[0] = status.isRollbackOnly();
+					bodyEnd[0] = System.nanoTime();
+					return result;
+				});
+				if (bodyEnd[0] > 0 && !rollbackOnly[0]) {
+					metrics.recordCommit("pay", strategy.value(), System.nanoTime() - bodyEnd[0]);
 				}
-				rollbackOnly[0] = status.isRollbackOnly();
-				bodyEnd[0] = System.nanoTime();
-				return result;
-			});
-			if (bodyEnd[0] > 0 && !rollbackOnly[0]) {
-				metrics.recordCommit("pay", strategy.value(), System.nanoTime() - bodyEnd[0]);
+			} catch (DataIntegrityViolationException e) {
+				if (idempotencyKey != null && hasConstraint(e, "uq_payment_tx_customer_idempotency_key")) {
+					outcome = resolveIdempotencyRace(customerId, bookingId, idempotencyKey, now);
+				} else if (hasConstraint(e, "uq_payment_tx_booking_payment")) {
+					outcome = reloadBookingForReplay(customerId, bookingId, now);
+				} else {
+					throw e;
+				}
 			}
 			return outcome;
 		} finally {
@@ -156,42 +222,32 @@ public class JpaSeatInventory implements SeatInventory {
 		}
 	}
 
-	@Override
-	public PayOutcome pay(Booking booking, Instant now) {
-		long start = System.nanoTime();
-		long[] bodyEnd = {-1L};
-		boolean[] rollbackOnly = {false};
-		PayOutcome outcome = null;
-		try {
-			outcome = transaction.execute(status -> {
-				PayOutcome result;
-				int updated = metrics.timeDbQuery("pay", "confirm_update", strategy.value(),
-					() -> jpa.confirm(booking.id(), booking.customerId(), now));
-				if (updated == 1) {
-					result = new PayOutcome.Paid(booking.confirmed());
-				} else {
-					result = metrics.timeDbQuery("pay", "reload_booking", strategy.value(),
-						() -> jpa.findByIdWithSeats(booking.id())).map(BookingEntity::toBooking)
-						.<PayOutcome>map(current -> {
-							if (!current.customerId().equals(booking.customerId())) {
-								return new PayOutcome.Gone();
-							}
-							BookingStatus currentStatus = current.statusAt(now);
-							return currentStatus == BookingStatus.CONFIRMED ? new PayOutcome.AlreadyPaid(current)
-								: new PayOutcome.NotPayable(currentStatus);
-						}).orElseGet(PayOutcome.Gone::new);
-				}
-				rollbackOnly[0] = status.isRollbackOnly();
-				bodyEnd[0] = System.nanoTime();
-				return result;
-			});
-			if (bodyEnd[0] > 0 && !rollbackOnly[0]) {
-				metrics.recordCommit("pay", strategy.value(), System.nanoTime() - bodyEnd[0]);
+	private PayOutcome resolveIdempotencyRace(UUID customerId, UUID bookingId, String idempotencyKey, Instant now) {
+		Optional<BookingEntityRepository.PaymentTxLookup> existing =
+			jpa.findPaymentByIdempotencyKey(customerId, idempotencyKey);
+		if (existing.isPresent()) {
+			BookingEntityRepository.PaymentTxLookup tx = existing.get();
+			if (!tx.getBookingId().equals(bookingId)) {
+				return new PayOutcome.IdempotencyKeyConflict();
 			}
-			return outcome;
-		} finally {
-			metrics.recordOperation("pay", strategy.value(), payOutcomeTag(outcome), System.nanoTime() - start);
+			if ("REFUNDED".equals(tx.getStatus())) {
+				return new PayOutcome.NotPayable(BookingStatus.EXPIRED);
+			}
 		}
+		return reloadBookingForReplay(customerId, bookingId, now);
+	}
+
+	private PayOutcome reloadBookingForReplay(UUID customerId, UUID bookingId, Instant now) {
+		return metrics.timeDbQuery("pay", "reload_booking", strategy.value(),
+			() -> jpa.findByIdWithSeats(bookingId)).map(BookingEntity::toBooking)
+			.<PayOutcome>map(current -> {
+				if (!current.customerId().equals(customerId)) {
+					return new PayOutcome.Gone();
+				}
+				BookingStatus currentStatus = current.statusAt(now);
+				return currentStatus == BookingStatus.CONFIRMED ? new PayOutcome.AlreadyPaid(current)
+					: new PayOutcome.NotPayable(currentStatus);
+			}).orElseGet(PayOutcome.Gone::new);
 	}
 
 	/** Like {@link #pay}, the row is read again in the same transaction when nothing was deleted. */
@@ -256,6 +312,7 @@ public class JpaSeatInventory implements SeatInventory {
 		// Delete before refunding: a payment that commits in between is then refunded, never left Confirmed.
 		jpa.deletePendingBookings(showtimeId);
 		jpa.refundConfirmedBookings(showtimeId);
+		jpa.insertRefundTransactionsForShowtime(showtimeId, now);
 		return new CancelOutcome.Cancelled();
 	}
 
@@ -301,6 +358,7 @@ public class JpaSeatInventory implements SeatInventory {
 			case PayOutcome.Paid ignored -> "paid";
 			case PayOutcome.AlreadyPaid ignored -> "already_paid";
 			case PayOutcome.NotPayable ignored -> "not_payable";
+			case PayOutcome.IdempotencyKeyConflict ignored -> "idempotency_key_conflict";
 			case PayOutcome.Gone ignored -> "gone";
 		};
 	}

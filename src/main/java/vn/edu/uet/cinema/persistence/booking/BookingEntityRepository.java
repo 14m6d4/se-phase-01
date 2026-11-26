@@ -132,9 +132,56 @@ interface BookingEntityRepository extends JpaRepository<BookingEntity, UUID> {
 		""")
 	void refundConfirmedBookings(UUID showtimeId);
 
+	@Query(nativeQuery = true, value = """
+		select booking_id as bookingId, status as status
+		from payment_transaction
+		where customer_id = :customerId and type = 'PAYMENT' and idempotency_key = :idempotencyKey
+		""")
+	Optional<PaymentTxLookup> findPaymentByIdempotencyKey(UUID customerId, String idempotencyKey);
+
+	@Modifying
+	@Query(nativeQuery = true, value = """
+		insert into payment_transaction
+			(id, booking_id, customer_id, type, status, amount, idempotency_key, created_at, updated_at)
+		values (:id, :bookingId, :customerId, :type, :status, :amount, cast(:idempotencyKey as varchar), :now, :now)
+		""")
+	void insertPaymentTransaction(UUID id, UUID bookingId, UUID customerId, String type, String status, long amount,
+		String idempotencyKey, Instant now);
+
+	@Modifying
+	@Query(nativeQuery = true, value = """
+		insert into payment_transaction
+			(id, booking_id, customer_id, type, status, amount, idempotency_key, created_at, updated_at)
+		values (:id, :bookingId, :customerId, 'PAYMENT', 'REFUNDED', :amount, cast(:idempotencyKey as varchar), :now, :now)
+		on conflict (customer_id, type, idempotency_key) where idempotency_key is not null do nothing
+		""")
+	void insertLatePaymentRefund(UUID id, UUID bookingId, UUID customerId, long amount, String idempotencyKey,
+		Instant now);
+
+	@Modifying
+	@Query(nativeQuery = true, value = """
+		insert into payment_transaction
+			(id, booking_id, customer_id, type, status, amount, idempotency_key, created_at, updated_at)
+		select gen_random_uuid(), b.id, b.customer_id, 'REFUND', 'REFUNDED',
+			cast(coalesce((select sum(s.price) from booked_seat s where s.booking_id = b.id), 1) as bigint),
+			'refund:' || cast(b.id as text),
+			:now, :now
+		from booking b
+		where b.showtime_id = :showtimeId and b.status = 'REFUNDED'
+		on conflict (booking_id) where type = 'REFUND' and status = 'REFUNDED' do nothing
+		""")
+	void insertRefundTransactionsForShowtime(UUID showtimeId, Instant now);
+
 	interface OccupiedSeat {
 
 		UUID getSeatId();
+
+		String getStatus();
+	}
+
+	interface PaymentTxLookup {
+
+		UUID getBookingId();
 
 		String getStatus();
 	}

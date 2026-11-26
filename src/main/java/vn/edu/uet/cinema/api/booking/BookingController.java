@@ -23,6 +23,7 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
@@ -88,16 +89,24 @@ class BookingController {
 		return BookingResponse.from(bookings.get(customerId(jwt), id), Instant.now());
 	}
 
+	public static final String IDEMPOTENCY_KEY_HEADER = "Idempotency-Key";
+
 	@PostMapping("/api/bookings/{id}/payment")
-	@Operation(summary = "Pay for my booking", description = "Simulates payment for a live Pending booking. An expired hold "
-		+ "returns 409; retrying payment for an already Confirmed booking returns it unchanged. Missing or another customer's "
-		+ "booking returns 404. Requires CUSTOMER.")
+	@Operation(summary = "Pay for my booking", description = "Simulates payment for a live Pending booking. Supports an "
+		+ "optional Idempotency-Key header so retried or concurrent requests return the same result without creating a "
+		+ "duplicate transaction; reusing a key on a different booking returns 409. An expired hold returns 409; retrying "
+		+ "payment for an already Confirmed booking returns it unchanged. Missing or another customer's booking returns "
+		+ "404. Requires CUSTOMER.")
 	@SecurityRequirement(name = OpenApiConfig.BEARER_AUTH)
 	BookingResponse pay(@AuthenticationPrincipal Jwt jwt,
 		@Parameter(description = "Booking UUID owned by the authenticated customer.",
-			example = "550e8400-e29b-41d4-a716-446655440030") @PathVariable UUID id) {
+			example = "550e8400-e29b-41d4-a716-446655440030") @PathVariable UUID id,
+		@Parameter(description = "Optional client-generated idempotency key (1–128 characters) to safely retry payment.",
+			example = "pay-550e8400-e29b-41d4-a716-446655440030",
+			schema = @Schema(type = "string", minLength = 1, maxLength = BookingService.MAX_IDEMPOTENCY_KEY_LENGTH))
+		@RequestHeader(value = IDEMPOTENCY_KEY_HEADER, required = false) String idempotencyKey) {
 		Instant now = Instant.now();
-		return BookingResponse.from(bookings.pay(customerId(jwt), id, now), now);
+		return BookingResponse.from(bookings.pay(customerId(jwt), id, now, idempotencyKey), now);
 	}
 
 	@DeleteMapping("/api/bookings/{id}")

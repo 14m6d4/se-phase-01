@@ -144,6 +144,13 @@ public class SingleWriterSeatInventory implements SeatInventory {
 	}
 
 	@Override
+	public PayOutcome pay(UUID customerId, UUID bookingId, Instant now, String idempotencyKey) {
+		PayOutcome outcome = delegate.pay(customerId, bookingId, now, idempotencyKey);
+		handlePayOutcome(customerId, bookingId, outcome);
+		return outcome;
+	}
+
+	@Override
 	public PayOutcome pay(Booking booking, Instant now) {
 		PayOutcome outcome = delegate.pay(booking, now);
 		handlePayOutcome(booking.customerId(), booking.id(), outcome);

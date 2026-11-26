@@ -878,6 +878,18 @@
               "format": "uuid"
             },
             "example": "550e8400-e29b-41d4-a716-446655440030"
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "description": "Optional client-generated idempotency key (1–128 characters) to safely retry payment.",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            },
+            "example": "pay-550e8400-e29b-41d4-a716-446655440030"
           }
         ],
         "responses": {
