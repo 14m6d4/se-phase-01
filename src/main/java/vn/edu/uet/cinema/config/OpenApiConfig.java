@@ -40,6 +40,8 @@ public class OpenApiConfig {
 	private static final Map<String, Set<String>> ERROR_RESPONSES = Map.ofEntries(
 		Map.entry("POST /api/auth/register", Set.of("400", "401", "409")),
 		Map.entry("POST /api/auth/login", Set.of("400", "401")),
+		Map.entry("POST /api/auth/refresh", Set.of("400", "401")),
+		Map.entry("POST /api/auth/logout", Set.of("400", "401")),
 		Map.entry("GET /api/me", Set.of("401", "404")),
 		Map.entry("POST /api/cinemas", Set.of("400", "401", "403")),
 		Map.entry("GET /api/cinemas", Set.of("400", "401")),
@@ -101,6 +103,7 @@ public class OpenApiConfig {
 		Map<String, Set<String>> nonblankFields = Map.of(
 			"RegisterRequest", Set.of("email", "fullName"),
 			"LoginRequest", Set.of("email", "password"),
+			"RefreshRequest", Set.of("refreshToken"),
 			"CinemaRequest", Set.of("name", "address"),
 			"AuditoriumRequest", Set.of("name"),
 			"MovieRequest", Set.of("title", "description", "genre", "posterUrl"));
