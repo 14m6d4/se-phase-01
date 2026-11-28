@@ -30,6 +30,7 @@ spring:
       enabled: false
 
 server:
+  forward-headers-strategy: ${SERVER_FORWARD_HEADERS_STRATEGY:none}
   tomcat:
     threads:
       max: ${TOMCAT_MAX_THREADS:40}
@@ -49,14 +50,23 @@ app:
     secret: ${JWT_SECRET}
     access-token-ttl: ${JWT_ACCESS_TOKEN_TTL:15m}
     refresh-token-ttl: ${JWT_REFRESH_TOKEN_TTL:7d}
+    decoder-cache-max-entries: ${JWT_DECODER_CACHE_MAX_ENTRIES:4096}
+    decoder-cache-ttl: ${JWT_DECODER_CACHE_TTL:15m}
   seat-inventory:
     strategy: ${SEAT_INVENTORY_STRATEGY:unique}
   rate-limit:
     enabled: ${RATE_LIMIT_ENABLED:true}
+    max-buckets: ${RATE_LIMIT_MAX_BUCKETS:20000}
+    bucket-ttl-seconds: ${RATE_LIMIT_BUCKET_TTL_SECONDS:600}
     auth:
-      capacity: ${RATE_LIMIT_AUTH_CAPACITY:200}
-      refill-tokens: ${RATE_LIMIT_AUTH_REFILL_TOKENS:200}
+      capacity: ${RATE_LIMIT_AUTH_CAPACITY:60}
+      refill-tokens: ${RATE_LIMIT_AUTH_REFILL_TOKENS:60}
       refill-duration-seconds: ${RATE_LIMIT_AUTH_DURATION:60}
+    login:
+      account:
+        capacity: ${RATE_LIMIT_LOGIN_ACCOUNT_CAPACITY:5}
+        refill-tokens: ${RATE_LIMIT_LOGIN_ACCOUNT_REFILL_TOKENS:5}
+        refill-duration-seconds: ${RATE_LIMIT_LOGIN_ACCOUNT_DURATION:60}
     api:
       capacity: ${RATE_LIMIT_API_CAPACITY:3000}
       refill-tokens: ${RATE_LIMIT_API_REFILL_TOKENS:3000}
@@ -67,6 +77,14 @@ app:
     max-abandons-in-window: ${ANTI_HOARDING_MAX_ABANDONS_IN_WINDOW:3}
     repeated-abandon-penalty-seconds: ${ANTI_HOARDING_REPEATED_ABANDON_PENALTY_SECONDS:120}
     max-active-holds-per-ip: ${ANTI_HOARDING_MAX_ACTIVE_HOLDS_PER_IP:3}
+  swagger:
+    enabled: ${SWAGGER_ENABLED:true}
+
+springdoc:
+  api-docs:
+    enabled: ${SWAGGER_ENABLED:true}
+  swagger-ui:
+    enabled: ${SWAGGER_ENABLED:true}
 
 logging:
   structured:

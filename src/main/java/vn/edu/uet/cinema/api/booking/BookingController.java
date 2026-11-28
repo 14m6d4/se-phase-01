@@ -33,6 +33,7 @@ import vn.edu.uet.cinema.business.booking.BookingService;
 import vn.edu.uet.cinema.business.showtime.inventory.BookedSeat;
 import vn.edu.uet.cinema.business.showtime.inventory.Booking;
 import vn.edu.uet.cinema.business.showtime.inventory.BookingStatus;
+import vn.edu.uet.cinema.config.ClientIpResolver;
 import vn.edu.uet.cinema.config.OpenApiConfig;
 
 @RestController
@@ -55,7 +56,7 @@ class BookingController {
 	BookingResponse book(@AuthenticationPrincipal Jwt jwt, @Valid @RequestBody BookingRequest request,
 		HttpServletRequest httpRequest) {
 		Instant now = Instant.now();
-		String clientKey = httpRequest != null ? httpRequest.getRemoteAddr() : null;
+		String clientKey = ClientIpResolver.resolve(httpRequest);
 		return BookingResponse.from(
 			bookings.book(customerId(jwt), request.showtimeId(), request.seatIds(), now, clientKey), now);
 	}

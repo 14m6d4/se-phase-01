@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import java.time.Duration;
+import java.util.concurrent.atomic.AtomicLong;
 import org.junit.jupiter.api.Test;
 
 class TokenBucketTest {
@@ -31,6 +32,26 @@ class TokenBucketTest {
 		TokenBucket.ConsumptionResult rejected = bucket.tryConsume(1);
 		assertThat(rejected.allowed()).isFalse();
 		assertThat(rejected.retryAfterSeconds()).isGreaterThanOrEqualTo(1);
+	}
+
+	@Test
+	void retryAfterRoundsUpFractionalSeconds() {
+		AtomicLong nanos = new AtomicLong(1_000_000_000L);
+		// 1 token every 2 seconds -> after 0.1s, 1.9s remain -> ceil(1.9) == 2s (not truncated to 1s).
+		TokenBucket bucket = new TokenBucket(1, 1, Duration.ofSeconds(2), nanos::get);
+		assertThat(bucket.tryConsume(1).allowed()).isTrue();
+
+		nanos.addAndGet(100_000_000L);
+		TokenBucket.ConsumptionResult rejectedAtOnePointNine = bucket.tryConsume(1);
+		assertThat(rejectedAtOnePointNine.allowed()).isFalse();
+		assertThat(rejectedAtOnePointNine.retryAfterSeconds()).isEqualTo(2L);
+
+		// Just over 1 second remaining -> ceil == 2s; exact 1 second remaining -> 1s.
+		nanos.addAndGet(899_999_999L); // total elapsed = 0.999999999s -> 1.000000001s remaining
+		assertThat(bucket.tryConsume(1).retryAfterSeconds()).isEqualTo(2L);
+
+		nanos.addAndGet(1L); // total elapsed = 1.0s -> 1.0s remaining
+		assertThat(bucket.tryConsume(1).retryAfterSeconds()).isEqualTo(1L);
 	}
 
 	@Test

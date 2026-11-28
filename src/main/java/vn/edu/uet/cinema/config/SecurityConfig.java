@@ -9,7 +9,6 @@ import java.nio.charset.StandardCharsets;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
-import java.util.concurrent.ConcurrentHashMap;
 import javax.crypto.SecretKey;
 import javax.crypto.spec.SecretKeySpec;
 import org.springframework.beans.factory.annotation.Value;
@@ -54,25 +53,43 @@ public class SecurityConfig {
 	/** Token claim linking an access JWT to its refresh token family so logout without a body revokes the session. */
 	public static final String FAMILY_ID_CLAIM = "familyId";
 
+	static final int DEFAULT_JWT_CACHE_MAX_ENTRIES = 4096;
+	static final Duration DEFAULT_JWT_CACHE_TTL = Duration.ofMinutes(15);
+
 	private static final String[] CATALOGUE = {"/api/cinemas/**", "/api/auditoriums/**", "/api/movies/**",
 		"/api/showtimes/**"};
+	private static final String[] SWAGGER_UI_PATHS = {"/swagger-ui.html", "/swagger-ui/**"};
+	private static final String[] API_DOCS_PATHS = {"/v3/api-docs/**", "/v3/api-docs.yaml"};
 
 	@Bean
-	SecurityFilterChain securityFilterChain(HttpSecurity http, RateLimitingFilter rateLimitingFilter) throws Exception {
+	SecurityFilterChain securityFilterChain(HttpSecurity http, RateLimitingFilter rateLimitingFilter,
+		@Value("${app.swagger.enabled:true}") boolean swaggerEnabled,
+		@Value("${springdoc.swagger-ui.enabled:true}") boolean swaggerUiEnabled,
+		@Value("${springdoc.api-docs.enabled:true}") boolean apiDocsEnabled) throws Exception {
 		AuthenticationEntryPoint unauthorized = problemJson(new BearerTokenAuthenticationEntryPoint());
 		AccessDeniedHandler forbidden = problemJson(new BearerTokenAccessDeniedHandler());
 		return http
 			.csrf(csrf -> csrf.disable())
 			.sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
-			.authorizeHttpRequests(auth -> auth
-				.requestMatchers("/api/auth/register", "/api/auth/login", "/api/auth/refresh", "/error",
-					"/actuator/health", "/swagger-ui.html", "/swagger-ui/**", "/v3/api-docs/**", "/v3/api-docs.yaml")
-				.permitAll()
-				.requestMatchers(GET, CATALOGUE).permitAll()
-				.requestMatchers(CATALOGUE).hasRole("ADMIN")
-				.requestMatchers("/api/bookings/**").hasRole("CUSTOMER")
-				.requestMatchers("/actuator/metrics/**").hasRole("ADMIN")
-				.anyRequest().authenticated())
+			.authorizeHttpRequests(auth -> {
+				auth.requestMatchers("/api/auth/register", "/api/auth/login", "/api/auth/refresh", "/error",
+					"/actuator/health").permitAll();
+				if (swaggerEnabled && swaggerUiEnabled) {
+					auth.requestMatchers(SWAGGER_UI_PATHS).permitAll();
+				} else {
+					auth.requestMatchers(SWAGGER_UI_PATHS).denyAll();
+				}
+				if (swaggerEnabled && apiDocsEnabled) {
+					auth.requestMatchers(API_DOCS_PATHS).permitAll();
+				} else {
+					auth.requestMatchers(API_DOCS_PATHS).denyAll();
+				}
+				auth.requestMatchers(GET, CATALOGUE).permitAll()
+					.requestMatchers(CATALOGUE).hasRole("ADMIN")
+					.requestMatchers("/api/bookings/**").hasRole("CUSTOMER")
+					.requestMatchers("/actuator/metrics/**").hasRole("ADMIN")
+					.anyRequest().authenticated();
+			})
 			.exceptionHandling(ex -> ex.authenticationEntryPoint(unauthorized).accessDeniedHandler(forbidden))
 			.oauth2ResourceServer(oauth -> oauth
 				.jwt(jwt -> jwt.jwtAuthenticationConverter(rolesClaimConverter()))
@@ -85,14 +102,20 @@ public class SecurityConfig {
 	@Bean
 	RateLimitingFilter rateLimitingFilter(
 		@Value("${app.rate-limit.enabled:true}") boolean enabled,
-		@Value("${app.rate-limit.auth.capacity:200}") long authCapacity,
-		@Value("${app.rate-limit.auth.refill-tokens:200}") long authRefillTokens,
+		@Value("${app.rate-limit.auth.capacity:60}") long authCapacity,
+		@Value("${app.rate-limit.auth.refill-tokens:60}") long authRefillTokens,
 		@Value("${app.rate-limit.auth.refill-duration-seconds:60}") long authDurationSeconds,
+		@Value("${app.rate-limit.login.account.capacity:5}") long loginAccountCapacity,
+		@Value("${app.rate-limit.login.account.refill-tokens:5}") long loginAccountRefillTokens,
+		@Value("${app.rate-limit.login.account.refill-duration-seconds:60}") long loginAccountDurationSeconds,
 		@Value("${app.rate-limit.api.capacity:3000}") long apiCapacity,
 		@Value("${app.rate-limit.api.refill-tokens:3000}") long apiRefillTokens,
-		@Value("${app.rate-limit.api.refill-duration-seconds:60}") long apiDurationSeconds) {
+		@Value("${app.rate-limit.api.refill-duration-seconds:60}") long apiDurationSeconds,
+		@Value("${app.rate-limit.max-buckets:20000}") int maxBuckets,
+		@Value("${app.rate-limit.bucket-ttl-seconds:600}") long bucketTtlSeconds) {
 		return new RateLimitingFilter(enabled, authCapacity, authRefillTokens, authDurationSeconds,
-			apiCapacity, apiRefillTokens, apiDurationSeconds);
+			loginAccountCapacity, loginAccountRefillTokens, loginAccountDurationSeconds,
+			apiCapacity, apiRefillTokens, apiDurationSeconds, maxBuckets, bucketTtlSeconds);
 	}
 
 	@Bean
@@ -122,17 +145,24 @@ public class SecurityConfig {
 	}
 
 	@Bean
-	JwtDecoder jwtDecoder(SecretKey jwtKey, TokenBlacklist tokenBlacklist) {
-		return jwtDecoder(jwtKey, tokenBlacklist, Clock.systemUTC());
+	JwtDecoder jwtDecoder(SecretKey jwtKey, TokenBlacklist tokenBlacklist,
+		@Value("${app.jwt.decoder-cache-max-entries:4096}") int maxCacheEntries,
+		@Value("${app.jwt.decoder-cache-ttl:15m}") Duration cacheTtl) {
+		return jwtDecoder(jwtKey, tokenBlacklist, Clock.systemUTC(), maxCacheEntries, cacheTtl);
 	}
 
 	JwtDecoder jwtDecoder(SecretKey jwtKey, TokenBlacklist tokenBlacklist, Clock clock) {
+		return jwtDecoder(jwtKey, tokenBlacklist, clock, DEFAULT_JWT_CACHE_MAX_ENTRIES, DEFAULT_JWT_CACHE_TTL);
+	}
+
+	JwtDecoder jwtDecoder(SecretKey jwtKey, TokenBlacklist tokenBlacklist, Clock clock,
+		int maxCacheEntries, Duration cacheTtl) {
 		NimbusJwtDecoder delegate = NimbusJwtDecoder.withSecretKey(jwtKey).macAlgorithm(MacAlgorithm.HS256).build();
 		// Disable Nimbus's default 60s clock skew so a logged-out JWT cannot be resurrected during [exp, exp + 60s].
 		JwtTimestampValidator timestampValidator = new JwtTimestampValidator(Duration.ZERO);
 		timestampValidator.setClock(clock);
 		delegate.setJwtValidator(timestampValidator);
-		ConcurrentHashMap<String, Jwt> cache = new ConcurrentHashMap<>(2048);
+		BoundedLruCache<String, Jwt> cache = new BoundedLruCache<>(maxCacheEntries, cacheTtl.toMillis(), clock::millis);
 		return token -> {
 			Jwt cached = cache.get(token);
 			Instant now = clock.instant();
@@ -148,14 +178,12 @@ public class SecurityConfig {
 				cache.remove(token, cached);
 			}
 			Jwt decoded = delegate.decode(token);
-			if (tokenBlacklist.isRevoked(tokenKey(decoded), now)) {
+			Instant checkNow = clock.instant();
+			if (tokenBlacklist.isRevoked(tokenKey(decoded), checkNow)) {
 				throw new BadJwtException("Token has been revoked");
 			}
 			Instant expiresAt = decoded.getExpiresAt();
-			if (expiresAt == null || expiresAt.isAfter(now)) {
-				if (cache.size() >= 4096) {
-					cache.clear();
-				}
+			if (expiresAt == null || expiresAt.isAfter(checkNow)) {
 				cache.putIfAbsent(token, decoded);
 			}
 			return decoded;

@@ -1,0 +1,10 @@
+# Production profile disables Swagger UI and OpenAPI schema endpoints by default (S5).
+app:
+  swagger:
+    enabled: ${SWAGGER_ENABLED:false}
+
+springdoc:
+  api-docs:
+    enabled: ${SWAGGER_ENABLED:false}
+  swagger-ui:
+    enabled: ${SWAGGER_ENABLED:false}

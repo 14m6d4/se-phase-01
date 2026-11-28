@@ -67,6 +67,58 @@ class SecurityConfigJwtDecoderTest {
 			.isInstanceOf(JwtException.class);
 	}
 
+	@Test
+	void boundedCacheEvictsWithoutClearingAllEntriesAndHonorsRevocation() {
+		Instant issuedAt = Instant.parse("2026-11-26T10:00:00Z");
+		Instant expiresAt = issuedAt.plus(Duration.ofMinutes(15));
+		MutableClock clock = new MutableClock(issuedAt);
+
+		SecurityConfig security = new SecurityConfig();
+		SecretKey key = security.jwtKey("s5-jwt-cache-test-secret-with-at-least-32-bytes");
+		JwtEncoder encoder = security.jwtEncoder(key);
+		InMemoryTokenBlacklist blacklist = new InMemoryTokenBlacklist(100, clock);
+		JwtDecoder decoder = security.jwtDecoder(key, blacklist, clock, 3, Duration.ofMinutes(5));
+
+		String t1 = encodeToken(encoder, issuedAt, expiresAt);
+		String t2 = encodeToken(encoder, issuedAt, expiresAt);
+		String t3 = encodeToken(encoder, issuedAt, expiresAt);
+		String t4 = encodeToken(encoder, issuedAt, expiresAt);
+
+		Jwt j1 = decoder.decode(t1);
+		Jwt j2 = decoder.decode(t2);
+		Jwt j3 = decoder.decode(t3);
+		// Touch t1 so t2 is least-recently-used before inserting t4.
+		assertThat(decoder.decode(t1).getId()).isEqualTo(j1.getId());
+		Jwt j4 = decoder.decode(t4);
+
+		// Remaining entries stay decodable and S2 revocation remains enforced across cache eviction.
+		assertThat(decoder.decode(t1).getId()).isEqualTo(j1.getId());
+		assertThat(decoder.decode(t3).getId()).isEqualTo(j3.getId());
+		assertThat(decoder.decode(t4).getId()).isEqualTo(j4.getId());
+
+		blacklist.revoke(SecurityConfig.tokenKey(j2), expiresAt);
+		blacklist.revoke(SecurityConfig.tokenKey(j4), expiresAt);
+		assertThatThrownBy(() -> decoder.decode(t2)).isInstanceOf(JwtException.class);
+		assertThatThrownBy(() -> decoder.decode(t4)).isInstanceOf(JwtException.class);
+
+		// Advancing beyond TTL does not break valid unrevoked tokens (re-decoded via delegate).
+		clock.set(issuedAt.plus(Duration.ofMinutes(6)));
+		assertThat(decoder.decode(t1).getId()).isEqualTo(j1.getId());
+		assertThat(decoder.decode(t3).getId()).isEqualTo(j3.getId());
+	}
+
+	private static String encodeToken(JwtEncoder encoder, Instant issuedAt, Instant expiresAt) {
+		JwtClaimsSet claims = JwtClaimsSet.builder()
+			.id(UUID.randomUUID().toString())
+			.subject(UUID.randomUUID().toString())
+			.issuedAt(issuedAt)
+			.expiresAt(expiresAt)
+			.claim(SecurityConfig.ROLES_CLAIM, List.of("CUSTOMER"))
+			.build();
+		return encoder.encode(JwtEncoderParameters.from(JwsHeader.with(MacAlgorithm.HS256).build(), claims))
+			.getTokenValue();
+	}
+
 	private static final class MutableClock extends Clock {
 
 		private Instant current;
